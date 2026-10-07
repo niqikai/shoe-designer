@@ -10,7 +10,7 @@ import bpy
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from engine.build import build_shoe
+from engine.build import build_last_candidate
 from engine.params import load_params, normalize_params, read_schema
 from engine.render import contact_sheet, material, render_views, VIEWS
 from engine.shoe.features import extract_features
@@ -111,7 +111,7 @@ def inspect(output, params_path, *, render=True):
     for style, default in read_schema()["x-style-defaults"].items():
         case_params[style] = normalize_params({**effective, "collar_style": style, "collar_height_mm": default})[0]
     for case, values in case_params.items():
-        candidate = build_shoe(values, last_mesh=high)
+        candidate = build_last_candidate(values, last_mesh=high)
         candidate.name = case + "_last_candidate"
         for poly in candidate.data.polygons:
             poly.use_smooth = poly.material_index != 1

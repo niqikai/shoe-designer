@@ -1,6 +1,16 @@
 {
   "schema_version": 1,
-  "revision": 0,
+  "revision": 1,
+  "foot_side": "right",
+  "size_eu": 42,
+  "foot_width": "standard",
+  "toe_roundness": 0.0,
+  "toe_height_scale": 1.0,
   "collar_style": "low",
-  "collar_height_mm": 75.0
+  "collar_height_mm": 75.0,
+  "heel_sole_mm": 24.0,
+  "forefoot_sole_mm": 16.0,
+  "edge_radius_mm": 2.0,
+  "outsole_flare_mm": 6.0,
+  "upper_thickness_mm": 2.4
 }

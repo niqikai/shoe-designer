@@ -41,7 +41,7 @@ def _ruler(camera, view_height, view_width, mat, temporary):
     _camera_text(camera, "50 mm", (x, y - view_height * 0.045, -200), view_height * 0.026, mat, temporary)
 
 
-def render_views(objects, frame_object, output_dir, prefix, title, *, views=VIEWS, foot="unconfirmed"):
+def render_views(objects, frame_object, output_dir, prefix, title, *, views=VIEWS, foot="unconfirmed", footer=None):
     scene = bpy.context.scene
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -103,7 +103,7 @@ def render_views(objects, frame_object, output_dir, prefix, title, *, views=VIEW
             _camera_text(camera, title, (-view_width * 0.43, view_height * 0.43, -200), view_height * 0.043, dark, per_view)
             label = {"side": "SIDE | toe ->", "top": "TOP | toe +Y up", "front": "FRONT | viewed from toe", "iso": "45 DEG | orthographic"}[view]
             _camera_text(camera, label, (-view_width * 0.43, view_height * 0.38, -200), view_height * 0.026, dark, per_view)
-            _camera_text(camera, f"inferred {foot.upper()} | LAST ONLY", (-view_width * 0.43, -view_height * 0.34, -200), view_height * 0.024, dark, per_view)
+            _camera_text(camera, footer or f"inferred {foot.upper()} | LAST ONLY", (-view_width * 0.43, -view_height * 0.34, -200), view_height * 0.024, dark, per_view)
             _ruler(camera, view_height, view_width, dark, per_view)
             scene.render.filepath = str(output_dir / f"{prefix}_{view}.png")
             bpy.context.view_layer.update()

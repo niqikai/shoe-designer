@@ -143,6 +143,121 @@ def load_reference(name):
     return _import_mesh(RAW_DIR / (name + ".stl"))
 
 
+def deform_last(mesh, params):
+    """Apply bounded, smooth fit controls to a copy of the normalized right last.
+
+    EU 42 and the width/height grading factor are explicit M1 assumptions, not a
+    claim about the licensed last's actual size or a verified fit. Coordinates
+    are transformed algorithmically; mesh topology and the source are retained.
+    """
+    def number(key, default, lower, upper):
+        value = params.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(key + " 必须是有限数值。")
+        value = float(value)
+        if not math.isfinite(value) or not lower <= value <= upper:
+            raise ValueError(key + " 超出受控形变范围，请先规范化参数。")
+        return value
+
+    size_eu = number("size_eu", 42, 35, 46)
+    toe_roundness = number("toe_roundness", 0, -0.15, 0.15)
+    toe_height_scale = number("toe_height_scale", 1, 0.85, 1.15)
+    width_name = params.get("foot_width", "standard")
+    width_scales = {"narrow": 0.9, "standard": 1.0, "wide": 1.1}
+    if not isinstance(width_name, str) or width_name not in width_scales:
+        raise ValueError("foot_width 必须为 narrow / standard / wide。")
+
+    source = coordinates(mesh)
+    if not len(source) or not np.isfinite(source).all():
+        raise ValueError("鞋楦坐标必须非空且有限。")
+    base_length = float(np.ptp(source[:, 1]))
+    if base_length <= 0 or abs(float(source[:, 1].min())) > 1e-3 or abs(float(source[:, 2].min())) > 1e-3:
+        raise ValueError("形变输入必须是脚跟后端 Y=0、最低足底 Z=0 的规范化鞋楦。")
+
+    target_length = base_length + (size_eu - 42.0) * (20.0 / 3.0)
+    length_scale = target_length / base_length
+    cross_section_scale = 1.0 + 0.7 * (length_scale - 1.0)
+    # A smoothstep in normalized Y leaves the posterior 70% independent of the
+    # toe controls; its derivative is zero at both ends of the transition.
+    longitudinal = (source[:, 1] - source[:, 1].min()) / base_length
+    blend = np.clip((longitudinal - 0.7) / 0.3, 0.0, 1.0)
+    toe_weight = blend * blend * (3.0 - 2.0 * blend)
+    width_scale = width_scales[width_name]
+    requested_width = width_scale + toe_roundness * toe_weight
+    # Limit the toe amplitude before blending. Per-vertex clipping would make
+    # a derivative discontinuity where the width first reaches its limit.
+    effective_roundness = float(np.clip(toe_roundness, 0.85 - width_scale, 1.15 - width_scale))
+    local_width = width_scale + effective_roundness * toe_weight
+    local_height = 1.0 + (toe_height_scale - 1.0) * toe_weight
+    bottom_z = source[:, 2].copy()
+    plantar_queries = 0
+    plantar_tangent_fallbacks = 0
+    if toe_height_scale != 1.0:
+        tree = surface_tree(mesh)
+        origin_z = float(source[:, 2].min() - base_length)
+        direction = Vector((0, 0, 1))
+        for index in np.flatnonzero(toe_weight > 0):
+            x, y, z = source[index]
+            # Restrict the ray to this vertex: an accidental missed lower edge
+            # must not select an unrelated upper surface above the vertex.
+            hit, _, _, _ = tree.ray_cast(Vector((float(x), float(y), origin_z)),
+                                         direction, float(z - origin_z + 1e-3))
+            plantar_queries += 1
+            if hit is None:
+                # At the projected silhouette the bottom and top coincide;
+                # exact float rays may miss that tangent. Keep that vertex.
+                plantar_tangent_fallbacks += 1
+            else:
+                bottom_z[index] = min(float(z), float(hit.z))
+                if abs(bottom_z[index] - z) <= 1e-4:
+                    bottom_z[index] = z
+    result_points = source.copy()
+    # The heel-centred X=0 reference and plantar Z=0 plane remain fixed. Toe
+    # height changes use the imported plantar surface at each original XY.
+    result_points[:, 0] *= cross_section_scale * local_width
+    result_points[:, 1] *= length_scale
+    result_points[:, 2] = (bottom_z + (source[:, 2] - bottom_z) * local_height) * cross_section_scale
+    if not np.isfinite(result_points).all():
+        raise ValueError("形变产生了非有限坐标。")
+
+    result = mesh.copy()
+    result.name = "last_deformed_right_mesh"
+    result.vertices.foreach_set("co", result_points.astype(np.float32).ravel())
+    result.update()
+    clamped = int(np.count_nonzero(np.abs(requested_width - local_width) > 1e-12))
+    warnings = []
+    if clamped:
+        warnings.append("脚宽与鞋头圆度叠加超过局部 ±15% 范围，已联合限幅。")
+    metadata = {
+        "side": "right",
+        "size_eu": size_eu,
+        "reference_size_eu_assumption": 42,
+        "reference_length_mm": base_length,
+        "target_length_mm": target_length,
+        "length_step_per_eu_size_mm": 20.0 / 3.0,
+        "global_size_scale_xyz": [cross_section_scale, length_scale, cross_section_scale],
+        "width_height_grading_coefficient": 0.7,
+        "grading_note": "EU42 基码与宽高 0.7 分级系数是工程映射假设，需量脚及试穿验证。",
+        "foot_width": width_name,
+        "toe_roundness": toe_roundness,
+        "effective_toe_roundness": effective_roundness,
+        "toe_height_scale": toe_height_scale,
+        "toe_region_normalized_y": [0.7, 1.0],
+        "toe_blend": "smoothstep",
+        "local_width_factor_range": [float(local_width.min()), float(local_width.max())],
+        "local_height_factor_range": [float(local_height.min()), float(local_height.max())],
+        "local_deformation_limit_fraction": 0.15,
+        "combined_width_clamped_vertices": clamped,
+        "width_reference": "heel-centred X=0 axis",
+        "height_reference": "original last plantar surface: first upward BVH hit at the same XY",
+        "plantar_reference_queries": plantar_queries,
+        "plantar_tangent_fallback_vertices": plantar_tangent_fallbacks,
+        "plantar_tangent_fallback": "retain the source vertex height when the upward ray misses a projected boundary tangent",
+        "warnings": warnings,
+    }
+    return result, metadata
+
+
 def unit_evidence():
     # Read STEP unit metadata only; do not import or use its geometry.
     step_text = (RAW_DIR / "sneaker_last.stp").read_text(errors="replace")
