@@ -1,0 +1,16 @@
+# Licensed source assets and all derived geometry stay local.
+/assets/
+/out/
+
+# Local runtime, caches, and Blender backup files.
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.blend1
+*.blend2
+*.crash.txt
+.env
+.env.*
+!.env.example
