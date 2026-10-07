@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "鞋设计参数（M0.5：鞋楦与鞋口高度）",
+  "description": "后续里程碑扩展整鞋参数；M0.5 只生成封闭鞋楦副本，不能作为可穿着鞋导出。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "revision", "collar_style", "collar_height_mm"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1, "default": 1, "description": "参数结构版本"},
+    "revision": {"type": "integer", "minimum": 0, "default": 0, "description": "设计版本，从 v000 开始"},
+    "collar_style": {"type": "string", "enum": ["low", "mid"], "default": "low", "description": "低帮或中帮，M0.5 高度等待用户确认"},
+    "collar_height_mm": {"type": "number", "minimum": 60, "maximum": 115, "default": 75, "description": "从规范化底面基准计量的楦顶裁切高度，单位毫米"}
+  },
+  "allOf": [
+    {"if": {"properties": {"collar_style": {"const": "low"}}}, "then": {"properties": {"collar_height_mm": {"minimum": 60, "maximum": 85}}}},
+    {"if": {"properties": {"collar_style": {"const": "mid"}}}, "then": {"properties": {"collar_height_mm": {"minimum": 86, "maximum": 115}}}}
+  ],
+  "x-style-defaults": {"low": 75, "mid": 100}
+}
