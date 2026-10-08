@@ -1,4 +1,4 @@
-"""M1: JSON -> deformed last -> solid sole and hollow upper -> checked exports."""
+"""JSON -> deformed last -> solid/lattice midsole and upper -> checked exports."""
 import argparse
 from dataclasses import dataclass
 import json
@@ -15,9 +15,10 @@ import numpy as np
 from mathutils import Matrix
 
 from engine.params import load_params, normalize_params
-from engine.render import contact_sheet, material, render_views, VIEWS
+from engine.render import contact_sheet, material, render_cutaway, render_views, VIEWS
 from engine.shoe.features import extract_features
 from engine.shoe.last import cut_last, deform_last, load_last, source_manifest
+from engine.shoe.lattice import clean_lattice_field, inspect_voids, lattice_midsole
 from engine.shoe.sole import sole_maps, solid_sole_field
 from engine.shoe.upper import upper_field
 from engine.shoe.volume import mesh_from_field, sample_map
@@ -47,6 +48,21 @@ class ShoeBuild:
     report: dict
 
 
+def sampling_spacing(params, override=None):
+    """Resolution is an output setting; lattice features limit coarse sampling."""
+    lattice = params["midsole_structure"] == "lattice"
+    nominal = ({"preview": .8, "export": .5} if lattice else {"preview": 1.0, "export": .5})[params["resolution"]]
+    limit = min(nominal, params["lattice_rod_mm"] / 2.5) if lattice else nominal
+    if override is None:
+        return limit, []
+    if not (.5 <= override <= 1):
+        raise ValueError("体素间距支持 0.5–1.0 mm。")
+    if lattice and override > params["lattice_rod_mm"] / 2.5:
+        fine = params["lattice_rod_mm"] / 2.5
+        return fine, [f"晶格特征需要更细采样，体素间距已从 {override:g} mm 限制为 {fine:g} mm。"]
+    return override, []
+
+
 def mirror_mesh(mesh):
     result = mesh.copy()
     result.transform(Matrix.Diagonal((-1, 1, 1, 1)))
@@ -59,11 +75,13 @@ def mirror_mesh(mesh):
     return result
 
 
-def build_shoe(params, *, last_mesh=None, voxel_mm=1.0):
+def build_shoe(params, *, last_mesh=None, voxel_mm=None):
     started = time.monotonic()
     effective, warnings = normalize_params(params)
-    if not (.5 <= voxel_mm <= 1.0):
-        raise ValueError("M1 体素间距支持 0.5–1.0 mm。")
+    voxel_mm, resolution_warnings = sampling_spacing(effective, voxel_mm)
+    warnings.extend(resolution_warnings)
+    is_lattice = effective["midsole_structure"] == "lattice"
+    stage = "M2" if is_lattice else "M1"
     source = last_mesh if last_mesh is not None else load_last()
     last, deformation = deform_last(source, effective)
     last_health = require_healthy(last, "形变鞋楦")
@@ -77,16 +95,38 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=1.0):
     maps = sole_maps(tree, features, effective, x, y)
     z = np.arange(float(maps["bottom"].min()) - 4 * voxel_mm,
                   effective["collar_height_mm"] + 4 * voxel_mm, voxel_mm)
-    print(f"M1: sampling {len(x)} x {len(y)} x {len(z)} at {voxel_mm:g} mm", flush=True)
+    print(f"{stage}: sampling {len(x)} x {len(y)} x {len(z)} at {voxel_mm:g} mm", flush=True)
     sole = solid_sole_field(maps, z, effective)
     shell, shell_info = upper_field(tree, x, y, z, effective["upper_thickness_mm"], effective["collar_height_mm"])
+    solid_sample_volume = int(np.count_nonzero(np.minimum(sole, shell) < 0)) * voxel_mm ** 3
+    lattice_info = {"enabled": False}
+    if is_lattice:
+        sole, core_mask, lattice_info = lattice_midsole(sole, maps, x, y, z, features["dimensions_mm"]["length"], effective)
+        lattice_info["enabled"] = True
+        print(f"M2: {effective['lattice_type']} period {lattice_info['period_mm']:.2f} mm", flush=True)
     field = np.minimum(sole, shell)
     del sole, shell
+    if is_lattice:
+        lattice_info["field_cleanup"] = clean_lattice_field(field, voxel_mm)
+        length = features["dimensions_mm"]["length"]
+        for zone, lo, hi in (("heel", -np.inf, .30), ("arch", .30, .60), ("forefoot", .60, np.inf)):
+            mask = core_mask & ((y >= lo * length) & (y < hi * length))[None, :, None]
+            stats = lattice_info["zone_core_sampling"][zone]
+            stats["periodic_field_fraction_before_union"] = stats["cropped_core_material_fraction"]
+            stats["cropped_core_material_fraction"] = float(np.count_nonzero((field < 0) & mask) / mask.sum()) if mask.any() else None
+        lattice_info["void_connectivity"] = inspect_voids(field, core_mask, voxel_mm)
+        lattice_info["solid_reference_sample_volume_mm3"] = solid_sample_volume
+        lattice_sample_volume = int(np.count_nonzero(field < 0)) * voxel_mm ** 3
+        lattice_info["lattice_sample_volume_mm3"] = lattice_sample_volume
+        lattice_info["sampled_material_reduction_fraction"] = 1 - lattice_sample_volume / solid_sample_volume
+        if lattice_info["void_connectivity"]["trapped_core_void_voxels"]:
+            warnings.append("采样发现部分内部空隙尚未连通外界；排粉／排料通道及制造适配留待 M3，当前不作可打印承诺。")
+        del core_mask
     mesh = mesh_from_field(field, (x[0], y[0], z[0]), voxel_mm, "shoe_right_mesh")
     del field
     # Three regions share one welded watertight body. Material boundaries do not
     # create intersecting internal surfaces in the printing mesh.
-    for name, color in (("outsole", (.16, .24, .25)), ("solid_midsole", (.79, .80, .72)), ("upper", (.18, .43, .40))):
+    for name, color in (("outsole", (.16, .24, .25)), ("lattice_midsole" if is_lattice else "solid_midsole", (.79, .80, .72)), ("upper", (.18, .43, .40))):
         mesh.materials.append(material(name, color))
     centres = coordinates(mesh)[triangles(mesh)].mean(axis=1)
     bottom = sample_map(maps["bottom"], centres[:, :2], (x[0], y[0]), voxel_mm)
@@ -112,9 +152,9 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=1.0):
     obj = bpy.data.objects.new("shoe_" + effective["foot_side"], mesh)
     bpy.context.scene.collection.objects.link(obj)
     obj["unit"] = "mm"
-    obj["stage"] = "M1_solid_midsole"
+    obj["stage"] = "M2_lattice_midsole" if is_lattice else "M1_solid_midsole"
     obj["foot_side"] = effective["foot_side"]
-    health = require_healthy(mesh, "M1 整鞋")
+    health = require_healthy(mesh, stage + " 整鞋")
     if health["connected_components"] != 1:
         raise ValueError("整鞋未连接成单一实体。")
     radius = np.minimum(effective["edge_radius_mm"], (maps["top"] - maps["bottom"]) * .45)
@@ -125,11 +165,12 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=1.0):
     report = {"effective_params": effective, "clamp_messages": warnings + deformation["warnings"],
               "deformation": deformation, "deformed_last_health": last_health,
               "deformed_last_health_frame": "right basis before optional X reflection", "mesh_health": health,
-              "voxel_mm": voxel_mm, "grid_shape": [len(x), len(y), len(z)], "upper": shell_info,
+              "voxel_mm": voxel_mm, "resolution": effective["resolution"], "lattice": lattice_info,
+              "grid_shape": [len(x), len(y), len(z)], "upper": shell_info,
               "sole": {"outsole_base_mm": 3, "flare_mm": effective["outsole_flare_mm"],
                        "edge_radius_mm": effective["edge_radius_mm"], "effective_radius_range_mm": radius_range, "anchors": maps["anchors"],
                        "bottom_anchor_z_mm": maps["bottom_anchor_z_mm"],
-                       "midsole": "solid; top sampled from deformed high-poly plantar surface"},
+                       "midsole": "lattice core with curved solid top skin" if is_lattice else "solid; top sampled from deformed high-poly plantar surface"},
               "geometry_elapsed_seconds": time.monotonic() - started}
     return ShoeBuild(obj, last, features, report)
 
@@ -173,13 +214,14 @@ def export_shoe(obj, output):
     return {"stl": str(stl), "glb": str(glb), "stl_coordinate_unit": "mm", "glb_coordinate_unit": "m"}
 
 
-def run(params_path, output, *, voxel_mm=1.0, render=True):
+def run(params_path, output, *, voxel_mm=None, render=True):
     started = time.monotonic()
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    write_json(output / "report.json", {"stage": "M1", "status": "running"})
-    before = source_manifest()
     effective, warnings = load_params(params_path)
+    stage = "M2" if effective["midsole_structure"] == "lattice" else "M1"
+    write_json(output / "report.json", {"stage": stage, "status": "running"})
+    before = source_manifest()
     built = build_shoe(effective, voxel_mm=voxel_mm)
     built.report["clamp_messages"] = warnings + built.report["clamp_messages"]
     bpy.context.view_layer.update()
@@ -187,30 +229,34 @@ def run(params_path, output, *, voxel_mm=1.0, render=True):
     previews = {}
     if render:
         previews = render_views([built.model], built.model, output / "previews", "shoe", f"LOW 75 mm | EU {effective['size_eu']}" if effective["collar_height_mm"] == 75 else f"{effective['collar_style'].upper()} {effective['collar_height_mm']:g} mm | EU {effective['size_eu']}",
-                                foot=effective["foot_side"], footer=f"{effective['foot_side'].upper()} | SOLID MIDSOLE | M1")
+                                foot=effective["foot_side"], footer=f"{effective['foot_side'].upper()} | {effective['lattice_type'].upper() if stage == 'M2' else 'SOLID MIDSOLE'} | {stage}")
         contact_sheet([previews[key] for key in VIEWS], output / "four_views.png")
+        if stage == "M2":
+            cutaway = render_cutaway(built.model, output / "previews", effective["lattice_type"])
+            contact_sheet(list(cutaway.values()), output / "cutaway.png")
+            previews["cutaway"] = cutaway
     if source_manifest() != before:
         raise ValueError("原始素材校验发生变化。")
-    report = {"stage": "M1", "status": "pass_pending_visual_confirmation", **built.report,
+    report = {"stage": stage, "status": "pass_pending_visual_confirmation", **built.report,
               "params_file": str(Path(params_path).resolve()), "exports": exports, "previews": previews,
               "original_sources_unchanged": True, "elapsed_seconds": time.monotonic() - started,
               "manufacturing_status": "not_checked_M3", "license_reminder": "本鞋楦仅限非商业使用，不得分发。"}
     write_json(output / "features.json", built.features)
     write_json(output / "effective_params.json", effective)
     write_json(output / "report.json", report)
-    print("M1_REPORT " + json.dumps({"out": str(output), "elapsed_seconds": report["elapsed_seconds"], "mesh": report["mesh_health"]["status"]}), flush=True)
+    print(stage + "_REPORT " + json.dumps({"out": str(output), "elapsed_seconds": report["elapsed_seconds"], "mesh": report["mesh_health"]["status"]}), flush=True)
     return report
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--params", type=Path, default=ROOT / "designs/current.json")
-    parser.add_argument("--out", type=Path, default=ROOT / "out/m1")
-    parser.add_argument("--voxel-mm", type=float, default=1.0)
+    parser.add_argument("--out", type=Path, default=ROOT / "out/m2")
+    parser.add_argument("--voxel-mm", type=float)
     parser.add_argument("--no-render", action="store_true")
     options = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     try:
         run(options.params, options.out, voxel_mm=options.voxel_mm, render=not options.no_render)
     except Exception as exc:
-        write_json(options.out / "report.json", {"stage": "M1", "status": "fail", "error": str(exc), "manufacturing_status": "not_checked_M3"})
+        write_json(options.out / "report.json", {"stage": "M1/M2", "status": "fail", "error": str(exc), "manufacturing_status": "not_checked_M3"})
         raise

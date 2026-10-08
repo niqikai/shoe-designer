@@ -4,28 +4,29 @@
 
 目标是让没有建模经验的用户通过自然语言调整鞋款，由 JSON 参数驱动 Blender 无头生成、校验、导出和渲染。
 
-当前阶段：**M1 实心造型已实现，等待用户看图确认后进入 M2。** 当前设计为右脚、低帮 75 mm；包含外底、贴合足弓曲面的实心中底与有实际鞋口的鞋面围条。导出通过当前网格检查，制造壁厚、工艺与设备适配尚待 M3，不代表已完成可打印性验收。
+当前阶段：**M2 晶格中底已实现，等待用户看图确认后进入 M3。** 当前设计为右脚、低帮 75 mm、Gyroid 分区晶格；保留贴合足弓的实心顶层、外底和实际开放的鞋口。支持 Gyroid、Diamond、Octet 三种结构与预览／导出两档精度。导出通过当前网格检查，制造壁厚、工艺与设备适配尚待 M3，不代表已完成可打印性验收。
 
-本阶段实测见 [M1 实心造型报告](docs/M1_REPORT.md)。历史依据保存在 [M0 开工检查](docs/M0_CHECK.md) 与 [M0.5 鞋楦报告](docs/M0_5_REPORT.md)。
+本阶段实测见 [M2 晶格报告](docs/M2_REPORT.md)。实心基准见 [M1 报告](docs/M1_REPORT.md)，历史依据保存在 [M0 开工检查](docs/M0_CHECK.md) 与 [M0.5 鞋楦报告](docs/M0_5_REPORT.md)。
 
 素材保存在本机 `assets/last/`；原 ZIP 及 `raw/` 解压文件已设为只读。`assets/`、`out/` 均被 Git 忽略。
 
-## 运行 M1
+## 运行当前设计
 
 已验证环境为 Blender 5.2.2 LTS、其内置 Python 3.13。启动器先读取 `BLENDER_PATH`，再查 PATH 和常见安装路径。原始素材仅保存在本机；首次使用先运行 M0.5，得到规范化鞋楦。
 
-M1 使用隐函数场与 Marching Cubes 合并鞋底和鞋面，避免对高面数曲面反复布尔。额外依赖安装在项目忽略的 `.venv` 中，Python 版本与 Blender 一致；版本记录在 `requirements-geometry.txt`。
+M1／M2 使用隐函数场与 Marching Cubes 合并鞋底、晶格和鞋面，避免对高面数曲面反复布尔。额外依赖安装在项目忽略的 `.venv` 中，Python 版本与 Blender 一致；版本记录在 `requirements-geometry.txt`。
 
 ```sh
 python3 tools/setup_geometry.py
 tools/run.sh designs/current.json
 ```
 
-默认在 `out/m1/` 生成：
+默认在 `out/m2/` 生成：
 
 - `shoe_right.stl`、`shoe_right.glb`：同一只整鞋；STL 坐标为毫米，GLB 按标准转换为米。左脚参数会生成 `shoe_left.*`。
 - `previews/shoe_side.png`、`shoe_top.png`、`shoe_front.png`、`shoe_iso.png` 与 `four_views.png`：四视角和拼图，附 50 mm 比例尺。
-- `report.json`：有效参数、形变、网格检查、尺寸、耗时与素材完整性结果。
+- `cutaway.png`：侧面与斜视剖切拼图，用于观察晶格、实心顶层和足弓；剖切副本不导出。
+- `report.json`：有效参数、形变、网格检查、分区实际密度、材料体积、孔隙采样连通性、尺寸、耗时与素材完整性结果。
 - `features.json`、`effective_params.json`：形变后的特征与本次实际使用的参数。
 
 每次运行的 Blender 日志保存在 `out/logs/build-*.log`。生成失败时 `report.json` 标记失败；已有旧导出不会变成本次通过的结果，应以报告状态为准。
@@ -33,12 +34,33 @@ tools/run.sh designs/current.json
 输出目录和采样精度可显式指定：
 
 ```sh
-tools/run.sh designs/current.json --out out/m1-review --voxel-mm 0.75
+tools/run.sh designs/current.json --out out/m2-export --voxel-mm 0.5
 ```
 
-默认体素间距为 1 mm，支持 0.5–1 mm；更细采样会增加运行时间与内存。当前默认设计生成、检查、导出和四视角预览约 7.2 秒；更改精度与参数后的耗时需重新测量。
+晶格 `resolution: preview` 默认间距 0.8 mm，`export` 为 0.5 mm。预览会随较小的杆径／片厚进一步细化，间距不超过该值的 1/2.5。命令行 `--voxel-mm` 支持 0.5–1 mm，同样受细节尺寸限制；实际间距以报告的 `voxel_mm` 为准。上例保持设计 JSON 不变，仅覆盖输出采样精度。更细采样会增加运行时间与内存；本机实测见 M2 报告。
 
-预览色区区分外底、实心中底与鞋面；三者合并为单个封闭网格，颜色不代表多材料打印。STL 为研究导出，后续需进行制造验证。**本鞋楦仅限非商业使用，不得分发。**
+预览色区区分外底、晶格中底与鞋面；三者合并为单个封闭网格，颜色不代表多材料打印。STL 为研究导出，后续需进行制造验证。**本鞋楦仅限非商业使用，不得分发。**
+
+
+## M2 参数与版本
+
+| 参数 | 范围／选项 | 当前值与含义 |
+| --- | --- | --- |
+| `midsole_structure` | `solid` / `lattice` | 当前 `lattice`；旧 JSON 缺省为 `solid`，可重现 M1 |
+| `lattice_type` | `gyroid` / `diamond` / `octet` | 当前 `gyroid`；前两者为曲面片层，后者为杆网 |
+| `lattice_density_heel/arch/forefoot` | 0.20–0.60 | 0.32／0.45／0.35，表示周期单胞目标材料占比 |
+| `lattice_rod_mm` | 1.5–3.0 mm | 2 mm；Octet 为杆径，曲面晶格为未裁切解析片层的保守厚度尺度 |
+| `resolution` | `preview` / `export` | 当前 `preview`；控制输出采样间距 |
+
+三个分区共享周期与相位，在分区边界附近平滑过渡。单胞目标密度不等于实际裁切后的密度；整鞋体积还包含固定实心顶层、外底和鞋面。默认顶层垂直厚度 2.4 mm，外底 3 mm。密度与厚度共同决定单胞大小，不能当作独立的软硬开关；解析厚度也不等于最终网格的实测最小壁厚，裁切端部和制造误差需在 M3 检查。
+
+当前为 v002。M1 的 v001 已逐字节备份到 `designs/history/v001.json`，此前 v000 也保留。重现 M1：
+
+```sh
+tools/run.sh designs/history/v001.json --out out/m1
+```
+
+`designs/current.json` 为唯一真相；修改先备份历史并记入 `designs/CHANGELOG.md`。语义规则见 [自然语言映射](docs/semantic_map.md)。一条命令的设计修改、撤销和版本比较留待 M4。
 
 ## 保留 M0.5 体检流程
 
@@ -69,8 +91,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_last_tests.py
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_deform_tests.py
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_shoe_tests.py -- --stress
+blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_lattice_tests.py -- --integration --stress --fine-export
 ```
 
-几何测试需先完成 M0.5 生成规范化文件，整鞋测试还需先运行默认 M1 设计。测试覆盖单位／轴向、OBJ/STL/GLB 往返、开放鞋口、足弓贴合、底厚、左右镜像、受控形变及参数关联截断。`--stress` 增加四个确定性的整鞋边界组合；这不代替 M5 的 1000 组随机测试。结果见本阶段报告。
+几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 需按上面的命令生成 `out/m2-export/`。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。
 
-设计版本从 v000 开始，`designs/current.json` 为唯一真相；当前为 v001，进入 M1 前的 v000 已保存到 `designs/history/v000.json`。修改先备份历史并记入 `designs/CHANGELOG.md`。语义规则见 [自然语言映射](docs/semantic_map.md)。一条命令的设计修改、撤销和版本比较留待 M4。
+测试覆盖单位／轴向、OBJ/STL/GLB 往返、鞋口、足弓贴合、底厚、左右镜像、受控形变，以及晶格密度标定、连续相位、分区过渡、厚度与单胞关系、三种整鞋拓扑和精度对比。M1 `--stress` 增加四个边界组合，M2 `--stress` 增加两个组合；这些不代替 M5 的 1000 组随机测试。测试结果及当前限制见 M2 报告。

@@ -51,6 +51,64 @@ def boundary_loops(edges):
     return loops
 
 
+def _coplanar_overlap_area(first, second, normal):
+    """Double-precision 2D triangle clipping for adjacent-face contact tests."""
+    axis = int(np.abs(normal).argmax())
+    a, b = np.delete(first, axis, axis=1), np.delete(second, axis, axis=1)
+    cross = lambda u, v: u[0] * v[1] - u[1] * v[0]
+    sign = 1 if cross(b[1] - b[0], b[2] - b[0]) >= 0 else -1
+    polygon = list(a)
+    for p, q in zip(b, np.roll(b, -1, axis=0)):
+        clipped = []
+        for s, t in zip(polygon, polygon[1:] + polygon[:1]):
+            ds, dt = sign * cross(q - p, s - p), sign * cross(q - p, t - p)
+            if ds >= 0:
+                clipped.append(s)
+            if (ds >= 0) != (dt >= 0):
+                clipped.append(s + (t - s) * ds / (ds - dt))
+        polygon = clipped
+        if not polygon:
+            return 0.0
+    return abs(sum(cross(p, q) for p, q in zip(polygon, polygon[1:] + polygon[:1]))) * .5
+
+
+def _only_shared_contact(points, first_ids, second_ids):
+    """Exclude legal shared vertices/edges, while retaining folded overlaps.
+
+    BVH's float overlap can report coplanar neighbour triangles touching only
+    at their shared vertex. A double-precision plane/cone check distinguishes
+    that contact from intersection beyond the mesh's shared feature.
+    """
+    shared = set(first_ids) & set(second_ids)
+    if not shared or len(shared) == 3:
+        return False
+    a, b = points[first_ids], points[second_ids]
+    na, nb = np.cross(a[1] - a[0], a[2] - a[0]), np.cross(b[1] - b[0], b[2] - b[0])
+    lengths = np.linalg.norm(na), np.linalg.norm(nb)
+    if min(lengths) < 1e-12:
+        return False
+    na, nb = na / lengths[0], nb / lengths[1]
+    direction = np.cross(na, nb)
+    scale = max(np.ptp(np.vstack((a, b)), axis=0).max(), 1.0)
+    if np.linalg.norm(direction) < 1e-7:
+        return _coplanar_overlap_area(a, b, na) < 1e-12 * scale ** 2
+    if len(shared) == 2:
+        return True  # Distinct planes intersect only along their shared edge.
+    origin = points[next(iter(shared))]
+    direction /= np.linalg.norm(direction)
+    def in_cone(ids, ray):
+        u, v = [points[i] - origin for i in ids if i not in shared]
+        uu, uv, vv = u @ u, u @ v, v @ v
+        determinant = uu * vv - uv * uv
+        if determinant < 1e-20:
+            return False
+        ru, rv = ray @ u, ray @ v
+        alpha = (ru * vv - rv * uv) / determinant
+        beta = (rv * uu - ru * uv) / determinant
+        return alpha >= -1e-10 and beta >= -1e-10
+    return not any(in_cone(first_ids, sign * direction) and in_cone(second_ids, sign * direction) for sign in (-1, 1))
+
+
 def mesh_health(mesh, *, intersections=True, near_duplicate_tolerance_mm=1e-5):
     bm = bmesh.new()
     try:
@@ -94,7 +152,8 @@ def mesh_health(mesh, *, intersections=True, near_duplicate_tolerance_mm=1e-5):
         examples = []
         if intersections and finite and len(bm.faces):
             tree = surface_tree(mesh)
-            pairs = sorted({tuple(sorted(pair)) for pair in tree.overlap(tree) if pair[0] != pair[1]})
+            raw_pairs = sorted({tuple(sorted(pair)) for pair in tree.overlap(tree) if pair[0] != pair[1]})
+            pairs = [pair for pair in raw_pairs if not _only_shared_contact(points, triangle_indices[pair[0]], triangle_indices[pair[1]])]
             intersection_pairs = len(pairs)
             examples = [list(pair) for pair in pairs[:8]]
         closed = bool(len(bm.faces) and boundary == 0 and nonmanifold == 0 and bad_vertices == 0)
@@ -116,7 +175,7 @@ def mesh_health(mesh, *, intersections=True, near_duplicate_tolerance_mm=1e-5):
             "signed_volume_mm3": volume, "surface_area_mm2": float(triangle_areas.sum()),
             "area_method": "float64 cross products of local triangle edges; degenerate threshold 1e-10 mm2",
             "self_intersection_pairs": intersection_pairs, "intersection_examples_triangle_indices": examples,
-            "intersection_method": "Blender BVH triangle intersection; float arithmetic; not an exact proof for coplanar overlaps",
+            "intersection_method": "Blender float BVH candidates; float64 shared-feature contact filtering; not an exact proof for coplanar overlaps",
             "manufacturing_status": "not_checked_M3",
         }
     finally:

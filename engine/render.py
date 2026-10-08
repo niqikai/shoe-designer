@@ -2,6 +2,7 @@
 from pathlib import Path
 import math
 
+import bmesh
 import bpy
 import numpy as np
 from mathutils import Vector
@@ -148,3 +149,25 @@ def contact_sheet(files, destination, *, columns=2):
     finally:
         for image in loaded:
             bpy.data.images.remove(image)
+
+
+def render_cutaway(obj, output_dir, lattice_name):
+    """Temporary open half-model for inspection only; never export this mesh."""
+    mesh = obj.data.copy()
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+                               plane_co=(0, 0, 0), plane_no=(1, 0, 0), dist=1e-5,
+                               clear_outer=True, clear_inner=False)
+        bm.to_mesh(mesh)
+    finally:
+        bm.free()
+    cut = bpy.data.objects.new("inspection_cutaway_not_for_export", mesh)
+    bpy.context.scene.collection.objects.link(cut)
+    try:
+        return render_views([cut], obj, output_dir, "cutaway", lattice_name.upper() + " | INTERNAL SECTION",
+                            views=("side", "iso"), foot=obj["foot_side"], footer="VISUAL CUTAWAY ONLY | Not a print mesh")
+    finally:
+        bpy.data.objects.remove(cut, do_unlink=True)
+        bpy.data.meshes.remove(mesh)

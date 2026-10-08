@@ -39,8 +39,10 @@ def mesh_from_field(field, origin, spacing, name):
     try:
         bm.from_mesh(mesh)
         # Collapse numerical coincidences far below the sampling precision.
-        bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-5)
-        bmesh.ops.dissolve_degenerate(bm, edges=list(bm.edges), dist=1e-5)
+        for _ in range(2):
+            bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=2e-5)
+            bmesh.ops.dissolve_degenerate(bm, edges=list(bm.edges), dist=2e-5)
+            bmesh.ops.triangulate(bm, faces=list(bm.faces))
         bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
         if bm.calc_volume(signed=True) < 0:
             bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
@@ -48,6 +50,7 @@ def mesh_from_field(field, origin, spacing, name):
     finally:
         bm.free()
     mesh.update()
+    mesh["numerical_merge_tolerance_mm"] = 2e-5
     return mesh
 
 

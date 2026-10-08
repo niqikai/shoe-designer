@@ -70,12 +70,58 @@ class ParameterTests(unittest.TestCase):
             self.assertIn("已截断", warnings[0])
             self.assertEqual(normalize_params(params), (params, []))
 
-    def test_saved_design_and_previous_revision_are_valid(self):
+    def test_m1_design_keeps_solid_structure_by_default(self):
+        legacy = json.loads((ROOT / "designs/history/v001.json").read_text(encoding="utf-8"))
+        self.assertNotIn("midsole_structure", legacy)
+        params, warnings = normalize_params(legacy)
+        self.assertEqual(warnings, [])
+        self.assertEqual(params["midsole_structure"], "solid")
+        self.assertEqual(params["lattice_type"], "gyroid")
+        self.assertEqual(params["resolution"], "preview")
+        self.assertEqual(params["lattice_density_heel"], .32)
+        self.assertEqual(params["lattice_density_arch"], .45)
+        self.assertEqual(params["lattice_density_forefoot"], .35)
+        self.assertEqual(params["lattice_rod_mm"], 2.0)
+
+    def test_m2_bounds_clamp_with_chinese_messages(self):
+        bounds = {"lattice_density_heel": (.20, .60), "lattice_density_arch": (.20, .60),
+                  "lattice_density_forefoot": (.20, .60), "lattice_rod_mm": (1.5, 3.0)}
+        for key, (lower, upper) in bounds.items():
+            for requested, expected in ((-10, lower), (10, upper)):
+                with self.subTest(key=key, requested=requested):
+                    params, warnings = normalize_params({"midsole_structure": "lattice", key: requested})
+                    self.assertEqual(params[key], expected)
+                    self.assertEqual(len(warnings), 1)
+                    self.assertIn("已截断", warnings[0])
+                    self.assertEqual(normalize_params(params), (params, []))
+
+    def test_valid_m2_values_and_structure_types_are_preserved(self):
+        for structure in ("solid", "lattice"):
+            for kind in ("gyroid", "diamond", "octet"):
+                for resolution in ("preview", "export"):
+                    values = {"midsole_structure": structure, "lattice_type": kind,
+                              "resolution": resolution, "lattice_density_heel": .25,
+                              "lattice_density_arch": .55, "lattice_density_forefoot": .40,
+                              "lattice_rod_mm": 2.5}
+                    params, warnings = normalize_params(values)
+                    self.assertEqual(warnings, [])
+                    for key, value in values.items():
+                        self.assertEqual(params[key], value)
+
+    def test_m2_numeric_values_reject_non_finite_and_wrong_types(self):
+        for key in ("lattice_density_heel", "lattice_density_arch", "lattice_density_forefoot", "lattice_rod_mm"):
+            for value in (math.nan, math.inf, -math.inf, True, "0.32", None):
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    normalize_params({key: value})
+
+    def test_saved_design_and_history_are_valid(self):
         current = json.loads((ROOT / "designs/current.json").read_text(encoding="utf-8"))
-        previous = json.loads((ROOT / "designs/history/v000.json").read_text(encoding="utf-8"))
-        self.assertEqual(previous["revision"], 0)
-        self.assertGreater(current["revision"], previous["revision"])
-        for values in (previous, current):
+        baseline = json.loads((ROOT / "designs/history/v000.json").read_text(encoding="utf-8"))
+        m1 = json.loads((ROOT / "designs/history/v001.json").read_text(encoding="utf-8"))
+        self.assertEqual(baseline["revision"], 0)
+        self.assertEqual(m1["revision"], 1)
+        self.assertGreater(current["revision"], m1["revision"])
+        for values in (baseline, m1, current):
             params, warnings = normalize_params(values)
             self.assertEqual(warnings, [])
             self.assertEqual(params["schema_version"], 1)
@@ -87,7 +133,9 @@ class ParameterTests(unittest.TestCase):
                        {"revision": 1.5}, {"schema_version": 2}, {"size_eu": 42.5},
                        {"size_eu": True}, {"foot_width": "extra-wide"}, {"foot_side": "both"},
                        {"toe_roundness": math.inf}, {"upper_thickness_mm": "2.4"},
-                       {"outsole_flare_mm": None}, {"heel_sole_mm": False}):
+                       {"outsole_flare_mm": None}, {"heel_sole_mm": False},
+                       {"midsole_structure": "hollow"}, {"lattice_type": "unknown"},
+                       {"resolution": "ultra"}, {"resolution": True}):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 normalize_params(values)
 

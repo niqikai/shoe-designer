@@ -1,31 +1,275 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "鞋设计参数（M1：实心整鞋造型）",
-  "description": "M1 生成实心外底、中底与鞋面围条；晶格、工艺和材料参数将在后续里程碑加入。尺寸为毫米，尺码为待试穿验证的名义 EU 尺码。缺少的新参数由默认值补全，兼容 M0.5 设计。",
+  "title": "鞋设计参数（M2：分区晶格中底）",
+  "description": "支持 M1 实心整鞋和 M2 分区晶格中底。尺寸为毫米，尺码为待试穿验证的名义 EU 尺码。缺少的新参数由默认值补全，旧版 M0.5、M1 设计默认保留实心中底。晶格参数为几何设计控制，实际制造最小壁厚和力学表现仍需后续验证。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "revision", "collar_style", "collar_height_mm"],
+  "required": [
+    "schema_version",
+    "revision",
+    "collar_style",
+    "collar_height_mm"
+  ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1, "default": 1, "description": "参数结构版本"},
-    "revision": {"type": "integer", "minimum": 0, "default": 0, "description": "设计版本，从 v000 开始"},
-    "foot_side": {"type": "string", "enum": ["right", "left"], "default": "right", "description": "生成单只右脚或左脚；左脚由同一右脚基准镜像生成"},
-    "size_eu": {"type": "integer", "minimum": 35, "maximum": 46, "default": 42, "title": "尺码", "description": "名义 EU 尺码；42 对应当前鞋楦基准，长度、宽度和高度采用不同缩放系数，实际合脚性需试穿验证"},
-    "foot_width": {"type": "string", "enum": ["narrow", "standard", "wide"], "default": "standard", "description": "窄、标准或宽脚；在尺码变换基础上控制宽度，形变幅度不超过 15%"},
-    "toe_roundness": {"type": "number", "minimum": -0.15, "maximum": 0.15, "default": 0, "title": "鞋头圆度", "description": "鞋头局部横向形变比例，正值更圆宽，负值更收窄；与鞋头高度和外底圆角共同形成圆头外观。宽脚时正值最多0.05，窄脚时负值最少-0.05，联合形变不超过15%。"},
-    "toe_height_scale": {"type": "number", "minimum": 0.85, "maximum": 1.15, "default": 1, "title": "鞋头高度倍率", "description": "鞋头局部高度倍率，以楦底为基准，最大增减 15%"},
-    "collar_style": {"type": "string", "enum": ["low", "mid"], "default": "low", "description": "低帮或中帮；用户已确认基准为低帮 75 mm"},
-    "collar_height_mm": {"type": "number", "minimum": 60, "maximum": 115, "default": 75, "title": "鞋口高度", "x-unit": "mm", "description": "从规范化楦底平面基准计量的鞋口裁切高度；低帮 60–85 mm，中帮 86–115 mm"},
-    "heel_sole_mm": {"type": "number", "minimum": 12, "maximum": 40, "default": 24, "title": "脚跟底厚", "x-unit": "mm", "description": "基准脚跟位置从楦底曲面到最下底面的局部垂直厚度，包含外底与实心中底"},
-    "forefoot_sole_mm": {"type": "number", "minimum": 8, "maximum": 30, "default": 16, "title": "前掌底厚", "x-unit": "mm", "description": "基准前掌位置从楦底曲面到最下底面的局部垂直厚度，包含外底与实心中底"},
-    "edge_radius_mm": {"type": "number", "minimum": 0.5, "maximum": 4, "default": 2, "title": "边缘圆角", "x-unit": "mm", "description": "外底外缘的目标圆角半径，最终形状受局部几何约束"},
-    "outsole_flare_mm": {"type": "number", "minimum": 4, "maximum": 8, "default": 6, "title": "外底外扩", "x-unit": "mm", "description": "楦底轮廓向外偏移的距离，使鞋底比楦底宽一圈"},
-    "upper_thickness_mm": {"type": "number", "minimum": 1.8, "maximum": 4, "default": 2.4, "title": "鞋面围条厚度", "x-unit": "mm", "description": "鞋面围条从楦表面向外的目标厚度；制造最小壁厚仍需后续校验"}
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "default": 1,
+      "description": "参数结构版本"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "设计版本，从 v000 开始"
+    },
+    "foot_side": {
+      "type": "string",
+      "enum": [
+        "right",
+        "left"
+      ],
+      "default": "right",
+      "description": "生成单只右脚或左脚；左脚由同一右脚基准镜像生成"
+    },
+    "size_eu": {
+      "type": "integer",
+      "minimum": 35,
+      "maximum": 46,
+      "default": 42,
+      "title": "尺码",
+      "description": "名义 EU 尺码；42 对应当前鞋楦基准，长度、宽度和高度采用不同缩放系数，实际合脚性需试穿验证"
+    },
+    "foot_width": {
+      "type": "string",
+      "enum": [
+        "narrow",
+        "standard",
+        "wide"
+      ],
+      "default": "standard",
+      "description": "窄、标准或宽脚；在尺码变换基础上控制宽度，形变幅度不超过 15%"
+    },
+    "toe_roundness": {
+      "type": "number",
+      "minimum": -0.15,
+      "maximum": 0.15,
+      "default": 0,
+      "title": "鞋头圆度",
+      "description": "鞋头局部横向形变比例，正值更圆宽，负值更收窄；与鞋头高度和外底圆角共同形成圆头外观。宽脚时正值最多0.05，窄脚时负值最少-0.05，联合形变不超过15%。"
+    },
+    "toe_height_scale": {
+      "type": "number",
+      "minimum": 0.85,
+      "maximum": 1.15,
+      "default": 1,
+      "title": "鞋头高度倍率",
+      "description": "鞋头局部高度倍率，以楦底为基准，最大增减 15%"
+    },
+    "collar_style": {
+      "type": "string",
+      "enum": [
+        "low",
+        "mid"
+      ],
+      "default": "low",
+      "description": "低帮或中帮；用户已确认基准为低帮 75 mm"
+    },
+    "collar_height_mm": {
+      "type": "number",
+      "minimum": 60,
+      "maximum": 115,
+      "default": 75,
+      "title": "鞋口高度",
+      "x-unit": "mm",
+      "description": "从规范化楦底平面基准计量的鞋口裁切高度；低帮 60–85 mm，中帮 86–115 mm"
+    },
+    "heel_sole_mm": {
+      "type": "number",
+      "minimum": 12,
+      "maximum": 40,
+      "default": 24,
+      "title": "脚跟底厚",
+      "x-unit": "mm",
+      "description": "基准脚跟位置从楦底曲面到最下底面的局部垂直厚度，包含外底与中底"
+    },
+    "forefoot_sole_mm": {
+      "type": "number",
+      "minimum": 8,
+      "maximum": 30,
+      "default": 16,
+      "title": "前掌底厚",
+      "x-unit": "mm",
+      "description": "基准前掌位置从楦底曲面到最下底面的局部垂直厚度，包含外底与中底"
+    },
+    "edge_radius_mm": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 4,
+      "default": 2,
+      "title": "边缘圆角",
+      "x-unit": "mm",
+      "description": "外底外缘的目标圆角半径，最终形状受局部几何约束"
+    },
+    "outsole_flare_mm": {
+      "type": "number",
+      "minimum": 4,
+      "maximum": 8,
+      "default": 6,
+      "title": "外底外扩",
+      "x-unit": "mm",
+      "description": "楦底轮廓向外偏移的距离，使鞋底比楦底宽一圈"
+    },
+    "upper_thickness_mm": {
+      "type": "number",
+      "minimum": 1.8,
+      "maximum": 4,
+      "default": 2.4,
+      "title": "鞋面围条厚度",
+      "x-unit": "mm",
+      "description": "鞋面围条从楦表面向外的目标厚度；制造最小壁厚仍需后续校验"
+    },
+    "midsole_structure": {
+      "type": "string",
+      "enum": [
+        "solid",
+        "lattice"
+      ],
+      "default": "solid",
+      "title": "中底结构",
+      "description": "实心或晶格中底；旧版设计省略时保留实心，启用晶格须显式选择 lattice"
+    },
+    "lattice_type": {
+      "type": "string",
+      "enum": [
+        "gyroid",
+        "diamond",
+        "octet"
+      ],
+      "default": "gyroid",
+      "title": "晶格类型",
+      "description": "Gyroid 曲面、Diamond 曲面或 Octet 杆网；仅在晶格中底时生效，类型改变不代表经验证的性能提升"
+    },
+    "lattice_density_heel": {
+      "type": "number",
+      "minimum": 0.2,
+      "maximum": 0.6,
+      "default": 0.32,
+      "title": "脚跟晶格密度",
+      "description": "脚跟分区的目标晶格相对密度，0.20–0.60；是周期单元的几何控制，不是整鞋实测体积分数；杆径下限、边界连接与分区过渡可能增加实际用料"
+    },
+    "lattice_density_arch": {
+      "type": "number",
+      "minimum": 0.2,
+      "maximum": 0.6,
+      "default": 0.45,
+      "title": "足弓晶格密度",
+      "description": "足弓分区的目标晶格相对密度，0.20–0.60；默认比脚跟和前掌高，作为支撑设计假设，实际支撑效果需试样验证"
+    },
+    "lattice_density_forefoot": {
+      "type": "number",
+      "minimum": 0.2,
+      "maximum": 0.6,
+      "default": 0.35,
+      "title": "前掌晶格密度",
+      "description": "前掌分区的目标晶格相对密度，0.20–0.60；与相邻分区平滑过渡，不承诺柔软、回弹或重量结果"
+    },
+    "lattice_rod_mm": {
+      "type": "number",
+      "minimum": 1.5,
+      "maximum": 3.0,
+      "default": 2.0,
+      "title": "晶格杆径／等效片厚",
+      "x-unit": "mm",
+      "description": "1.5–3.0 mm 的设计控制：对 Gyroid、Diamond 表示未裁切解析片层的保守厚度尺度，对 Octet 表示最稀疏分区杆径；与目标密度共同决定全局单胞大小，较密分区会增厚，不等同于制造最小实测厚度，后者在 M3 验证"
+    },
+    "resolution": {
+      "type": "string",
+      "enum": [
+        "preview",
+        "export"
+      ],
+      "default": "preview",
+      "title": "生成分辨率",
+      "description": "preview 使用较低体素分辨率进行快速看图，export 使用较高体素分辨率生成导出候选；提高分辨率不替代制造校验"
+    }
   },
   "allOf": [
-    {"if": {"properties": {"collar_style": {"const": "low"}}}, "then": {"properties": {"collar_height_mm": {"minimum": 60, "maximum": 85}}}},
-    {"if": {"properties": {"collar_style": {"const": "mid"}}}, "then": {"properties": {"collar_height_mm": {"minimum": 86, "maximum": 115}}}},
-    {"if": {"required": ["foot_width"], "properties": {"foot_width": {"const": "wide"}}}, "then": {"properties": {"toe_roundness": {"maximum": 0.05}}}},
-    {"if": {"required": ["foot_width"], "properties": {"foot_width": {"const": "narrow"}}}, "then": {"properties": {"toe_roundness": {"minimum": -0.05}}}}
+    {
+      "if": {
+        "properties": {
+          "collar_style": {
+            "const": "low"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "collar_height_mm": {
+            "minimum": 60,
+            "maximum": 85
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "collar_style": {
+            "const": "mid"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "collar_height_mm": {
+            "minimum": 86,
+            "maximum": 115
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "foot_width"
+        ],
+        "properties": {
+          "foot_width": {
+            "const": "wide"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "toe_roundness": {
+            "maximum": 0.05
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "foot_width"
+        ],
+        "properties": {
+          "foot_width": {
+            "const": "narrow"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "toe_roundness": {
+            "minimum": -0.05
+          }
+        }
+      }
+    }
   ],
-  "x-style-defaults": {"low": 75, "mid": 100}
+  "x-style-defaults": {
+    "low": 75,
+    "mid": 100
+  }
 }
