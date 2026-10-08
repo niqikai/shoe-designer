@@ -114,14 +114,80 @@ class ParameterTests(unittest.TestCase):
                 with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                     normalize_params({key: value})
 
+    def test_m2_design_receives_m3_defaults_without_changing_geometry(self):
+        legacy = json.loads((ROOT / "designs/history/v002.json").read_text(encoding="utf-8"))
+        self.assertNotIn("print_process", legacy)
+        params, warnings = normalize_params(legacy)
+        self.assertEqual(warnings, [])
+        expected = {"print_process": "SLS", "material": "TPU", "tpu_shore_a": 90,
+                    "build_size_x_mm": 250, "build_size_y_mm": 250,
+                    "build_size_z_mm": 250, "build_margin_mm": 2,
+                    "build_orientation": "auto"}
+        for key, value in expected.items():
+            self.assertEqual(params[key], value)
+        for key, value in legacy.items():
+            self.assertEqual(params[key], value)
+
+    def test_m3_numeric_bounds_clamp_with_chinese_messages(self):
+        bounds = {"tpu_shore_a": (70, 95), "build_size_x_mm": (100, 1000),
+                  "build_size_y_mm": (100, 1000), "build_size_z_mm": (100, 1000),
+                  "build_margin_mm": (0, 10)}
+        for key, (lower, upper) in bounds.items():
+            for requested, expected in ((-10, lower), (1001, upper)):
+                with self.subTest(key=key, requested=requested):
+                    params, warnings = normalize_params({key: requested})
+                    self.assertEqual(params[key], expected)
+                    self.assertEqual(len(warnings), 1)
+                    self.assertIn("已截断", warnings[0])
+                    self.assertEqual(normalize_params(params), (params, []))
+        self.assertIsInstance(normalize_params({"tpu_shore_a": 100})[0]["tpu_shore_a"], int)
+
+    def test_valid_m3_settings_are_preserved(self):
+        for process in ("SLS", "MJF", "FDM"):
+            for orientation in ("auto", "as_designed"):
+                values = {"print_process": process, "material": "TPU", "tpu_shore_a": 85,
+                          "build_size_x_mm": 320, "build_size_y_mm": 220.5,
+                          "build_size_z_mm": 200, "build_margin_mm": 3.5,
+                          "build_orientation": orientation}
+                params, warnings = normalize_params(values)
+                self.assertEqual(warnings, [])
+                for key, value in values.items():
+                    self.assertEqual(params[key], value)
+
+    def test_m3_bad_settings_are_rejected(self):
+        for values in ({"print_process": "sls"}, {"print_process": "SLA"},
+                       {"material": "PLA"}, {"tpu_shore_a": 90.0},
+                       {"tpu_shore_a": "90A"}, {"build_orientation": "scale_to_fit"},
+                       {"build_orientation": True}):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                normalize_params(values)
+        for key in ("tpu_shore_a", "build_size_x_mm", "build_size_y_mm",
+                    "build_size_z_mm", "build_margin_mm"):
+            for value in (math.nan, math.inf, -math.inf, True, "250", None):
+                with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                    normalize_params({key: value})
+
+    def test_m3_current_design_preserves_m2_shape_and_lattice(self):
+        previous = json.loads((ROOT / "designs/history/v002.json").read_text(encoding="utf-8"))
+        current = json.loads((ROOT / "designs/current.json").read_text(encoding="utf-8"))
+        self.assertEqual(previous["revision"], 2)
+        self.assertGreaterEqual(current["revision"], 3)
+        # This initial manufacturing-only revision must not resize the user's shoe.
+        if current["revision"] == 3:
+            for key, value in previous.items():
+                if key != "revision":
+                    self.assertEqual(current[key], value)
+
     def test_saved_design_and_history_are_valid(self):
         current = json.loads((ROOT / "designs/current.json").read_text(encoding="utf-8"))
         baseline = json.loads((ROOT / "designs/history/v000.json").read_text(encoding="utf-8"))
         m1 = json.loads((ROOT / "designs/history/v001.json").read_text(encoding="utf-8"))
+        m2 = json.loads((ROOT / "designs/history/v002.json").read_text(encoding="utf-8"))
         self.assertEqual(baseline["revision"], 0)
         self.assertEqual(m1["revision"], 1)
-        self.assertGreater(current["revision"], m1["revision"])
-        for values in (baseline, m1, current):
+        self.assertEqual(m2["revision"], 2)
+        self.assertGreater(current["revision"], m2["revision"])
+        for values in (baseline, m1, m2, current):
             params, warnings = normalize_params(values)
             self.assertEqual(warnings, [])
             self.assertEqual(params["schema_version"], 1)

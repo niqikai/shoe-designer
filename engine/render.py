@@ -171,3 +171,23 @@ def render_cutaway(obj, output_dir, lattice_name):
     finally:
         bpy.data.objects.remove(cut, do_unlink=True)
         bpy.data.meshes.remove(mesh)
+
+
+def render_thin_locations(obj, thickness, output_dir):
+    """Overlay diagnostic markers on a temporary render, never on exports."""
+    markers = []
+    red = material("thin_location_marker", (.9, .08, .025))
+    try:
+        for item in thickness.get("thin_examples", []):
+            bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=8, radius=2,
+                                                location=item["position_mm"])
+            marker = bpy.context.object
+            marker.data.materials.append(red)
+            markers.append(marker)
+        return render_views([obj, *markers], obj, output_dir, "thin", "M3 | THIN EDGE LOCATIONS",
+                            views=("side", "iso"), footer=f"RED = {len(markers)} OF {thickness['thin_sample_count']} THIN SAMPLES | MARKERS ONLY")
+    finally:
+        for marker in markers:
+            mesh = marker.data
+            bpy.data.objects.remove(marker, do_unlink=True)
+            bpy.data.meshes.remove(mesh)

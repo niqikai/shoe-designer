@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "鞋设计参数（M2：分区晶格中底）",
-  "description": "支持 M1 实心整鞋和 M2 分区晶格中底。尺寸为毫米，尺码为待试穿验证的名义 EU 尺码。缺少的新参数由默认值补全，旧版 M0.5、M1 设计默认保留实心中底。晶格参数为几何设计控制，实际制造最小壁厚和力学表现仍需后续验证。",
+  "title": "鞋设计参数（M3：制造校验）",
+  "description": "支持 M1 实心整鞋、M2 分区晶格中底和 M3 制造校验设置。尺寸为毫米，尺码为待试穿验证的名义 EU 尺码。缺少的新参数由默认值补全，旧版 M0.5、M1 设计默认保留实心中底。晶格参数是几何设计控制；工艺经验阈值和几何检查不能代替指定设备、材料及试样验证。",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -127,7 +127,7 @@
       "default": 2.4,
       "title": "鞋面围条厚度",
       "x-unit": "mm",
-      "description": "鞋面围条从楦表面向外的目标厚度；制造最小壁厚仍需后续校验"
+      "description": "鞋面围条从楦表面向外的目标厚度；M3 另检查生成网格的制造厚度，参数值不等于实测最小厚度"
     },
     "midsole_structure": {
       "type": "string",
@@ -192,6 +192,80 @@
       "default": "preview",
       "title": "生成分辨率",
       "description": "preview 使用较低体素分辨率进行快速看图，export 使用较高体素分辨率生成导出候选；提高分辨率不替代制造校验"
+    },
+    "print_process": {
+      "type": "string",
+      "enum": [
+        "SLS",
+        "MJF",
+        "FDM"
+      ],
+      "default": "SLS",
+      "title": "打印工艺",
+      "description": "制造检查所用工艺；默认 SLS 是尚待供应商确认的假设。工艺经验最小壁厚／杆径为 SLS、MJF 1.2 mm，FDM 1.5 mm，由制造 profile 固定读取；切换工艺不保证设备支持或成品可打印"
+    },
+    "material": {
+      "type": "string",
+      "enum": [
+        "TPU"
+      ],
+      "default": "TPU",
+      "title": "打印材料",
+      "description": "当前仅支持 TPU 制造配置；具体牌号、设备兼容性和工艺参数仍需供应商确认"
+    },
+    "tpu_shore_a": {
+      "type": "integer",
+      "minimum": 70,
+      "maximum": 95,
+      "default": 90,
+      "title": "TPU 邵氏 A 硬度",
+      "description": "计划使用的材料标称硬度，Shore A 70–95 整数；默认 90。只记录材料选择，不改变几何，不据此推算整鞋柔软度或回弹"
+    },
+    "build_size_x_mm": {
+      "type": "number",
+      "minimum": 100,
+      "maximum": 1000,
+      "default": 250,
+      "title": "设备 X 向成型尺寸",
+      "x-unit": "mm",
+      "description": "设备 X 轴可用成型尺寸；默认 250 mm 为待确认假设，检验时再扣除两侧安全边距"
+    },
+    "build_size_y_mm": {
+      "type": "number",
+      "minimum": 100,
+      "maximum": 1000,
+      "default": 250,
+      "title": "设备 Y 向成型尺寸",
+      "x-unit": "mm",
+      "description": "设备 Y 轴可用成型尺寸；默认 250 mm 为待确认假设，检验时再扣除两侧安全边距"
+    },
+    "build_size_z_mm": {
+      "type": "number",
+      "minimum": 100,
+      "maximum": 1000,
+      "default": 250,
+      "title": "设备 Z 向成型尺寸",
+      "x-unit": "mm",
+      "description": "设备 Z 轴可用成型尺寸；默认 250 mm 为待确认假设，检验时再扣除两侧安全边距"
+    },
+    "build_margin_mm": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 2,
+      "title": "成型边距",
+      "x-unit": "mm",
+      "description": "默认 2 mm；有效尺寸为各轴成型尺寸减去两倍边距。XY 各侧保留该值；输出最低 Z=0，以便接触底板，Z 的两份余量均留在上方"
+    },
+    "build_orientation": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "as_designed"
+      ],
+      "default": "auto",
+      "title": "成型空间摆放",
+      "description": "auto 搜索可容纳整鞋的刚体摆放，as_designed 保持设计坐标轴进行包围盒检查；摆放建议只检验空间适配，不能替代支撑、热过程、排粉和表面质量评估，不改变 designs/current.json 的鞋型几何"
     }
   },
   "allOf": [

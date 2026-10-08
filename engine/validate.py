@@ -1,4 +1,4 @@
-"""M0.5 mesh health checks. Manufacturing checks are implemented in M3."""
+"""Mesh health and M3 manufacturing export decisions."""
 import bmesh
 import numpy as np
 from mathutils.bvhtree import BVHTree
@@ -187,3 +187,23 @@ def require_healthy(mesh, label):
     if report["status"] != "pass":
         raise ValueError(f"{label} 未通过网格健康检查，已停止保存和导出：{report}")
     return report
+
+
+def validate_manufacturing(mesh, params, health, measured):
+    """Combine scoped checks; a failed or missing required check blocks export."""
+    from engine.manufacturing_pose import check_fdm_overhang, plan_build_pose
+    pose = plan_build_pose(coordinates(mesh), params)
+    overhang = (check_fdm_overhang(coordinates(mesh), triangles(mesh), pose)
+                if params["print_process"] == "FDM" else
+                {"status": "not_applicable", "message": "粉末工艺不使用 FDM 悬垂角规则；热变形与工艺朝向需打印方确认。"})
+    checks = {"mesh": health, "thickness": measured.get("thickness", {"status": "fail"}),
+              "powder_removal": measured.get("powder_removal", {"status": "fail"}),
+              "build_volume": pose, "overhang": overhang}
+    blockers = [key for key, check in checks.items() if check.get("status") not in ("pass", "warning", "not_applicable")]
+    warnings = [check["message"] for check in checks.values() if check.get("status") == "warning" and "message" in check]
+    warnings.append("尚未指定实际 TPU 牌号、设备与打印配置；本报告只按项目经验规则筛查，制造前须由打印方确认并试印局部样件。")
+    return {**measured, "status": "fail" if blockers else "warning", "export_allowed": not blockers,
+            "blockers": blockers, "warnings": warnings, "build_volume": pose, "overhang": overhang,
+            "summary": ("必要制造检查未通过，本轮不导出打印网格。" if blockers else
+                        "项目自动几何筛查通过，可导出带制造警告的候选；尚未获得具体工艺认证。"),
+            "export_policy": "no STL/GLB on any required fail/missing check; scoped warnings accompany candidates"}
