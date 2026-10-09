@@ -1,4 +1,6 @@
-# M3 制造筛查报告
+# M3 制造筛查报告（v003 历史记录）
+
+后续 v004 修复已通过项目必要几何检查，见 [M3 收口修复报告](M3_REPAIR_REPORT.md)。以下保留 v003 原始失败结论，输出目录已归档为 `out/m3-v003/` 与 `out/m3-export-v003/`。当前代码已移除补球循环；精确复现 v003 算法需使用 Git 提交 `1348660`。
 
 **工具实现与本轮验证完成；当前 v003 Gyroid 设计未通过制造门槛，已阻止打印导出。** 用户确认 SLS，TPU 90A 和 250 × 250 × 250 mm 空间暂为可配置的工程假设。保留右脚、低帮 75 mm 与全部 M2 外形／晶格输入，v002 参数已逐字节备份。M4 尚未进入。
 
@@ -57,7 +59,7 @@
 
 日志在本机 `out/m3-params-tests.log`、`out/m3-pose-tests.log`、`out/m3-manufacturing-tests.log`、`out/m3-integration-tests.log`、`out/m3-lattice-regression.log`。原 ZIP 与 `raw/` 的生成前后哈希一致；`assets/`、`out/` 保持 Git 忽略。
 
-复现当前失败诊断（退出码 2 为预期结果）：
+在 Git 提交 `1348660` 下复现历史失败诊断（退出码 2 为预期结果）：
 
 ```sh
 tools/run.sh designs/current.json
@@ -68,9 +70,9 @@ tools/run.sh designs/current.json --out out/m3-export --voxel-mm 0.5
 
 ## 查看结果与后续
 
-- [预览薄点图](../out/m3/thin_locations.png)、[高精度薄点图](../out/m3-export/thin_locations.png)。
-- [高精度四视角](../out/m3-export/four_views.png)、[剖视图](../out/m3-export/cutaway.png)、[构建空间图](../out/m3-export/previews/build_iso.png)。
-- [预览 JSON](../out/m3/report.json)、[高精度 JSON](../out/m3-export/report.json)、[中文生成报告](../out/m3-export/manufacturing_report.md)。
+- [预览薄点图](../out/m3-v003/thin_locations.png)、[高精度薄点图](../out/m3-export-v003/thin_locations.png)。
+- [高精度四视角](../out/m3-export-v003/four_views.png)、[剖视图](../out/m3-export-v003/cutaway.png)、[构建空间图](../out/m3-export-v003/previews/build_iso.png)。
+- [预览 JSON](../out/m3-v003/report.json)、[高精度 JSON](../out/m3-export-v003/report.json)、[中文生成报告](../out/m3-export-v003/manufacturing_report.md)。
 
 建议下一步在保留 Gyroid 的基础上修改裁切末端／连续边缘连接，再重新完成 M3；也可比较其他晶格或实心方案，但它们必须独立通过相同检查。完成必要检查后，再打印脚跟局部试样验证实际清粉、壁厚偏差和反复压缩表现。当前不承诺回弹、重量、舒适度或稳定性。
 

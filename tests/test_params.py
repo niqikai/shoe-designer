@@ -142,6 +142,49 @@ class ParameterTests(unittest.TestCase):
                     self.assertEqual(normalize_params(params), (params, []))
         self.assertIsInstance(normalize_params({"tpu_shore_a": 100})[0]["tpu_shore_a"], int)
 
+    def test_legacy_designs_leave_boundary_rounding_disabled(self):
+        for revision in ("v000", "v001", "v002"):
+            legacy = json.loads((ROOT / "designs/history" / f"{revision}.json").read_text(encoding="utf-8"))
+            self.assertNotIn("boundary_rounding_mm", legacy)
+            params, warnings = normalize_params(legacy)
+            self.assertEqual(params["boundary_rounding_mm"], 0)
+            self.assertEqual(warnings, [])
+
+    def test_boundary_rounding_numeric_bounds_and_valid_values(self):
+        for requested, expected, warning_count in ((-1, 0, 1), (2, 1.5, 1),
+                                                    (0, 0, 0), (1.2, 1.2, 0),
+                                                    (1.5, 1.5, 0)):
+            with self.subTest(requested=requested):
+                params, warnings = normalize_params({"boundary_rounding_mm": requested,
+                                                     "upper_thickness_mm": 4})
+                self.assertEqual(params["boundary_rounding_mm"], expected)
+                self.assertEqual(len(warnings), warning_count)
+                if warnings:
+                    self.assertIn("边缘收口半径", warnings[0])
+                    self.assertIn("已截断", warnings[0])
+                self.assertEqual(normalize_params(params), (params, []))
+
+    def test_boundary_rounding_is_limited_by_effective_upper_thickness(self):
+        for wall, radius, expected, warning_count in ((2.4, 1.5, 1.2, 1),
+                                                     (1.8, 1.2, .9, 1),
+                                                     (1, 1.5, .9, 2),
+                                                     (2.4, 1.2, 1.2, 0)):
+            with self.subTest(wall=wall, radius=radius):
+                values = {"upper_thickness_mm": wall, "boundary_rounding_mm": radius}
+                params, warnings = normalize_params(values)
+                self.assertEqual(params["boundary_rounding_mm"], expected)
+                self.assertEqual(len(warnings), warning_count)
+                if warnings:
+                    self.assertIn("鞋面围条厚度的一半", warnings[-1])
+                    self.assertIn("已截断", warnings[-1])
+                self.assertEqual(normalize_params(params), (params, []))
+                self.assertEqual(values["boundary_rounding_mm"], radius)
+
+    def test_boundary_rounding_rejects_non_finite_and_wrong_types(self):
+        for value in (math.nan, math.inf, -math.inf, True, False, "1.2", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                normalize_params({"boundary_rounding_mm": value})
+
     def test_valid_m3_settings_are_preserved(self):
         for process in ("SLS", "MJF", "FDM"):
             for orientation in ("auto", "as_designed"):

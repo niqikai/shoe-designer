@@ -62,6 +62,16 @@ def normalize_params(values):
         else:
             unit = " " + spec["x-unit"] if "x-unit" in spec else ""
             warnings.append(f"{spec.get('title', key)} {original:g}{unit} 超出允许范围，已截断为 {effective:g}{unit}。")
+    # Use the effective wall thickness after its own range clamp, so reloading an
+    # effective design is stable and never asks for an impossible lip radius.
+    rounding_limit = result["upper_thickness_mm"] / 2
+    if result["boundary_rounding_mm"] > rounding_limit:
+        original = result["boundary_rounding_mm"]
+        result["boundary_rounding_mm"] = rounding_limit
+        warnings.append(
+            f"边缘收口半径 {original:g} mm 超过有效鞋面围条厚度的一半，"
+            f"已截断为 {rounding_limit:g} mm。"
+        )
     return result, warnings
 
 

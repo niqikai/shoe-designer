@@ -15,8 +15,9 @@ import numpy as np
 from mathutils import Matrix
 
 from engine.params import load_params, normalize_params
-from engine.manufacturing import check_powder_paths, measure_thickness, process_profile, reinforce_thin_edges
+from engine.manufacturing import check_powder_paths, measure_thickness, process_profile
 from engine.render import contact_sheet, material, render_cutaway, render_thin_locations, render_views, VIEWS
+from engine.shoe.edge_finish import round_material_edges, smooth_finished_surface
 from engine.shoe.features import extract_features
 from engine.shoe.last import cut_last, deform_last, load_last, source_manifest
 from engine.shoe.lattice import clean_lattice_field, inspect_voids, lattice_midsole
@@ -110,6 +111,11 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
     del sole, shell
     if is_lattice:
         lattice_info["field_cleanup"] = clean_lattice_field(field, voxel_mm)
+    edge_finish = round_material_edges(field, (x, y, z), maps["top"],
+                                       effective["collar_height_mm"], effective["boundary_rounding_mm"])
+    if is_lattice:
+        if edge_finish["enabled"]:
+            edge_finish["cleanup"] = clean_lattice_field(field, voxel_mm)
         length = features["dimensions_mm"]["length"]
         for zone, lo, hi in (("heel", -np.inf, .30), ("arch", .30, .60), ("forefoot", .60, np.inf)):
             mask = core_mask & ((y >= lo * length) & (y < hi * length))[None, :, None]
@@ -124,40 +130,21 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
         if lattice_info["void_connectivity"]["trapped_core_void_voxels"]:
             warnings.append("采样发现部分内部空隙尚未连通外界；排粉／排料通道及制造适配留待 M3，当前不作可打印承诺。")
     mesh = mesh_from_field(field, (x[0], y[0], z[0]), voxel_mm, "shoe_right_mesh")
+    surface_displacement = 0.0
+    if edge_finish["enabled"]:
+        mesh, edge_finish["surface_smoothing"] = smooth_finished_surface(mesh, (x, y, z), maps["top"], effective["collar_height_mm"])
+        surface_displacement = edge_finish["surface_smoothing"]["max_surface_displacement_mm"]
     manufacturing_info = None
     if manufacturing:
         profile = process_profile(effective)
         minimum = profile["minimum_wall_mm"]
-        thickness, thin = measure_thickness(mesh, minimum)
-        repair_history = []
-        initial_thickness = thickness
-        for attempt in range(3):
-            if not thin or not is_lattice:
-                break
-            repair = reinforce_thin_edges(field, (x, y, z), thin, minimum, maps["top"])
-            if not repair["sphere_count"]:
-                break
-            repair["cleanup"] = clean_lattice_field(field, voxel_mm)
-            repair_history.append(repair)
-            bpy.data.meshes.remove(mesh)
-            mesh = mesh_from_field(field, (x[0], y[0], z[0]), voxel_mm, "shoe_right_mesh")
-            thickness, thin = measure_thickness(mesh, minimum)
-            print(f"M3: thickness repair {attempt + 1}, {thickness['thin_sample_count']} thin samples remain", flush=True)
+        thickness, _ = measure_thickness(mesh, minimum, samples=192000 if edge_finish["enabled"] else 24000)
         powder = {"status": "not_applicable", "message": "实心中底或非粉末工艺，不启用晶格排粉检查。"}
         if is_lattice and effective["print_process"] in ("SLS", "MJF"):
-            powder = check_powder_paths(field, envelope_mask, core_mask, (x, y, z))
+            powder = check_powder_paths(field, envelope_mask, core_mask, (x, y, z), surface_displacement_mm=surface_displacement)
         manufacturing_info = {"profile": profile, "thickness": thickness,
-                              "initial_thickness": initial_thickness,
-                              "auto_repairs": repair_history, "powder_removal": powder,
+                              "powder_removal": powder,
                               "measurement_frame": "right design basis before optional X mirror"}
-        if is_lattice:
-            # Recompute geometry statistics after any local manufacturing repair.
-            for zone, lo, hi in (("heel", -np.inf, .30), ("arch", .30, .60), ("forefoot", .60, np.inf)):
-                mask = core_mask & ((y >= lo * length) & (y < hi * length))[None, :, None]
-                lattice_info["zone_core_sampling"][zone]["cropped_core_material_fraction"] = float(np.count_nonzero((field < 0) & mask) / mask.sum()) if mask.any() else None
-            lattice_info["void_connectivity"] = inspect_voids(field, core_mask, voxel_mm)
-            lattice_info["lattice_sample_volume_mm3"] = int(np.count_nonzero(field < 0)) * voxel_mm ** 3
-            lattice_info["sampled_material_reduction_fraction"] = 1 - lattice_info["lattice_sample_volume_mm3"] / solid_sample_volume
     del field, envelope_mask
     if is_lattice:
         del core_mask
@@ -199,7 +186,7 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
             # Position diagnostics follow the actual shoe's design coordinate frame.
             for item in manufacturing_info["powder_removal"].get("exit_examples", []):
                 item["centre_mm"][0] *= -1
-            for diagnostic in {id(value): value for value in (manufacturing_info["thickness"], manufacturing_info["initial_thickness"])}.values():
+            for diagnostic in (manufacturing_info["thickness"],):
                 for item in diagnostic.get("thin_examples", []):
                     for key in ("position_mm", "opposite_mm", "midpoint_mm", "normal"):
                         item[key][0] *= -1
@@ -215,7 +202,7 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
               "deformation": deformation, "deformed_last_health": last_health,
               "deformed_last_health_frame": "right basis before optional X reflection", "mesh_health": health,
               "voxel_mm": voxel_mm, "resolution": effective["resolution"], "lattice": lattice_info,
-              "grid_shape": [len(x), len(y), len(z)], "upper": shell_info,
+              "grid_shape": [len(x), len(y), len(z)], "upper": shell_info, "edge_finish": edge_finish,
               "sole": {"outsole_base_mm": 3, "flare_mm": effective["outsole_flare_mm"],
                        "edge_radius_mm": effective["edge_radius_mm"], "effective_radius_range_mm": radius_range, "anchors": maps["anchors"],
                        "bottom_anchor_z_mm": maps["bottom_anchor_z_mm"],
@@ -321,6 +308,9 @@ def run(params_path, output, *, voxel_mm=None, render=True):
         for suffix in ("", "_print"):
             for extension in ("stl", "glb"):
                 (output / f"shoe_{foot}{suffix}.{extension}").unlink(missing_ok=True)
+    # A passing rerun must not leave the previous failed candidate's markers.
+    for diagnostic in ("thin_locations.png", "previews/thin_side.png", "previews/thin_iso.png"):
+        (output / diagnostic).unlink(missing_ok=True)
     effective, warnings = load_params(params_path)
     stage = "M3"
     write_json(output / "report.json", {"stage": stage, "status": "running"})

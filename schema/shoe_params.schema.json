@@ -129,6 +129,15 @@
       "x-unit": "mm",
       "description": "鞋面围条从楦表面向外的目标厚度；M3 另检查生成网格的制造厚度，参数值不等于实测最小厚度"
     },
+    "boundary_rounding_mm": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1.5,
+      "default": 0,
+      "title": "边缘收口半径",
+      "x-unit": "mm",
+      "description": "连续形态学收口的控制半径，0 保留原始裁切，正值处理中底自由末端与鞋口边沿并保留楦底接触曲面；范围 0–1.5 mm，且不超过有效 upper_thickness_mm 的一半。控制值不等于已验证的最小壁厚或曲率半径，仍须通过制造校验"
+    },
     "midsole_structure": {
       "type": "string",
       "enum": [

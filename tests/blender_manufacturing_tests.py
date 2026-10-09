@@ -1,6 +1,7 @@
-"""M3 thickness, finite powder paths, repair and fail-closed export tests."""
+"""M3 thickness, continuous edge finishing, powder paths and export gate tests."""
 from pathlib import Path
 import json
+import math
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -13,9 +14,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from engine.build import run
-from engine.manufacturing import check_powder_paths, measure_thickness, process_profile, reinforce_thin_edges
+from engine.manufacturing import check_powder_paths, measure_thickness, process_profile
 from engine.params import normalize_params
-from engine.validate import mesh_health, validate_manufacturing
+from engine.shoe.edge_finish import round_material_edges, smooth_finished_surface
+from engine.shoe.volume import mesh_from_field
+from engine.validate import coordinates, mesh_health, triangles, validate_manufacturing
 
 
 def box_mesh(dimensions):
@@ -97,18 +100,108 @@ class PowderPathTests(unittest.TestCase):
         self.assertEqual(result['detected_separate_exit_count'],0)
         self.assertGreater(result['unreachable_wide_core_centres'],0)
 
-    def test_reinforcement_is_local_and_protects_foot_contact_surface(self):
-        axis=np.arange(-5,5.01,.5)
-        x,y,z=axis[:,None,None],axis[None,:,None],axis[None,None,:]
-        field=np.maximum(np.maximum(abs(x)-4,abs(y)-4),abs(z)-.3).astype(np.float32)
-        before=field.copy()
-        stats=reinforce_thin_edges(field,(axis,axis,axis),[{'midpoint_mm':[0,0,0]}],1.2,np.ones((len(axis),len(axis)))*4)
-        self.assertGreater(stats['added_material_mm3'],0)
-        np.testing.assert_array_equal(field[:3],before[:3])
-        protected=before.copy()
-        stats=reinforce_thin_edges(protected,(axis,axis,axis),[{'midpoint_mm':[0,0,0]}],1.2,np.ones((len(axis),len(axis))))
-        self.assertEqual(stats['sphere_count'],0)
-        np.testing.assert_array_equal(protected,before)
+    def test_surface_displacement_reserves_extra_clearance(self):
+        fixture = self.fixture(4)
+        self.assertEqual(check_powder_paths(*fixture)['detected_separate_exit_count'], 2)
+        result = check_powder_paths(*fixture, surface_displacement_mm=3)
+        self.assertEqual(result['status'], 'fail')
+        self.assertEqual(result['detected_separate_exit_count'], 0)
+        self.assertEqual(result['surface_displacement_guard_mm'], 3)
+        self.assertAlmostEqual(result['clearance_guard_mm'], math.sqrt(3) * .5 + 3)
+
+    def test_invalid_surface_displacement_is_rejected(self):
+        fixture = self.fixture(4)
+        for displacement in (-.1, math.nan, math.inf, -math.inf):
+            with self.subTest(displacement=displacement), self.assertRaises(ValueError):
+                check_powder_paths(*fixture, surface_displacement_mm=displacement)
+
+
+class EdgeFinishTests(unittest.TestCase):
+    def fixture(self, *, wedge=False, plantar=False):
+        # A wedge represents a clipped sheet whose end tapers to zero thickness.
+        # The separate 3 mm slab is an already adequate, connected control.
+        axis = np.arange(-8, 8.01, .25)
+        x, y, z = axis[:, None, None], axis[None, :, None], axis[None, None, :]
+        half_height = 1.5 - .3 * x if wedge else 1.5
+        vertical = abs(z + 1.5) - 1.5 if plantar else abs(z) - half_height
+        field = np.maximum(np.maximum(abs(x) - 5, abs(y) - 4), vertical).astype(np.float32)
+        top_map = np.full((len(axis), len(axis)), 0.0 if plantar else 20.0)
+        return field, (axis, axis, axis), top_map
+
+    def extract(self, field, axes, name):
+        return mesh_from_field(field, tuple(axis[0] for axis in axes), .25, name)
+
+    def test_zero_radius_preserves_field_exactly(self):
+        field, axes, top_map = self.fixture(wedge=True)
+        before = field.copy()
+        info = round_material_edges(field, axes, top_map, 50, 0)
+        self.assertFalse(info['enabled'])
+        np.testing.assert_array_equal(field, before)
+
+    def test_clipped_sliver_fails_then_rounded_fixture_passes(self):
+        field, axes, top_map = self.fixture(wedge=True)
+        mesh = self.extract(field, axes, 'thin_wedge')
+        try:
+            initial, _ = measure_thickness(mesh, 1.2, samples=6000)
+            self.assertEqual(initial['status'], 'fail')
+            self.assertGreater(initial['thin_sample_count'], 0)
+        finally:
+            bpy.data.meshes.remove(mesh)
+        info = round_material_edges(field, axes, top_map, 50, 1.2)
+        self.assertGreater(info['removed_material_mm3'], 0)
+        mesh = self.extract(field, axes, 'rounded_wedge')
+        mesh, _ = smooth_finished_surface(mesh, axes, top_map, 50)
+        try:
+            final, _ = measure_thickness(mesh, 1.2, samples=6000)
+            self.assertEqual(final['status'], 'pass')
+            self.assertEqual(final['thin_sample_count'], 0)
+            self.assertEqual(final['missing_samples'], 0)
+            self.assertEqual(mesh_health(mesh)['status'], 'pass')
+        finally:
+            bpy.data.meshes.remove(mesh)
+
+    def test_adequate_slab_stays_connected_and_thick_enough(self):
+        field, axes, top_map = self.fixture()
+        round_material_edges(field, axes, top_map, 50, 1.2)
+        mesh = self.extract(field, axes, 'rounded_slab')
+        mesh, _ = smooth_finished_surface(mesh, axes, top_map, 50)
+        try:
+            health = mesh_health(mesh)
+            self.assertEqual(health['status'], 'pass')
+            self.assertEqual(health['connected_components'], 1)
+            self.assertEqual(measure_thickness(mesh, 1.2, samples=6000)[0]['status'], 'pass')
+        finally:
+            bpy.data.meshes.remove(mesh)
+
+    def test_plantar_field_and_protected_vertices_are_unchanged(self):
+        field, axes, top_map = self.fixture(plantar=True)
+        before = field.copy()
+        height = axes[2]
+        protected_field = (height >= -1) & (height <= 50 - 4)
+        round_material_edges(field, axes, top_map, 50, 1.2)
+        np.testing.assert_array_equal(field[:, :, protected_field], before[:, :, protected_field])
+        self.assertTrue(np.any(field[:, :, ~protected_field] != before[:, :, ~protected_field]))
+        mesh = self.extract(field, axes, 'protected_slab')
+        points = coordinates(mesh)
+        faces = triangles(mesh).copy()
+        protected_vertices = (points[:, 2] >= -1) & (points[:, 2] <= 50 - 4)
+        self.assertGreater(np.count_nonzero(protected_vertices), 0)
+        mesh, info = smooth_finished_surface(mesh, axes, top_map, 50)
+        try:
+            after = coordinates(mesh)
+            np.testing.assert_array_equal(after[protected_vertices], points[protected_vertices])
+            np.testing.assert_array_equal(triangles(mesh), faces)
+            self.assertEqual(len(after), len(points))
+            self.assertEqual(info['protected_max_displacement_mm'], 0)
+            self.assertGreater(info['max_surface_displacement_mm'], 0)
+        finally:
+            bpy.data.meshes.remove(mesh)
+
+    def test_invalid_rounding_radius_is_rejected(self):
+        field, axes, top_map = self.fixture()
+        for radius in (-.1, math.nan, math.inf, -math.inf):
+            with self.subTest(radius=radius), self.assertRaises(ValueError):
+                round_material_edges(field.copy(), axes, top_map, 50, radius)
 
 
 class ManufacturingGateTests(unittest.TestCase):
@@ -140,9 +233,15 @@ class ManufacturingGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             stale=Path(folder)/'shoe_right.stl'
             stale.write_text('old output')
+            old_diagnostics=[Path(folder)/name for name in
+                             ('thin_locations.png','previews/thin_side.png','previews/thin_iso.png')]
+            for diagnostic in old_diagnostics:
+                diagnostic.parent.mkdir(exist_ok=True)
+                diagnostic.write_text('old thin-point diagnostic')
             with patch('engine.build.build_shoe',return_value=built),patch('engine.build.source_manifest',return_value={'test':'unchanged'}),patch('engine.build.export_shoe',side_effect=AssertionError('must not export')):
                 report=run(ROOT/'designs/current.json',folder,render=False)
             self.assertFalse(stale.exists())
+            self.assertTrue(all(not path.exists() for path in old_diagnostics))
             self.assertEqual(report['exports'],{})
             self.assertEqual(json.loads((Path(folder)/'report.json').read_text())['manufacturing']['blockers'],['thickness'])
             self.assertTrue((Path(folder)/'manufacturing_report.md').exists())

@@ -71,55 +71,20 @@ def measure_thickness(mesh, minimum_mm, *, samples=24000):
     return report, thin
 
 
-def reinforce_thin_edges(field, axes, thin, minimum_mm, top_map):
-    """Union bounded local spheres around measured midsole slivers only.
-
-    Foot-contact surface and upper are protected. The generated-field change
-    is measured and reported; unrepairable points remain export blockers.
-    """
-    from engine.shoe.volume import sample_map
-    spacing = float(axes[0][1] - axes[0][0])
-    radius = max(minimum_mm * 1.25, spacing * 2.0)
-    centres = np.asarray([sample["midpoint_mm"] for sample in thin], dtype=float).reshape(-1, 3)
-    if not len(centres):
-        return {"sphere_count": 0, "added_material_mm3": 0.0, "radius_mm": radius}
-    _, unique = np.unique(np.round(centres / (spacing * .75)).astype(int), axis=0, return_index=True)
-    centres = centres[np.sort(unique)]
-    roofs = sample_map(top_map, centres[:, :2], (axes[0][0], axes[1][0]), spacing)
-    allowed = centres[:, 2] + radius < roofs - .25
-    before = int(np.count_nonzero(field < 0))
-    applied = 0
-    for centre in centres[allowed]:
-        slices = [slice(max(0, int(np.searchsorted(axis, c - radius - spacing))),
-                        min(len(axis), int(np.searchsorted(axis, c + radius + spacing)) + 1))
-                  for axis, c in zip(axes, centre)]
-        local = [axis[index] - c for axis, index, c in zip(axes, slices, centre)]
-        sphere = np.sqrt(local[0][:, None, None] ** 2 + local[1][None, :, None] ** 2 + local[2][None, None, :] ** 2) - radius
-        # Protect the footbed at every XY grid location, not just at the
-        # sphere centre, because the plantar roof is curved.
-        roof = top_map[slices[0], slices[1]][:, :, None]
-        np.maximum(sphere, axes[2][slices[2]][None, None, :] - roof + .25, out=sphere)
-        window = tuple(slices)
-        np.minimum(field[window], sphere, out=field[window])
-        applied += 1
-    added = int(np.count_nonzero(field < 0)) - before
-    return {"sphere_count": applied, "protected_samples_skipped": int((~allowed).sum()),
-            "radius_mm": radius, "added_material_mm3": added * spacing ** 3,
-            "message": f"对 {applied} 处中底薄边增加局部圆滑补强，随后重新生成并测量；保护足底接触面。"}
-
-
-def check_powder_paths(field, envelope_mask, core_mask, axes, *, diameter_mm=4.0, required_exits=2):
+def check_powder_paths(field, envelope_mask, core_mask, axes, *, diameter_mm=4.0, required_exits=2, surface_displacement_mm=0.0):
     """Finite-clearance paths, not just zero-size flood-fill connectivity.
 
     The EDT guard accounts conservatively for a grid-cell diagonal. Opening
     centres must lie on the actual sole envelope, below the solid footbed.
     """
+    if not math.isfinite(surface_displacement_mm) or surface_displacement_mm < 0:
+        raise ValueError("表面位移留量必须是非负有限数值。")
     geometry_dependencies()
     from scipy.ndimage import binary_erosion, binary_propagation, distance_transform_edt, generate_binary_structure, label, find_objects
     spacing = float(axes[0][1] - axes[0][0])
     void = field > 0
     distances = distance_transform_edt(void, sampling=spacing)
-    guard = math.sqrt(3) * spacing
+    guard = math.sqrt(3) * spacing + surface_displacement_mm
     safe = void & (distances >= diameter_mm / 2 + guard)
     seed = np.zeros(field.shape, dtype=bool)
     for axis in range(3):
@@ -157,8 +122,9 @@ def check_powder_paths(field, envelope_mask, core_mask, axes, *, diameter_mm=4.0
     return {"status": status, "required_exit_count": required_exits, "required_diameter_mm": diameter_mm,
             "detected_separate_exit_count": len(exits), "exit_examples": exits[:12],
             "grid_spacing_mm": spacing, "clearance_guard_mm": guard,
+            "surface_displacement_guard_mm": surface_displacement_mm,
             "wide_core_centres": wide_count, "unreachable_wide_core_centres": unreachable,
             "wide_core_reachable_fraction": (wide_count - unreachable) / wide_count if wide_count else None,
             "message": f"检测到 {len(exits)} 处相互分离、满足 {diameter_mm:g} mm 保守净空通路的中底出口；{unreachable} 个宽孔中心未通过此净空通路连到外界。",
-            "method": "EDT clearance minus sqrt(3)*spacing; six-neighbour eroded-void exterior flood; separate components on sole envelope",
+            "method": "EDT clearance minus sqrt(3)*spacing and maximum surface displacement; six-neighbour eroded-void exterior flood; separate components on sole envelope",
             "limitations": "finite grid and ideal spherical clearance; not actual powder-flow certification; vendor aperture requirements may be stricter"}

@@ -113,6 +113,9 @@ class LatticeShoeTests(unittest.TestCase):
     def test_all_three_topologies_are_connected_and_preserve_fit_surfaces(self):
         before = source_manifest()
         params, _ = load_params(ROOT / "designs/current.json")
+        # This is the historical M2 raw-field regression. The current Gyroid
+        # boundary finish is independently checked by the M3 integration suite.
+        params["boundary_rounding_mm"] = 0
         for kind in KINDS:
             with self.subTest(kind=kind):
                 built = build_shoe({**params, "lattice_type": kind})
@@ -195,6 +198,7 @@ class LatticeFineExportTests(unittest.TestCase):
 class LatticeBoundaryTests(unittest.TestCase):
     def test_thin_small_truss_and_large_gradient_sheet(self):
         params, _ = load_params(ROOT / "designs/current.json")
+        params["boundary_rounding_mm"] = 0  # Historical M2 extremes, before M3 finishing.
         cases = [
             {"size_eu": 35, "foot_width": "narrow", "collar_height_mm": 60,
              "heel_sole_mm": 12, "forefoot_sole_mm": 8, "upper_thickness_mm": 1.8,

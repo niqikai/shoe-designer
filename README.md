@@ -4,9 +4,9 @@
 
 目标是让没有建模经验的用户通过自然语言调整鞋款，由 JSON 参数驱动 Blender 无头生成、校验、导出和渲染。
 
-当前阶段：**M3 制造筛查已实现，当前 Gyroid 设计尚未通过壁厚门槛，打印导出已阻止。** 右脚、低帮 75 mm 的外形与 M2 参数仍是设计基准；新增 SLS／MJF／FDM、TPU 硬度、设备空间和摆放参数。默认 SLS 已由用户确认。M3 检查的是最终生成网格，发现 M2 中名义 2 mm 晶格在侧边裁切处存在更薄的末端；有限局部补强后仍有剩余问题。
+当前阶段：**v004 Gyroid 已通过 M3 项目必要几何门槛，保留排粉通路与材料设备警告，等待看图验收；M4 尚未进入。** 当前为右脚、低帮 75 mm、SLS。连续边缘收口替代按薄点补球，保留足底接触面；高精度候选已生成。
 
-本阶段实测见 [M3 制造筛查报告](docs/M3_REPORT.md)，规则及厂商差异见 [材料与制造依据](docs/materials.md)。此前成果保存在 [M2 报告](docs/M2_REPORT.md)、[M1 报告](docs/M1_REPORT.md)、[M0 开工检查](docs/M0_CHECK.md) 和 [M0.5 鞋楦报告](docs/M0_5_REPORT.md)。
+本轮实测见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
 
 素材保存在本机 `assets/last/`；原 ZIP 及 `raw/` 解压文件已设为只读。`assets/`、`out/` 均被 Git 忽略。
 
@@ -23,14 +23,14 @@ tools/run.sh designs/current.json
 
 默认在 `out/m3/` 生成：
 
-- `shoe_right.stl`、`shoe_right.glb`：只有必要检查通过时生成的设计姿态候选；`shoe_right_print.stl/.glb` 使用已核验的设备摆放姿态。STL 坐标为毫米，GLB 按标准转换为米。左脚对应 `shoe_left*`。当前设计失败，因此本轮不生成这些文件。
+- `shoe_right.stl`、`shoe_right.glb`：只有必要检查通过时生成的设计姿态候选；`shoe_right_print.stl/.glb` 使用已核验的设备摆放姿态。STL 坐标为毫米，GLB 按标准转换为米。左脚对应 `shoe_left*`。当前候选通过项目门槛；实际打印建议使用高精度目录 `out/m3-export/` 中的 `_print.stl`，并由打印方复核。
 - `previews/shoe_side.png`、`shoe_top.png`、`shoe_front.png`、`shoe_iso.png` 与 `four_views.png`：四视角和拼图，附 50 mm 比例尺。
 - `cutaway.png`：侧面与斜视剖切拼图，用于观察晶格、实心顶层和足弓；剖切副本不导出。
 - `thin_locations.png`（检出薄边时）、`previews/build_iso.png`：红点标记最薄采样位置，以及设备空间内的推荐摆放。红点只供观察。
-- `report.json`、`manufacturing_report.md`：结构化与中文结果，包含壁厚、排粉净空、悬垂、设备空间、自动修复、导出门槛和限制。
+- `report.json`、`manufacturing_report.md`：结构化与中文结果，包含壁厚、排粉净空、悬垂、设备空间、连续收口、导出门槛和限制。
 - `features.json`、`effective_params.json`：形变后的特征与本次实际使用的参数。
 
-每次运行的 Blender 日志保存在 `out/logs/build-*.log`。制造检查未通过时保留诊断与预览，退出码为 2；运行错误退出码为 1。每次运行清除该输出目录下本工具命名的旧鞋 STL／GLB，防止误用旧文件。旧 M1／M2 目录中的历史导出不等于通过了 M3。
+每次运行的 Blender 日志保存在 `out/logs/build-*.log`。制造检查未通过时保留诊断与预览，退出码为 2；运行错误退出码为 1。每次运行清除该输出目录下本工具命名的旧鞋 STL／GLB 和薄点诊断图，防止误用旧文件。旧 M1／M2 目录中的历史导出不等于通过了 M3。
 
 输出目录和采样精度可显式指定：
 
@@ -38,7 +38,7 @@ tools/run.sh designs/current.json
 tools/run.sh designs/current.json --out out/m3-export --voxel-mm 0.5
 ```
 
-晶格 `resolution: preview` 默认间距 0.8 mm，`export` 为 0.5 mm。预览会随较小的杆径／片厚进一步细化，间距不超过该值的 1/2.5。命令行 `--voxel-mm` 支持 0.5–1 mm，同样受细节尺寸限制；实际间距以报告的 `voxel_mm` 为准。上例保持设计 JSON 不变，仅覆盖输出采样精度。更细采样会增加运行时间与内存；本机实测见 M3 报告。预览包含局部补强与制造检查约 30 秒，高精度档更慢；失败同样生成诊断预览。
+晶格 `resolution: preview` 默认间距 0.8 mm，`export` 为 0.5 mm。预览会随较小的杆径／片厚进一步细化，间距不超过该值的 1/2.5。命令行 `--voxel-mm` 支持 0.5–1 mm，同样受细节尺寸限制；实际间距以报告的 `voxel_mm` 为准。上例保持设计 JSON 不变，仅覆盖输出采样精度。更细采样会增加运行时间与内存；本机实测见 M3 收口修复报告；失败同样生成诊断预览。
 
 预览色区区分外底、晶格中底与鞋面；三者合并为单个封闭网格，颜色不代表多材料打印。M3 放行的 STL 仍是按项目规则筛查的候选，需按所选材料、设备和切片配置复核。**本鞋楦仅限非商业使用，不得分发。**
 
@@ -55,7 +55,7 @@ tools/run.sh designs/current.json --out out/m3-export --voxel-mm 0.5
 
 三个分区共享周期与相位，在分区边界附近平滑过渡。单胞目标密度不等于实际裁切后的密度；整鞋体积还包含固定实心顶层、外底和鞋面。默认顶层垂直厚度 2.4 mm，外底 3 mm。密度与厚度共同决定单胞大小，不能当作独立的软硬开关；解析厚度也不等于最终网格的实测最小壁厚，裁切端部和制造误差需在 M3 检查。
 
-当前为 v003。M2 的 v002 已逐字节备份到 `designs/history/v002.json`，此前 v000／v001 也保留。生成旧版实心外形并按当前 M3 规则检查：
+当前为 v004；v003 已逐字节备份到 `designs/history/v003.json`，此前 v000–v002 也保留。生成旧版实心外形并按当前 M3 规则检查：
 
 ```sh
 tools/run.sh designs/history/v001.json --out out/m1-review
@@ -72,14 +72,17 @@ tools/run.sh designs/history/v001.json --out out/m1-review
 | `build_size_x_mm/y_mm/z_mm` | 各 250 mm；各轴可配 100–1000 mm |
 | `build_margin_mm` | 2 mm；0–10 mm |
 | `build_orientation` | `auto` / `as_designed`；默认自动搜索 |
+| `boundary_rounding_mm` | 旧设计默认 0；0–1.5 mm，且不超过有效鞋面厚度的一半；当前 1.2 mm |
 
 项目壁／杆厚度下限：SLS／MJF 1.2 mm，FDM 1.5 mm；粉末工艺至少两处 4 mm 净空出口；FDM 悬垂经验阈值 45°。这些是筛查规则，不是通用材料认证。
 
-壁厚使用 24,000 个面积分层采样的向内法线射线，同时报告缺测与覆盖口径。晶格薄边最多尝试三轮局部圆滑补强，保护足底接触面；每轮重新生成、测量，结束后重新做网格检查。未能修复则失败，不能降低阈值放行。粉末通道采用带体素误差留量的有限半径连通检查，鞋口不算中底排粉孔；通道狭窄或材料厂商未确定时保留警告。
+连续收口从整个材料场的内距中心域重建圆滑边缘，并做受保护的表面平滑；足底顶面附近保持原场和原顶点。它会增减材料，实际体积和孔道必须重新测量；参数不是保证的最终圆角或制造厚度。半径 0 完全关闭此几何步骤，旧设计保留原始裁切，已移除失败点驱动的补球循环。
+
+启用收口时，最终网格使用 192,000 个面积分层向内法线射线；未启用时保留 24,000 次筛查。报告缺测和覆盖口径，任何检出薄点或缺测仍阻止导出。粉末通道的净空留量包含体素误差和表面平滑的最大位移；鞋口不算中底出口。有限采样不证明全局最薄值，通路狭窄或材料厂商未确定时保留警告。
 
 自动摆放优先水平旋转；SLS／MJF 必要时再搜索倾斜，FDM 保持底面朝下。每个放行姿态都用全部模型顶点重新检查。每轴预留两倍边距，XY 分配到两侧；最低 Z 保持 0，Z 的两份余量留在上方。输出 `_print` 文件才应用推荐旋转和平移，设计姿态文件及看图坐标保留。空间适配不证明支撑、热变形与排粉效果。
 
-任何必要检查失败或缺测均阻止打印导出；具体材料与设备尚未认证时，即使自动规则通过，总结仍保留警告。当前款的剩余薄边需要进一步处理，M4 尚未开始。
+任何必要检查失败或缺测均阻止打印导出；具体材料与设备尚未认证时，即使自动规则通过，总结仍保留警告。当前 v004 的必要检查已通过，实际清粉与制造仍需局部试样验证；看图验收后再决定是否进入 M4。
 
 ## 保留 M0.5 体检流程
 
@@ -99,7 +102,7 @@ tools/inspect_last.sh
 
 低帮 75 mm 已由用户确认，中帮 100 mm 保留为比较候选。高度均从规范化最低楦底基准计量，详细定义见 [设计说明](docs/design_notes.md)。`current_four_views.png` 对应当前参数的鞋楦裁切；M1 的整鞋预览位于 `out/m1/`。
 
-原始低模存在最大约 6.725 mm 双向采样偏差，后续正式造型使用高模；细节见报告。自交检测使用浮点 BVH，制造壁厚、排粉孔、悬垂、构建尺寸等检查留待 M3。
+原始低模存在最大约 6.725 mm 双向采样偏差，后续正式造型使用高模；细节见报告。自交检测使用浮点 BVH，制造壁厚、排粉孔、悬垂和构建尺寸已在 M3 增加独立筛查。
 
 早期受限 Codex 沙箱曾在 Metal 初始化时崩溃；本机终端与当前可访问图形驱动的无头环境已验证可运行。该环境记录保留在 M0 报告中。
 
@@ -116,6 +119,6 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python te
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_manufacturing_integration_tests.py
 ```
 
-几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 读取已保留的 M2 `out/m2-export/` 历史证据。M3 集成测试需先生成 `out/m3/`、`out/m3-export/` 诊断结果，另自动建立独立实心测试夹具验证成功导出。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。
+几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 读取已保留的 M2 `out/m2-export/` 历史证据。M3 集成测试需先生成当前 `out/m3/`、`out/m3-export/`；它会重导入精细 STL／GLB、独立做 384,000 次测厚及 9 点足底检查，另建立实心测试夹具。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。
 
 测试覆盖单位／轴向、OBJ/STL/GLB 往返、鞋口、足弓贴合、底厚、左右镜像、受控形变，以及晶格密度标定、连续相位、分区过渡、厚度与单胞关系、三种整鞋拓扑和精度对比。M1 `--stress` 增加四个边界组合，M2 `--stress` 增加两个组合；这些不代替 M5 的 1000 组随机测试。M3 另覆盖已知薄板／圆杆、缺测、单孔／双孔／窄通道、摆放、悬垂、导出阻断及打印姿态往返。测试结果及当前限制见 M3 报告。

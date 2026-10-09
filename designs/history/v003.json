@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "revision": 4,
+  "revision": 3,
   "foot_side": "right",
   "size_eu": 42,
   "foot_width": "standard",
@@ -27,6 +27,5 @@
   "build_size_y_mm": 250,
   "build_size_z_mm": 250,
   "build_margin_mm": 2,
-  "build_orientation": "auto",
-  "boundary_rounding_mm": 1.2
+  "build_orientation": "auto"
 }
