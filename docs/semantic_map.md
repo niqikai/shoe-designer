@@ -1,6 +1,6 @@
 # 自然语言与参数映射
 
-参数规则按里程碑上线。当前 M3 在 M1 整鞋造型和 M2 分区晶格中底上加入制造校验设置，几何由 `build_shoe(params)` 自动处理。下列没有明确数值的增量是对话默认解释，依据受限局部形变与渐进调整原则；用户明确数值优先，最终值按 schema 范围截断并说明。旧版设计省略 `midsole_structure` 时仍采用实心中底，只有显式选择 `lattice` 才启用晶格。
+参数规则按里程碑上线。M4 已在 M1 造型、M2 晶格和 M3 制造设置上提供本地口语命令，几何仍由 `build_shoe(params)` 自动处理。下列没有明确数值的增量是对话默认解释，依据受限局部形变与渐进调整原则；用户明确数值优先，最终值按 schema 范围截断并说明。旧版设计省略 `midsole_structure` 时仍采用实心中底，只有显式选择 `lattice` 才启用晶格。表格用于助手理解语义，命令直接识别的文字变体以末尾规则区为准；尚未登记的同义表达需补充规则或用 `--set` 明确参数。
 
 | 用户表达 | 参数修改 | 说明 |
 | --- | --- | --- |
@@ -67,3 +67,98 @@
 | 能否打印／制造检查 | 沿用当前制造设置并运行校验 | 说明当前工艺和设备假设、通过项与未通过项；数字几何校验不能替代供应商工艺确认和局部试样 |
 
 “更软一点”仍按上方的分区密度假设处理，只有明确提到 TPU 或材料硬度时才修改 `tpu_shore_a`，避免一次意图同时改变材料与几何。无法确认新工艺或材料时保留当前设计参数并说明所缺信息；不得把未知材料映射为 TPU。制造参数同样经 schema 默认值、类型校验和范围截断，修改前保留版本备份。
+
+## M4 本地口语规则
+
+`tools/apply_edit.py` 从下方规则区读取表达式和参数动作，上面的表提供人话解释，两者在同一文件维护。相对调整从当前有效值出发；多条要求按文字顺序执行，整轮再统一做范围和关联截断。长表达优先于它包含的短表达，避免“TPU 90A”被当成只有“TPU”。未知或否定表达不会只执行一半，工具会保留当前设计并说明尚未识别的部分；助手可明确解释后用 `--set`，新增规则须在此记录依据。数值支持阿拉伯数字和简单中文数字。
+
+“更圆一点”未明确部位时默认鞋头；“变红”“外底花纹”“3MF”等尚未实现的要求不会被吞掉。裸“更软一点”改晶格分区；明确“换更软的 TPU”才改材料硬度。回弹和透气只记录意图，不虚构可测性能。这些新增语句变体依据既有表中的渐进步长，并不扩展几何参数。
+
+| 版本操作 | 行为 |
+| --- | --- |
+| 撤销／撤销上一次修改 | 恢复上一项实际修改的父版本参数，生成递增新版本；连续撤销继续回退 |
+| 回到第 N 版／恢复 v### | 恢复指定历史有效参数，保留历史并生成新版本 |
+| 对比上一版 | 当前与上一物理版本比较参数及匹配预览，不运行 Blender |
+| 对比第 N 版和第 M 版 | 比较两版；缺失或损坏预览缓存时明确只比较参数 |
+
+版本号支持阿拉伯数字及简单中文数字，可写“回到第 四 版”。`--compare` 零参数表示上一版与当前，一参数表示指定版与当前，两参数指定两版；`--list` 只列出现有版本。版本号由工具管理，不能作为设计补丁传入。
+
+<!-- M4_RULES_START -->
+```json
+{
+  "filler_pattern": "设计(?:一双|一只)?|做(?:一双|一只)?|帮我|我(?:想要|要|想)|请|麻烦|然后|并且|以及|和|鞋子|这双鞋|一下|吧|的",
+  "rules": [
+    {"id": "size", "pattern": "(?:EU\\s*)?(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*码", "actions": [{"field": "size_eu", "op": "set", "value": {"group": "n"}}], "note": "尺码按名义 EU 解释，合脚程度需量脚和试穿确认。"},
+    {"id": "size_up", "pattern": "大(?:一|1)码", "actions": [{"field": "size_eu", "op": "add", "value": 1}]},
+    {"id": "size_down", "pattern": "小(?:一|1)码", "actions": [{"field": "size_eu", "op": "add", "value": -1}]},
+    {"id": "right_foot", "pattern": "右脚", "actions": [{"field": "foot_side", "op": "set", "value": "right"}]},
+    {"id": "left_foot", "pattern": "左脚", "actions": [{"field": "foot_side", "op": "set", "value": "left"}]},
+    {"id": "width_standard", "pattern": "标准脚宽", "actions": [{"field": "foot_width", "op": "set", "value": "standard"}]},
+    {"id": "width_narrow", "pattern": "窄脚", "actions": [{"field": "foot_width", "op": "set", "value": "narrow"}]},
+    {"id": "width_wide", "pattern": "宽脚", "actions": [{"field": "foot_width", "op": "set", "value": "wide"}]},
+    {"id": "wider", "pattern": "(?:脚(?:宽)?|鞋(?:子)?)?(?:再|更)?宽(?:一|1)?点", "actions": [{"field": "foot_width", "op": "step", "value": 1, "choices": ["narrow", "standard", "wide"]}]},
+    {"id": "narrower", "pattern": "(?:脚(?:宽)?|鞋(?:子)?)?(?:再|更)?窄(?:一|1)?点", "actions": [{"field": "foot_width", "op": "step", "value": -1, "choices": ["narrow", "standard", "wide"]}]},
+    {"id": "round_toe", "pattern": "圆头", "actions": [{"field": "toe_roundness", "op": "set", "value": 0.1}, {"field": "toe_height_scale", "op": "set", "value": 1.08}, {"field": "edge_radius_mm", "op": "set", "value": 3}], "note": "圆头同时调整鞋头圆度、高度和底缘圆角。"},
+    {"id": "rounder_toe", "pattern": "(?:鞋头)?(?:再|更)?圆(?:一|1)?点", "actions": [{"field": "toe_roundness", "op": "add", "value": 0.03}, {"field": "toe_height_scale", "op": "add", "value": 0.02}], "note": "未指定部位的“更圆一点”按鞋头解释。"},
+    {"id": "narrower_toe", "pattern": "鞋头(?:再|更)?收(?:一|1)?点", "actions": [{"field": "toe_roundness", "op": "add", "value": -0.03}]},
+    {"id": "toe_height_高", "pattern": "鞋头(?:再|更)?高(?:一|1)?点", "actions": [{"field": "toe_height_scale", "op": "add", "value": 0.05}]},
+    {"id": "toe_height_低", "pattern": "鞋头(?:再|更)?低(?:一|1)?点", "actions": [{"field": "toe_height_scale", "op": "add", "value": -0.05}]},
+    {"id": "collar_low", "pattern": "低帮", "actions": [{"field": "collar_style", "op": "set", "value": "low"}, {"field": "collar_height_mm", "op": "set", "value": 75}]},
+    {"id": "collar_mid", "pattern": "中帮", "actions": [{"field": "collar_style", "op": "set", "value": "mid"}, {"field": "collar_height_mm", "op": "set", "value": 100}]},
+    {"id": "collar_relative_提高", "pattern": "鞋口(?:再|更)?提高(?:一|1)?点", "actions": [{"field": "collar_height_mm", "op": "add", "value": 5}], "note": "仅调整鞋口高度，保持当前低帮／中帮款型。"},
+    {"id": "collar_relative_降低", "pattern": "鞋口(?:再|更)?降低(?:一|1)?点", "actions": [{"field": "collar_height_mm", "op": "add", "value": -5}], "note": "仅调整鞋口高度，保持当前低帮／中帮款型。"},
+    {"id": "collar_relative_高", "pattern": "鞋口(?:再|更)?高(?:一|1)?点", "actions": [{"field": "collar_height_mm", "op": "add", "value": 5}], "note": "仅调整鞋口高度，保持当前低帮／中帮款型。"},
+    {"id": "collar_relative_低", "pattern": "鞋口(?:再|更)?低(?:一|1)?点", "actions": [{"field": "collar_height_mm", "op": "add", "value": -5}], "note": "仅调整鞋口高度，保持当前低帮／中帮款型。"},
+    {"id": "collar_mm_提高", "pattern": "鞋口提高\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": "collar_height_mm", "op": "add", "value": {"group": "n", "scale": 1}}]},
+    {"id": "collar_mm_降低", "pattern": "鞋口降低\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": "collar_height_mm", "op": "add", "value": {"group": "n", "scale": -1}}]},
+    {"id": "collar_absolute", "pattern": "鞋口(?:高度)?(?:设为|改为|为|到)?\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": "collar_height_mm", "op": "set", "value": {"group": "n"}}]},
+    {"id": "thick_sole", "pattern": "厚底", "actions": [{"field": "heel_sole_mm", "op": "set", "value": 32}, {"field": "forefoot_sole_mm", "op": "set", "value": 24}]},
+    {"id": "sole_relative_厚", "pattern": "(?:鞋底)?(?:再|更)?厚(?:一|1)?点", "actions": [{"field": "heel_sole_mm", "op": "add", "value": 3}, {"field": "forefoot_sole_mm", "op": "add", "value": 3}]},
+    {"id": "sole_relative_薄", "pattern": "(?:鞋底)?(?:再|更)?薄(?:一|1)?点", "actions": [{"field": "heel_sole_mm", "op": "add", "value": -3}, {"field": "forefoot_sole_mm", "op": "add", "value": -3}]},
+    {"id": "sole_zone_加厚", "pattern": "(?P<zone>脚跟|前掌)加厚\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": {"group": "zone", "map": {"脚跟": "heel_sole_mm", "前掌": "forefoot_sole_mm"}}, "op": "add", "value": {"group": "n", "scale": 1}}]},
+    {"id": "sole_zone_减薄", "pattern": "(?P<zone>脚跟|前掌)减薄\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": {"group": "zone", "map": {"脚跟": "heel_sole_mm", "前掌": "forefoot_sole_mm"}}, "op": "add", "value": {"group": "n", "scale": -1}}]},
+    {"id": "sole_zone_absolute", "pattern": "(?P<zone>脚跟|前掌)(?:底厚|厚度)(?:设为|改为|为)?\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": {"group": "zone", "map": {"脚跟": "heel_sole_mm", "前掌": "forefoot_sole_mm"}}, "op": "set", "value": {"group": "n"}}]},
+    {"id": "edge_圆", "pattern": "底边(?:再|更)?圆(?:一|1)?点", "actions": [{"field": "edge_radius_mm", "op": "add", "value": 0.5}]},
+    {"id": "edge_利落", "pattern": "底边(?:再|更)?利落(?:一|1)?点", "actions": [{"field": "edge_radius_mm", "op": "add", "value": -0.5}]},
+    {"id": "finish", "pattern": "圆滑收口|去掉薄尖尾", "actions": [{"field": "boundary_rounding_mm", "op": "set", "value": 1.2}]},
+    {"id": "no_finish", "pattern": "恢复原始裁切|关闭边缘收口", "actions": [{"field": "boundary_rounding_mm", "op": "set", "value": 0}]},
+    {"id": "skate_sole", "pattern": "板鞋(?:底)?|鞋底宽一圈", "actions": [{"field": "outsole_flare_mm", "op": "set", "value": 6}]},
+    {"id": "flare_外扩", "pattern": "鞋底(?:再|更)?外扩(?:一|1)?点", "actions": [{"field": "outsole_flare_mm", "op": "add", "value": 1}]},
+    {"id": "flare_收", "pattern": "鞋底(?:再|更)?收(?:一|1)?点", "actions": [{"field": "outsole_flare_mm", "op": "add", "value": -1}]},
+    {"id": "upper_厚", "pattern": "鞋面(?:再|更)?厚(?:一|1)?点", "actions": [{"field": "upper_thickness_mm", "op": "add", "value": 0.3}]},
+    {"id": "upper_薄", "pattern": "鞋面(?:再|更)?薄(?:一|1)?点", "actions": [{"field": "upper_thickness_mm", "op": "add", "value": -0.3}]},
+    {"id": "lattice", "pattern": "晶格中底|镂空中底", "actions": [{"field": "midsole_structure", "op": "set", "value": "lattice"}]},
+    {"id": "solid", "pattern": "实心中底", "actions": [{"field": "midsole_structure", "op": "set", "value": "solid"}]},
+    {"id": "gyroid", "pattern": "Gyroid|螺旋曲面晶格", "actions": [{"field": "midsole_structure", "op": "set", "value": "lattice"}, {"field": "lattice_type", "op": "set", "value": "gyroid"}]},
+    {"id": "diamond", "pattern": "Diamond|钻石曲面晶格", "actions": [{"field": "midsole_structure", "op": "set", "value": "lattice"}, {"field": "lattice_type", "op": "set", "value": "diamond"}]},
+    {"id": "octet", "pattern": "Octet|八面体杆网", "actions": [{"field": "midsole_structure", "op": "set", "value": "lattice"}, {"field": "lattice_type", "op": "set", "value": "octet"}]},
+    {"id": "density", "pattern": "(?P<zone>脚跟|足弓|前掌)密度(?:设为|改为|为)?\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?P<pct>%|百分比)?", "actions": [{"field": {"group": "zone", "map": {"脚跟": "lattice_density_heel", "足弓": "lattice_density_arch", "前掌": "lattice_density_forefoot"}}, "op": "set", "value": {"group": "n", "percent_group": "pct"}}], "note": "这是周期单胞目标密度，实心中底时暂不影响几何。"},
+    {"id": "zone_疏", "pattern": "(?P<zone>脚跟|足弓|前掌)(?:再|更)?疏(?:一|1)?点", "actions": [{"field": {"group": "zone", "map": {"脚跟": "lattice_density_heel", "足弓": "lattice_density_arch", "前掌": "lattice_density_forefoot"}}, "op": "add", "value": -0.05}], "note": "分区调整只是几何设计假设；实际软硬、回弹和重量需局部试样确认。", "when": "lattice"},
+    {"id": "zone_密", "pattern": "(?P<zone>脚跟|足弓|前掌)(?:再|更)?密(?:一|1)?点", "actions": [{"field": {"group": "zone", "map": {"脚跟": "lattice_density_heel", "足弓": "lattice_density_arch", "前掌": "lattice_density_forefoot"}}, "op": "add", "value": 0.05}], "note": "分区调整只是几何设计假设；实际软硬、回弹和重量需局部试样确认。", "when": "lattice"},
+    {"id": "zone_软", "pattern": "(?P<zone>脚跟|足弓|前掌)(?:再|更)?软(?:一|1)?点", "actions": [{"field": {"group": "zone", "map": {"脚跟": "lattice_density_heel", "足弓": "lattice_density_arch", "前掌": "lattice_density_forefoot"}}, "op": "add", "value": -0.05}], "note": "分区调整只是几何设计假设；实际软硬、回弹和重量需局部试样确认。", "when": "lattice"},
+    {"id": "arch_support", "pattern": "足弓(?:再|更)?稳(?:一|1)?点|足弓更有支撑", "actions": [{"field": "lattice_density_arch", "op": "add", "value": 0.05}], "note": "增加足弓材料占比作为设计假设，不承诺稳定性。", "when": "lattice"},
+    {"id": "soft_or_light", "pattern": "(?:再|更)?(?:软|轻)(?:一|1)?点", "actions": [{"field": "lattice_density_heel", "op": "add", "value": -0.05}, {"field": "lattice_density_forefoot", "op": "add", "value": -0.05}], "note": "默认调整脚跟与前掌，保留足弓；只作设计倾向，建议打印局部样比较。", "when": "lattice"},
+    {"id": "stable", "pattern": "(?:再|更)?稳(?:一|1)?点", "actions": [{"field": "lattice_density_heel", "op": "add", "value": 0.05}, {"field": "lattice_density_arch", "op": "add", "value": 0.05}], "note": "默认调整脚跟和足弓；不承诺防扭或抗侧翻。", "when": "lattice"},
+    {"id": "rod_细", "pattern": "杆(?:径)?(?:再|更)?细(?:一|1)?点", "actions": [{"field": "lattice_rod_mm", "op": "add", "value": -0.2}], "note": "保持密度时，改变杆径／片厚尺度也会改变单胞大小。"},
+    {"id": "rod_粗", "pattern": "杆(?:径)?(?:再|更)?粗(?:一|1)?点", "actions": [{"field": "lattice_rod_mm", "op": "add", "value": 0.2}], "note": "保持密度时，改变杆径／片厚尺度也会改变单胞大小。"},
+    {"id": "preview", "pattern": "快速预览|先看效果", "actions": [{"field": "resolution", "op": "set", "value": "preview"}]},
+    {"id": "export", "pattern": "精细导出|导出打印文件|导出(?:STL|GLB)", "actions": [{"field": "resolution", "op": "set", "value": "export"}], "note": "高精度导出仍须通过必要制造检查；当前格式为 STL 和 GLB。"},
+    {"id": "rebound", "pattern": "回弹(?:再|更)?好|更有回弹", "actions": [], "note": "回弹没有可靠的单一参数方向，保留参数并记录意图；建议用局部试样测量。"},
+    {"id": "breathable", "pattern": "(?:再|更)?透气", "actions": [], "note": "中底孔隙不等于鞋内通风，本轮保留几何；透气设计需要单独明确鞋面方案。"},
+    {"id": "process_SLS", "pattern": "(?:用\\s*)?SLS(?:\\s*打印)?", "actions": [{"field": "print_process", "op": "set", "value": "SLS"}]},
+    {"id": "process_MJF", "pattern": "(?:用\\s*)?MJF(?:\\s*打印)?", "actions": [{"field": "print_process", "op": "set", "value": "MJF"}]},
+    {"id": "process_FDM", "pattern": "(?:用\\s*)?FDM(?:\\s*打印)?", "actions": [{"field": "print_process", "op": "set", "value": "FDM"}]},
+    {"id": "shore", "pattern": "TPU\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*A|邵氏\\s*A\\s*硬度\\s*(?P<n2>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))", "actions": [{"field": "tpu_shore_a", "op": "set", "value": {"group": "n", "fallback_group": "n2"}}, {"field": "material", "op": "set", "value": "TPU"}], "note": "硬度为目标材料规格，不能直接代表整鞋软硬。"},
+    {"id": "TPU", "pattern": "(?:用\\s*)?TPU", "actions": [{"field": "material", "op": "set", "value": "TPU"}]},
+    {"id": "material_软", "pattern": "换(?:再|更)?软的\\s*TPU|(?:TPU|材料)硬度(?:再|更)?低(?:一|1)?点", "actions": [{"field": "tpu_shore_a", "op": "add", "value": -5}], "note": "只改变目标 TPU 牌号硬度，不同时修改晶格密度。"},
+    {"id": "material_硬", "pattern": "换(?:再|更)?硬的\\s*TPU|(?:TPU|材料)硬度(?:再|更)?高(?:一|1)?点", "actions": [{"field": "tpu_shore_a", "op": "add", "value": 5}], "note": "只改变目标 TPU 牌号硬度，不同时修改晶格密度。"},
+    {"id": "build_size", "pattern": "打印空间\\s*(?P<x>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*[×xX*]\\s*(?P<y>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*[×xX*]\\s*(?P<z>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)?", "actions": [{"field": "build_size_x_mm", "op": "set", "value": {"group": "x"}}, {"field": "build_size_y_mm", "op": "set", "value": {"group": "y"}}, {"field": "build_size_z_mm", "op": "set", "value": {"group": "z"}}]},
+    {"id": "build_cube", "pattern": "(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*方", "actions": [{"field": "build_size_x_mm", "op": "set", "value": {"group": "n"}}, {"field": "build_size_y_mm", "op": "set", "value": {"group": "n"}}, {"field": "build_size_z_mm", "op": "set", "value": {"group": "n"}}], "note": "“方”按 X、Y、Z 三轴相同的毫米构建空间解释。"},
+    {"id": "margin", "pattern": "打印边距\\s*(?P<n>-?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千]+(?:点[零〇一二三四五六七八九]+)?))\\s*(?:毫米|mm)", "actions": [{"field": "build_margin_mm", "op": "set", "value": {"group": "n"}}]},
+    {"id": "orientation_auto", "pattern": "自动摆放|斜着放(?:看能否装下)?", "actions": [{"field": "build_orientation", "op": "set", "value": "auto"}]},
+    {"id": "orientation_design", "pattern": "保持原方向|按设计方向摆放", "actions": [{"field": "build_orientation", "op": "set", "value": "as_designed"}]},
+    {"id": "check", "pattern": "能否打印|制造检查|重新生成|生成预览", "actions": [], "note": "沿用当前工艺和设备假设重新校验；几何通过不代替实物制造验证。"}
+  ]
+}
+```
+<!-- M4_RULES_END -->

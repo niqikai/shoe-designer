@@ -14,3 +14,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# M4 process lock and atomic-write scratch files; parameters/history stay tracked.
+/designs/.edit.lock
+/designs/.m4-*

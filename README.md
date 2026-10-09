@@ -4,11 +4,35 @@
 
 目标是让没有建模经验的用户通过自然语言调整鞋款，由 JSON 参数驱动 Blender 无头生成、校验、导出和渲染。
 
-当前阶段：**v004 Gyroid 已通过 M3 项目必要几何门槛，保留排粉通路与材料设备警告，等待看图验收；M4 尚未进入。** 当前为右脚、低帮 75 mm、SLS。连续边缘收口替代按薄点补球，保留足底接触面；高精度候选已生成。
+当前阶段：**M4 的口语修改、版本备份、撤销／恢复、预览对比与制造导出闭环已实现，等待用户验收；M5 尚未开始。** 当前 v007 为右脚、低帮 75 mm、SLS／TPU 90A／Gyroid，恢复了 v004 的造型和密度，并切换为 0.5 mm 精细采样。必要几何门槛通过，仍保留排粉通路与具体材料设备待验证警告。
 
-本轮实测见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
+本轮闭环与实测见 [M4 报告](docs/M4_REPORT.md)，连续收口依据见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
 
 素材保存在本机 `assets/last/`；原 ZIP 及 `raw/` 解压文件已设为只读。`assets/`、`out/` 均被 Git 忽略。
+
+## 一条命令调整设计（M4）
+
+从项目目录执行，系统 Python 3.9 及以上即可运行对话层，无需 API 密钥；几何生成仍使用本机 Blender 和项目 `.venv`。
+
+```sh
+# 先检查解释、步长和截断；不写设计、不生成模型
+python3 tools/apply_edit.py '鞋头再圆一点，脚跟再软一点' --dry-run
+# 实际修改、备份、生成、制造筛查与报告
+python3 tools/apply_edit.py '鞋头再圆一点，脚跟再软一点'
+python3 tools/apply_edit.py '撤销'
+python3 tools/apply_edit.py '回到第4版'
+python3 tools/apply_edit.py '对比上一版'
+python3 tools/apply_edit.py '对比第4版和第7版'
+python3 tools/apply_edit.py '导出打印文件'
+```
+
+同样支持 `--undo`、`--restore v004`、`--compare 4 7`、`--list`。`--set heel_sole_mm=27` 可重复，`--patch patch.json` 接受已支持参数的 JSON 对象；`--json` 输出供其他对话程序使用的结果，Blender 日志独立保存在 `out/logs/edit-*.log`。默认输出到 `out/m3/`，可用 `--out out/my-design` 指定生成子目录；`out/m4/` 与 `out/logs/` 留给预览历史与日志。
+
+每次有效参数变化都先逐字节备份当前 JSON，再追加 `designs/CHANGELOG.md`、`designs/operations.jsonl` 并生成递增版本；撤销／恢复也生成新版本，不覆盖历史。连续撤销按实际修改的父版本继续回退。参数没有变化时只重新生成，不创建空版本。生成失败保留本轮参数和诊断，方便撤销；必要制造失败退出 2，其他错误退出 1，均禁止本轮打印导出。
+
+输出包含中文 `edit_report.md` 与结构化 `edit_report.json`。版本预览缓存保存在 `out/m4/versions/v###/`；对比生成内嵌图片的本地 HTML 和参数差异 JSON，旧版本没有完整缓存时明确只比较参数，不会把当前图片当成旧版预览。对比、列表与 `--dry-run` 不修改设计或运行 Blender。
+
+口语解释由 [语义表](docs/semantic_map.md) 中的本地规则驱动，覆盖现有参数；未知要求、否定句、外底花纹、颜色和 3MF 会明确拒绝整轮修改，助手可解释后使用已支持参数并补充规则。回弹只记录意图，软硬／轻重仍是设计假设。v005 演示检出薄点并被拦截，说明参数在允许范围内也不保证制造通过。
 
 ## 运行当前设计
 
@@ -51,17 +75,17 @@ tools/run.sh designs/current.json --out out/m3-export --voxel-mm 0.5
 | `lattice_type` | `gyroid` / `diamond` / `octet` | 当前 `gyroid`；前两者为曲面片层，后者为杆网 |
 | `lattice_density_heel/arch/forefoot` | 0.20–0.60 | 0.32／0.45／0.35，表示周期单胞目标材料占比 |
 | `lattice_rod_mm` | 1.5–3.0 mm | 2 mm；Octet 为杆径，曲面晶格为未裁切解析片层的保守厚度尺度 |
-| `resolution` | `preview` / `export` | 当前 `preview`；控制输出采样间距 |
+| `resolution` | `preview` / `export` | 当前 `export`；控制输出采样间距 |
 
 三个分区共享周期与相位，在分区边界附近平滑过渡。单胞目标密度不等于实际裁切后的密度；整鞋体积还包含固定实心顶层、外底和鞋面。默认顶层垂直厚度 2.4 mm，外底 3 mm。密度与厚度共同决定单胞大小，不能当作独立的软硬开关；解析厚度也不等于最终网格的实测最小壁厚，裁切端部和制造误差需在 M3 检查。
 
-当前为 v004；v003 已逐字节备份到 `designs/history/v003.json`，此前 v000–v002 也保留。生成旧版实心外形并按当前 M3 规则检查：
+当前为 v007，历史 v000–v006 均保留；M4 演示中 v005 制造失败，v006 撤销恢复，v007 只切换精细采样。生成旧版实心外形并按当前 M3 规则检查：
 
 ```sh
 tools/run.sh designs/history/v001.json --out out/m1-review
 ```
 
-`designs/current.json` 为唯一真相；修改先备份历史并记入 `designs/CHANGELOG.md`。语义规则见 [自然语言映射](docs/semantic_map.md)。一条命令的设计修改、撤销和版本比较留待 M4。
+`designs/current.json` 为唯一真相；日常设计修改使用 `tools/apply_edit.py` 保留历史和撤销关系。语义规则见 [自然语言映射](docs/semantic_map.md)。
 
 ## M3 参数、修复与导出门槛
 
@@ -82,7 +106,7 @@ tools/run.sh designs/history/v001.json --out out/m1-review
 
 自动摆放优先水平旋转；SLS／MJF 必要时再搜索倾斜，FDM 保持底面朝下。每个放行姿态都用全部模型顶点重新检查。每轴预留两倍边距，XY 分配到两侧；最低 Z 保持 0，Z 的两份余量留在上方。输出 `_print` 文件才应用推荐旋转和平移，设计姿态文件及看图坐标保留。空间适配不证明支撑、热变形与排粉效果。
 
-任何必要检查失败或缺测均阻止打印导出；具体材料与设备尚未认证时，即使自动规则通过，总结仍保留警告。当前 v004 的必要检查已通过，实际清粉与制造仍需局部试样验证；看图验收后再决定是否进入 M4。
+任何必要检查失败或缺测均阻止打印导出；具体材料与设备尚未认证时，即使自动规则通过，总结仍保留警告。当前 v007 必要检查已通过，实际清粉与制造仍需局部试样验证。
 
 ## 保留 M0.5 体检流程
 
@@ -121,4 +145,4 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python te
 
 几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 读取已保留的 M2 `out/m2-export/` 历史证据。M3 集成测试需先生成当前 `out/m3/`、`out/m3-export/`；它会重导入精细 STL／GLB、独立做 384,000 次测厚及 9 点足底检查，另建立实心测试夹具。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。
 
-测试覆盖单位／轴向、OBJ/STL/GLB 往返、鞋口、足弓贴合、底厚、左右镜像、受控形变，以及晶格密度标定、连续相位、分区过渡、厚度与单胞关系、三种整鞋拓扑和精度对比。M1 `--stress` 增加四个边界组合，M2 `--stress` 增加两个组合；这些不代替 M5 的 1000 组随机测试。M3 另覆盖已知薄板／圆杆、缺测、单孔／双孔／窄通道、摆放、悬垂、导出阻断及打印姿态往返。测试结果及当前限制见 M3 报告。
+测试覆盖单位／轴向、OBJ/STL/GLB 往返、鞋口、足弓贴合、底厚、左右镜像、受控形变，以及晶格密度标定、连续相位、分区过渡、厚度与单胞关系、三种整鞋拓扑和精度对比。M1 `--stress` 增加四个边界组合，M2 `--stress` 增加两个组合；这些不代替 M5 的 1000 组随机测试。M3 另覆盖已知薄板／圆杆、缺测、单孔／双孔／窄通道、摆放、悬垂、导出阻断及打印姿态往返。M4 增加口语组合、关联截断、逐字节备份、连续撤销／恢复、无写入预检、历史预览、锁与失败清理的临时项目测试；后端夹具只验证命令协议，实际几何另做 Blender 演示和集成复验。结果及限制见各阶段报告。
