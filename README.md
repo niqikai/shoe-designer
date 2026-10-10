@@ -4,9 +4,9 @@
 
 目标是让没有建模经验的用户通过自然语言调整鞋款，由 JSON 参数驱动 Blender 无头生成、校验、导出和渲染。
 
-当前阶段：**M4 的口语修改、版本备份、撤销／恢复、预览对比与制造导出闭环已实现，等待用户验收；M5 尚未开始。** 当前 v007 为右脚、低帮 75 mm、SLS／TPU 90A／Gyroid，恢复了 v004 的造型和密度，并切换为 0.5 mm 精细采样。必要几何门槛通过，仍保留排粉通路与具体材料设备待验证警告。
+当前阶段：**M4 已验收并推送，M5 的固定种子千组随机与边界实际几何测试正在进行。** 当前设计仍为 v007：右脚、低帮 75 mm、SLS／TPU 90A／Gyroid，恢复了 v004 的造型和密度，并切换为 0.5 mm 精细采样。既有候选通过必要几何门槛，仍保留排粉通路与具体材料设备待验证警告；M5 修复后已重新核验当前候选，预览命令约 27.8 秒；完整随机验收仍在进行。
 
-本轮闭环与实测见 [M4 报告](docs/M4_REPORT.md)，连续收口依据见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
+M5 的实际问题、测试口径与进度见 [M5 报告](docs/M5_REPORT.md)，此前闭环见 [M4 报告](docs/M4_REPORT.md)，连续收口依据见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
 
 素材保存在本机 `assets/last/`；原 ZIP 及 `raw/` 解压文件已设为只读。`assets/`、`out/` 均被 Git 忽略。
 
@@ -132,6 +132,25 @@ tools/inspect_last.sh
 
 ## 测试
 
+M5 使用独立参数副本实际构建完整鞋体，默认计划为固定种子 `20261009` 的 **1000 个随机案例与 108 个额外边界案例**，包含两档实际采样、实心及三种晶格、左右脚、两种鞋帮、零／正收口及组合角落。计划和每个案例都有指纹。运行只读当前设计与素材，保留全部几何健康门槛，不渲染或导出随机网格，也不把制造筛查失败的合法参数预先滤掉。
+
+```sh
+# 默认完整计划；本机 16 GiB 内存建议同时运行两个 Blender 进程
+python3 tools/run_stress.py --jobs 2 --batch-size 10
+# 中断后仅复用同计划、同代码且通过完整性复核的成功案例
+python3 tools/run_stress.py --jobs 2 --batch-size 10 --resume
+# 可以先跑额外边界，完成后用上面的 --resume 继续完整计划
+python3 tools/run_stress.py --kind boundary --jobs 2 --batch-size 3
+# 小批真实生成验证运行器，不代表完成整个 M5
+python3 tools/run_stress.py --count 12 --no-boundaries --jobs 2 --batch-size 3 --out out/m5-pilot
+```
+
+`out/m5/latest.json` 指向本次运行目录，其中 `manifest.json` 保存全部请求和有效参数，`summary.json/.md` 汇总结果，`results.jsonl` 按案例记录健康检查、耗时和失败原因。每个 `batches/####/` 内保留完整日志、逐案例事件和批前后源素材／设计完整性结果。运行指纹绑定代码及实际读取的规范化鞋楦文件摘要；每批次核对该文件的预期、运行前及运行后摘要，变化或缺失时证据失效。`--only case_id` 可重放失败案例；部分运行明确标为 `partial_pass`，不能声称千组通过。
+
+按 Ctrl+C 会取消排队批次、停止活动 Blender，并记录 `interrupted` 和退出码 130；完整结束且通过复核的批次可以续跑，被中断批次会重新生成。
+
+几何压力测试要求不崩溃、有限正体积、封闭、向外法线、单实体，以及非流形、退化、重复和当前方法检出的自交为零。它不执行每组的 M3 测厚、排粉或工艺认证；合法的小构建空间仍可能制造失败。当前设计的 M3 导出另行复验。完整测试需持续运行，实际进度以本机 `summary.json` 为准，尚未达到全计划通过时不得宣称 M5 完成。
+
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_last_tests.py
@@ -141,6 +160,9 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python te
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_manufacturing_pose_tests.py
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_manufacturing_tests.py
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_manufacturing_integration_tests.py
+# M5 已知失败案例与收口强度回退回归（真实整鞋，单套约数分钟）
+blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_stress_regression_tests.py
+blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_field_finish_tests.py
 ```
 
 几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 读取已保留的 M2 `out/m2-export/` 历史证据。M3 集成测试需先生成当前 `out/m3/`、`out/m3-export/`；它会重导入精细 STL／GLB、独立做 384,000 次测厚及 9 点足底检查，另建立实心测试夹具。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。

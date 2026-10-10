@@ -112,10 +112,11 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
     if is_lattice:
         lattice_info["field_cleanup"] = clean_lattice_field(field, voxel_mm)
     edge_finish = round_material_edges(field, (x, y, z), maps["top"],
-                                       effective["collar_height_mm"], effective["boundary_rounding_mm"])
+                                       effective["collar_height_mm"], effective["boundary_rounding_mm"],
+                                       lattice_cleanup=clean_lattice_field if is_lattice else None)
+    if edge_finish.get("applied_strength", 1) < 1:
+        warnings.append(edge_finish["strength_message"])
     if is_lattice:
-        if edge_finish["enabled"]:
-            edge_finish["cleanup"] = clean_lattice_field(field, voxel_mm)
         length = features["dimensions_mm"]["length"]
         for zone, lo, hi in (("heel", -np.inf, .30), ("arch", .30, .60), ("forefoot", .60, np.inf)):
             mask = core_mask & ((y >= lo * length) & (y < hi * length))[None, :, None]
@@ -130,15 +131,28 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
         if lattice_info["void_connectivity"]["trapped_core_void_voxels"]:
             warnings.append("采样发现部分内部空隙尚未连通外界；排粉／排料通道及制造适配留待 M3，当前不作可打印承诺。")
     mesh = mesh_from_field(field, (x[0], y[0], z[0]), voxel_mm, "shoe_right_mesh")
+    extraction_info = {
+        "requested_level_field_mm": float(mesh["extraction_requested_level_field_mm"]),
+        "level_field_mm": float(mesh["extraction_level_field_mm"]),
+        "attempts": json.loads(mesh["extraction_attempts_json"]),
+        "method": str(mesh["extraction_method"]),
+        "level_units": str(mesh["extraction_level_units"]),
+        "numerical_merge_tolerance_mm": float(mesh["numerical_merge_tolerance_mm"]),
+    }
+    if extraction_info["level_field_mm"] != 0:
+        warnings.append(f"网格提取的零等值面有数值退化，已向材料内部回退到场量 {extraction_info['level_field_mm']:g} mm 并通过完整健康检查；此场量工程刻度不是实际位移或壁厚保证，仍须按最终网格检查制造条件。")
     surface_displacement = 0.0
     if edge_finish["enabled"]:
         mesh, edge_finish["surface_smoothing"] = smooth_finished_surface(mesh, (x, y, z), maps["top"], effective["collar_height_mm"])
         surface_displacement = edge_finish["surface_smoothing"]["max_surface_displacement_mm"]
+        smoothing = edge_finish["surface_smoothing"]
+        if smoothing["factor"] < smoothing["requested_factor"]:
+            warnings.append(f"附加表面平滑强度已从 {smoothing['requested_factor']:g} 回退到 {smoothing['factor']:g}；" + smoothing["reason"])
     manufacturing_info = None
     if manufacturing:
         profile = process_profile(effective)
         minimum = profile["minimum_wall_mm"]
-        thickness, _ = measure_thickness(mesh, minimum, samples=192000 if edge_finish["enabled"] else 24000)
+        thickness, _ = measure_thickness(mesh, minimum, samples=192000 if effective["boundary_rounding_mm"] > 0 else 24000)
         powder = {"status": "not_applicable", "message": "实心中底或非粉末工艺，不启用晶格排粉检查。"}
         if is_lattice and effective["print_process"] in ("SLS", "MJF"):
             powder = check_powder_paths(field, envelope_mask, core_mask, (x, y, z), surface_displacement_mm=surface_displacement)
@@ -202,6 +216,7 @@ def build_shoe(params, *, last_mesh=None, voxel_mm=None, manufacturing=False):
               "deformation": deformation, "deformed_last_health": last_health,
               "deformed_last_health_frame": "right basis before optional X reflection", "mesh_health": health,
               "voxel_mm": voxel_mm, "resolution": effective["resolution"], "lattice": lattice_info,
+              "mesh_extraction": extraction_info,
               "grid_shape": [len(x), len(y), len(z)], "upper": shell_info, "edge_finish": edge_finish,
               "sole": {"outsole_base_mm": 3, "flare_mm": effective["outsole_flare_mm"],
                        "edge_radius_mm": effective["edge_radius_mm"], "effective_radius_range_mm": radius_range, "anchors": maps["anchors"],
@@ -352,7 +367,7 @@ def run(params_path, output, *, voxel_mm=None, render=True):
              f"工艺：{effective['print_process']}；TPU {effective['tpu_shore_a']}A；采样间距 {report['voxel_mm']:g} mm。", "",
              manufacturing["thickness"]["message"], "", manufacturing["powder_removal"]["message"], "",
              manufacturing["build_volume"]["message"], "", manufacturing["overhang"]["message"], "",
-             "## 警告与后续", "", *["- " + item for item in manufacturing["warnings"]], "",
+             "## 自动调整与警告", "", *["- " + item for item in dict.fromkeys(report["clamp_messages"] + manufacturing["warnings"])], "",
              "厚度为最终网格的射线采样，不能证明所有未采样位置的最小值；详见 report.json。", "",
              "导出状态：" + ("候选文件已导出；打印时使用 *_print.stl 中已核验的姿态。" if manufacturing["export_allowed"] else "已阻止所有 STL／GLB 导出。"), "",
              "本鞋楦仅限非商业使用，不得分发。"]

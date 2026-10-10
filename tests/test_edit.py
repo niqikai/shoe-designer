@@ -450,6 +450,48 @@ class CommandTests(unittest.TestCase):
         self.assertIsNone(cache_previews(self.root, self.output, baseline()))
         self.assertEqual(self.invoke("更厚一点")[0], 0)
 
+    def test_backend_adaptive_warnings_reach_json_markdown_and_cli_without_duplicates(self):
+        warnings = ["收口较强候选会切断材料连接，已回退到 0.25 强度。",
+                    "附加表面平滑强度已从 0.5 回退到 0.125。",
+                    "网格提取改用有界数值回退，场量不是物理位移或壁厚保证。"]
+
+        def adaptive_backend(root, output, params):
+            result = self.backend(root, output, params)
+            result["report"]["clamp_messages"] = warnings + [warnings[0]]
+            return result
+
+        code, report = self.invoke("--set", "heel_sole_mm=999", runner=adaptive_backend)
+        self.assertEqual(code, 0)
+        self.assertTrue(any("已截断" in message for message in report["clamps"]))
+        written_json = json.loads((self.output / "edit_report.json").read_bytes())
+        markdown = (self.output / "edit_report.md").read_text()
+        for message in warnings:
+            self.assertEqual(report["clamps"].count(message), 1)
+            self.assertEqual(written_json["clamps"].count(message), 1)
+            self.assertEqual(markdown.count(message), 1)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = main(["重新生成"], root=self.root, runner=adaptive_backend)
+        self.assertEqual(code, 0)
+        for message in warnings:
+            self.assertEqual(stdout.getvalue().count(message), 1)
+
+    def test_optional_backend_warning_metadata_rejects_bad_types_without_inventing_messages(self):
+        missing = object()
+        valid = "已从同一材料场生成较弱收口，仍须制造校验。"
+        values = (missing, None, 42, "非列表，不能作为逐条警告", {"warning": valid},
+                  [None, 42, True, {}, [], "", "   ", valid])
+        for value in values:
+            with self.subTest(value=value):
+                def backend_with_metadata(root, output, params):
+                    result = self.backend(root, output, params)
+                    if value is not missing:
+                        result["report"]["clamp_messages"] = value
+                    return result
+                code, report = self.invoke("重新生成", runner=backend_with_metadata)
+                self.assertEqual(code, 0)
+                self.assertEqual(report["clamps"], [valid] if isinstance(value, list) else [])
+
 
 if __name__ == "__main__":
     unittest.main()

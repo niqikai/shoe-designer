@@ -156,6 +156,10 @@ def execute(options, root, runner):
             cache_previews(store.root, output, candidate)
         backend = generated.get("report", {})
         backend = backend if isinstance(backend, dict) else {}
+        backend_clamps = backend.get("clamp_messages", [])
+        if backend.get("effective_params") == candidate and isinstance(backend_clamps, list):
+            report["clamps"] = list(dict.fromkeys(report["clamps"] + [
+                message for message in backend_clamps if isinstance(message, str) and message.strip()]))
         measured = backend.get("manufacturing", {})
         measured = measured if isinstance(measured, dict) else {}
         report.update(status=status, summary=summary, generation={key: value for key, value in generated.items() if key != "report"},
