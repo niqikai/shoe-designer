@@ -162,7 +162,7 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python te
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_manufacturing_integration_tests.py
 # M5 已知失败案例与收口强度回退回归（真实整鞋，单套约数分钟）
 blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_stress_regression_tests.py
-blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_field_finish_tests.py
+blender -b --factory-startup --disable-autoexec --python-exit-code 1 --python tests/blender_field_finish_tests.py -- --replay
 ```
 
 几何测试需先完成 M0.5 生成规范化文件；M1 导出往返测试需 `out/m1/`，M2 的 `--integration` 需默认 `out/m2/` 导出，`--fine-export` 读取已保留的 M2 `out/m2-export/` 历史证据。M3 集成测试需先生成当前 `out/m3/`、`out/m3-export/`；它会重导入精细 STL／GLB、独立做 384,000 次测厚及 9 点足底检查，另建立实心测试夹具。如果 PATH 中没有 `blender`，使用 `python3 tools/find_blender.py` 查到的路径。

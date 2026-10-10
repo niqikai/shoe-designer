@@ -45,6 +45,24 @@
 
 `assets/` 与 `out/` 均被 Git 忽略，生成文件仅供本机个人验收。
 
+## 当前 STL 的切片软件导入复验
+
+使用官方 PrusaSlicer 2.9.6 的 `--info --threads 1`，对 `out/m3-export/shoe_right.stl` 及 `shoe_right_print.stl` 逐一进行实际导入诊断。两者均正常退出，标准错误为空，显示 `manifold = yes`、单个连通部件；面数均为 2,494,004，与原二进制 STL 头部记录一致。没有报告退化面、修复边、删除面、翻转面或反向边计数；文件前后的 SHA-256 相同。
+
+软件可能在导入时自动修复内存中的模型，因此不单凭 `manifold = yes` 作结论。这里结合原 STL 独立健康检查、原／导入面数一致、修复计数未触发及文件哈希不变，共同支持当前候选的导入验收。[官方该版本诊断代码](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.6/src/libslic3r/Model.cpp#L1160) 显示非零修复计数；[导入实现](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.6/src/libslic3r/TriangleMesh.cpp#L206) 保留修复统计。此处验证 STL 导入及网格诊断，没有执行切层、生成 G-code 或验证 SLS 设备工艺。
+
+本机证据为 `out/m5-tools/prusa_mesh_checks.json`、`out/m5-prusa-shoe_right-info.log` 及 `out/m5-prusa-shoe_right_print-info.log`。官方 DMG 的 SHA-256 已与发布摘要核对；软件仅从只读临时镜像执行，检查后已卸载挂载，未安装到系统应用目录。
+
+## 并发调整
+
+用户要求加快完整随机验收后，本机实测 10 核、16 GiB，旧两进程运行时 CPU 约 63% 空闲，内存压力查询可用比例约 57%。因此将本次续跑调整为四个 Blender、每批 25 个案例；保持单进程线程数、全部精度和健康门槛。调整通过原运行器的正常 SIGINT 停止后 `--resume`，复用完整批次记录，未完成批次重新生成。调整前随机已有 82 个、边界 108 个通过。
+
+```sh
+python3 tools/run_stress.py --jobs 4 --batch-size 25 --resume
+```
+
+四并发用于本机此次加速验收，并非任意 16 GiB 环境的默认建议；仍需观察内存压力与交换，必要时降低并发。仅扩大每批案例数不会使单个案例更快，主要吞吐提升来自并发由二增至四。
+
 ## 重现与续跑
 
 ```sh
