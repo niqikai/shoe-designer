@@ -4,9 +4,9 @@
 
 目标是让没有建模经验的用户通过自然语言调整鞋款，由 JSON 参数驱动 Blender 无头生成、校验、导出和渲染。
 
-当前阶段：**M4 已验收并推送，M5 的固定种子千组随机与边界实际几何测试正在进行。** 当前设计仍为 v007：右脚、低帮 75 mm、SLS／TPU 90A／Gyroid，恢复了 v004 的造型和密度，并切换为 0.5 mm 精细采样。既有候选通过必要几何门槛，仍保留排粉通路与具体材料设备待验证警告；M5 修复后已重新核验当前候选，预览命令约 27.8 秒；完整随机验收仍在进行。
+当前阶段：**M4 已验收并推送，M5 的 1000 个随机与 108 个额外边界实际几何案例已全部通过，等待用户验收。** 当前设计仍为 v007：右脚、低帮 75 mm、SLS／TPU 90A／Gyroid，恢复了 v004 的造型和密度，并切换为 0.5 mm 精细采样。既有候选通过必要几何门槛，仍保留排粉通路与具体材料设备待验证警告；M5 修复后已重新核验当前候选，预览命令约 27.8 秒；完整随机验收为 1108／1108，通过回归 140 项；两份精细 STL 的 PrusaSlicer 导入诊断均通过。
 
-M5 的实际问题、测试口径与进度见 [M5 报告](docs/M5_REPORT.md)，此前闭环见 [M4 报告](docs/M4_REPORT.md)，连续收口依据见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
+M5 的实际问题、测试口径与完整结果见 [M5 报告](docs/M5_REPORT.md)，此前闭环见 [M4 报告](docs/M4_REPORT.md)，连续收口依据见 [M3 收口修复报告](docs/M3_REPAIR_REPORT.md)，此前失败证据保存在 [v003 制造筛查报告](docs/M3_REPORT.md)。规则及厂商差异见 [材料与制造依据](docs/materials.md)；此前成果见 [M2](docs/M2_REPORT.md)、[M1](docs/M1_REPORT.md)、[M0](docs/M0_CHECK.md) 和 [M0.5](docs/M0_5_REPORT.md)。
 
 素材保存在本机 `assets/last/`；原 ZIP 及 `raw/` 解压文件已设为只读。`assets/`、`out/` 均被 Git 忽略。
 
@@ -149,7 +149,7 @@ python3 tools/run_stress.py --count 12 --no-boundaries --jobs 2 --batch-size 3 -
 
 按 Ctrl+C 会取消排队批次、停止活动 Blender，并记录 `interrupted` 和退出码 130；完整结束且通过复核的批次可以续跑，被中断批次会重新生成。
 
-几何压力测试要求不崩溃、有限正体积、封闭、向外法线、单实体，以及非流形、退化、重复和当前方法检出的自交为零。它不执行每组的 M3 测厚、排粉或工艺认证；合法的小构建空间仍可能制造失败。当前设计的 M3 导出另行复验。完整测试需持续运行，实际进度以本机 `summary.json` 为准，尚未达到全计划通过时不得宣称 M5 完成。
+几何压力测试要求不崩溃、有限正体积、封闭、向外法线、单实体，以及非流形、退化、重复和当前方法检出的自交为零。它不执行每组的 M3 测厚、排粉或工艺认证；合法的小构建空间仍可能制造失败。当前设计的 M3 导出另行复验。本次完整计划已达到 1108／1108 通过，最终状态和独立汇总证据保存在本机 `summary.json` 与 `final_audit.json`。后续改动代码或输入后须重新生成同版本的完整证据，部分运行不得替代全计划验收。
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
