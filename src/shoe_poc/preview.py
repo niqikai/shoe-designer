@@ -11,14 +11,21 @@ import numpy as np
 import trimesh
 
 
-def rasterize(mesh, elevation, azimuth, width=900, height=520):
+def rasterize(mesh, elevation, azimuth, width=900, height=520, frame_bounds=None):
     """Orthographic depth buffer avoids matplotlib's triangle-sort artifacts."""
     elev, azim = np.radians([elevation, azimuth])
     view = np.array([np.cos(elev)*np.cos(azim), np.cos(elev)*np.sin(azim), np.sin(elev)])
     right = np.array([-np.sin(azim), np.cos(azim), 0])
     up = np.cross(view, right)
-    coordinates = (mesh.vertices - mesh.bounds.mean(axis=0)) @ np.stack([right, up, view]).T
-    span = np.ptp(coordinates[:, :2], axis=0)
+    basis = np.stack([right, up, view]).T
+    bounds = mesh.bounds if frame_bounds is None else np.asarray(frame_bounds)
+    coordinates = (mesh.vertices - bounds.mean(axis=0)) @ basis
+    if frame_bounds is None:
+        span = np.ptp(coordinates[:, :2], axis=0)
+    else:
+        corners = np.asarray([[x, y, z] for x in bounds[:, 0]
+                              for y in bounds[:, 1] for z in bounds[:, 2]])
+        span = np.ptp((corners - bounds.mean(axis=0)) @ basis, axis=0)[:2]
     scale = min((width-60)/span[0], (height-60)/span[1])
     screen = coordinates.copy()
     screen[:, 0] = width/2 + coordinates[:, 0]*scale
@@ -73,4 +80,50 @@ def render_preview(model: Path, output: Path) -> None:
     fig.text(0.5, 0.015, f"{dimensions} mm · Engineering preview. Orientation/fit require review; no print qualification.", ha="center", fontsize=11)
     fig.tight_layout(rect=(0, 0.035, 1, 0.95))
     fig.savefig(output, dpi=140)
+    plt.close(fig)
+
+
+def render_comparison(previous_model: Path, model: Path, last_model: Path,
+                      output: Path) -> None:
+    """Compare reimported STL geometry with identical cameras and scale.
+
+    Sections overlay the source last, so changes to the exterior cannot hide
+    loss of the cavity. Face normals are used as exported, without smoothing.
+    """
+    previous, current, last = [trimesh.load_mesh(path, process=True)
+                               for path in (previous_model, model, last_model)]
+    frame = np.asarray([np.minimum(previous.bounds[0], current.bounds[0]),
+                        np.maximum(previous.bounds[1], current.bounds[1])])
+    fig, axes = plt.subplots(4, 2, figsize=(15, 18), facecolor="#f3f5f7")
+    for row, (elev, azim, title) in enumerate([
+            (28, -55, "Perspective"), (0, -90, "Side"), (90, -90, "Top")]):
+        for column, (mesh, label) in enumerate([(previous, "Original M1"),
+                                                (current, "M1 repair")]):
+            axes[row, column].imshow(rasterize(mesh, elev, azim, frame_bounds=frame))
+            axes[row, column].set_title(f"{label} · {title}")
+            axes[row, column].set_axis_off()
+    y = float(last.bounds[:, 1].mean())
+    x = float(last.bounds[0, 0] + 0.7 * last.extents[0])
+    for axis, origin, normal, indices, title in [
+            (axes[3, 0], [0, y, 0], [0, 1, 0], [0, 2], "Longitudinal section"),
+            (axes[3, 1], [x, 0, 0], [1, 0, 0], [1, 2], "Forefoot section")]:
+        for mesh, color, label in [(previous, "#d88a2f", "Original M1"),
+                                    (current, "#148eaa", "M1 repair"),
+                                    (last, "#444444", "Real last")]:
+            section = mesh.section(plane_origin=origin, plane_normal=normal)
+            if section is not None:
+                for i, points in enumerate(section.discrete):
+                    axis.plot(points[:, indices[0]], points[:, indices[1]],
+                              color=color, label=label if i == 0 else None,
+                              linewidth=1.3)
+        axis.set_aspect("equal")
+        axis.set_title(title)
+        axis.set_xlabel("X (mm)" if indices[0] == 0 else "Y (mm)")
+        axis.set_ylabel("Z (mm)")
+        axis.legend()
+        axis.grid(alpha=0.2)
+    fig.suptitle("Actual STL comparison · identical camera and scale", fontsize=17)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=130)
     plt.close(fig)

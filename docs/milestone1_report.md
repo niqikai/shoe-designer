@@ -1,5 +1,7 @@
 # Milestone 1 — 验收报告
 
+> 历史报告说明：下文记录首次生成的几何链路检查。预览评审发现折面、鞋口竖墙、端盖及鞋底轮廓问题，因此原“工程 PASS”不能解释为基础鞋型验收通过。M1 总体状态为 PARTIAL，外形及用户验收尚未通过。后续修复证据单独保存到 `output/m1_repair/`；原输出保留用于对照，不进入 M2。
+
 ## 1. 完成状态
 
 **PASS — Milestone 1 工程链路通过；用户验收 PENDING。** Phase 0 全流程、制造资格和实体打印分别为 NOT_TESTED / NOT_VERIFIED / NOT_TESTED。

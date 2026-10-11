@@ -38,6 +38,21 @@ To reproduce the complete sole-height comparison, run `.venv/bin/python scripts/
 
 Each CLI command accepts `--max-rss-mb` (default 8192 MiB). The guard samples process RSS every 100 ms and exits with code 3 plus a saved failure report when an observed sample exceeds the budget. It is a sampled safeguard, not an OS hard cap; brief spikes may occur between samples. Native CAD jobs recorded multi-GiB peak RSS and require sufficient memory. For production use, additionally enforce container/OS limits.
 
+## M1 shape repair and acceptance
+
+The first M1 result passed the implemented topology/export checks but had a faceted upper, abrupt collar cut, flat end caps and slab-like sole. That result is a pipeline prototype, not an accepted shoe template. Preserve `output/m1/` and generate repair evidence separately:
+
+```sh
+.venv/bin/python -m shoe_poc run --spec input/specs/shoe_spec.json --output output/m1_repair --compare-with output/m1/base_shoe.stl
+.venv/bin/python scripts/verify_parameters.py --spec input/specs/shoe_spec.json --baseline output/m1_repair --output output/m1_repair/variant
+.venv/bin/python -m pytest -q --report-json output/m1_repair/test_report.json
+.venv/bin/python scripts/report_m1.py --output output/m1_repair --document docs/milestone1_repair_report.md
+```
+
+`--compare-with` is optional. It reads the previous STL and renders both exported meshes with identical cameras and scale, plus sections overlaid with the real last. It does not rewrite the previous model or smooth the geometry. `surface_report.json` records independent sampled clearance/thickness, exclusions and unmeasurable locations; these samples do not certify a global minimum.
+
+The execution report separates pipeline status from milestone status. M1 remains `PARTIAL` while appearance/user acceptance is pending, even if topology, export and numerical tests pass. A failed numerical check produces a failed execution. Manufacturing, physical printing and wear remain separate qualification levels. M2 starts only after M1 user acceptance.
+
 ## Configuration and outputs
 
 ShoeSpec is JSON with explicit millimetre units for geometry. Manufacturing rules in [config/manufacturing_rules.json](config/manufacturing_rules.json) are experimental and informational for this milestone; they do not certify printability. Milestone 1 outputs belong under `output/m1/`, including the inspected last metadata/normalized STEP and base shoe STEP/STL where those operations succeed. Generated files are not source-controlled.

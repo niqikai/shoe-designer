@@ -27,6 +27,7 @@ GENERATED_NAMES = (
     "base_shoe.step", "base_shoe.stl", "preview.png", "geometry_report.json",
     "validation_report.json", "roundtrip_report.json", "execution_report.json",
     "artifact_manifest.json", "failure_report.json", "parameter_change_report.json",
+    "surface_report.json", "comparison.png", "last_normalized.stl",
 )
 
 
@@ -62,6 +63,7 @@ def measure(directory: Path) -> dict:
                   for name in ("base_shoe.step", "base_shoe.stl", "last_normalized.step", "shoe_spec.json")},
         "execution_elapsed_seconds": read_json(directory / "execution_report.json")["elapsed_seconds"],
         "execution_status": read_json(directory / "execution_report.json")["status"],
+        "surface_sampling_status": read_json(directory / "surface_report.json")["geometry_status"],
         "input_sha256": read_json(directory / "last_metadata.json")["source"]["sha256"],
     }
 
@@ -104,6 +106,7 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
     checks = {
         "same_actual_last_source": original["input_sha256"] == variant["input_sha256"],
         "both_execution_checks_pass": original["execution_status"] == variant["execution_status"] == "PASS",
+        "neither_surface_sampling_fails": all(v["surface_sampling_status"] != "FAIL" for v in (original, variant)),
         "both_valid_single_cad_solid": all(v["cad"]["topology_valid"] and v["cad"]["solid_count"] == 1 for v in (original, variant)),
         "both_watertight_connected_meshes_without_unintended_handles": all(
             v["mesh"]["watertight"] and v["mesh"]["winding_consistent"]

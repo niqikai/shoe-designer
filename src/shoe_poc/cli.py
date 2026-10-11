@@ -40,11 +40,16 @@ def inspect_last(path: Path, output: Path) -> dict:
     return metadata
 
 
-def build_base(spec_path: Path, output: Path) -> dict:
+def build_base(spec_path: Path, output: Path, compare_with: Path | None = None) -> dict:
+    if compare_with is not None:
+        if not compare_with.is_file():
+            raise FileNotFoundError(f"Comparison STL does not exist: {compare_with}")
+        if compare_with.resolve() == (output / "base_shoe.stl").resolve():
+            raise InputError("Comparison STL must differ from the generated base_shoe.stl; preserve the previous input")
     from build123d import export_step, export_stl, import_step
     from shoe_poc.geometry.assembler import ShoeAssembler
     from shoe_poc.last import LastLoader, analyze_shape, normalize_last
-    from shoe_poc.preview import render_preview
+    from shoe_poc.preview import render_comparison, render_preview
     from shoe_poc.schemas import ShoeSpec
     from shoe_poc.validation import validate_mesh
 
@@ -104,9 +109,21 @@ def build_base(spec_path: Path, output: Path) -> dict:
                         and step_bbox_delta <= 0.3 and stl_bbox_delta <= 0.3 and volume_delta <= 1e-5 else "FAIL"}
     write_json(output / "roundtrip_report.json", roundtrip_checks)
     write_json(output / "validation_report.json", mesh)
+    from shoe_poc.validation.surface import validate_surface_samples
+    surface = stage("measure_surface_samples", lambda: validate_surface_samples(last, result, spec))
+    write_json(output / "surface_report.json", surface)
     stage("render_preview", lambda: render_preview(output / "base_shoe.stl", output / "preview.png"))
-    passed = mesh["geometry_status"] == "PASS" and roundtrip_checks["status"] == "PASS"
+    if compare_with is not None:
+        stage("export_last_preview_stl", lambda: export_stl(last, output / "last_normalized.stl",
+                                                            tolerance=0.15, angular_tolerance=0.1))
+        stage("render_comparison", lambda: render_comparison(compare_with, output / "base_shoe.stl",
+                                                              output / "last_normalized.stl",
+                                                              output / "comparison.png"))
+    passed = (mesh["geometry_status"] == "PASS" and roundtrip_checks["status"] == "PASS"
+              and surface["geometry_status"] != "FAIL")
     execution = {"task": "Milestone 1 build-base", "status": "PASS" if passed else "FAIL",
+                 "milestone_status": "PARTIAL" if passed else "FAIL",
+                 "appearance_acceptance": "PENDING",
                  "scope": "CAD and exported geometry only; full POC/manufacturing/print NOT_VERIFIED",
                  "generated_at": utc_now(), "input_file": str(Path(spec.last.file)),
                  "input_sha256": loaded.source["sha256"], "spec_source": str(spec_path.resolve()),
@@ -116,14 +133,15 @@ def build_base(spec_path: Path, output: Path) -> dict:
                  "outputs": {name: record for name, record in artifact_manifest(output).items()
                              if name in {"base_shoe.step", "base_shoe.stl", "last_normalized.step",
                                          "last_metadata.json", "shoe_spec.json", "geometry_report.json",
-                                         "roundtrip_report.json", "validation_report.json", "preview.png"}}}
+                                         "roundtrip_report.json", "validation_report.json", "surface_report.json",
+                                         "preview.png", "comparison.png", "last_normalized.stl"}}}
     write_json(output / "execution_report.json", execution)
     if passed:
         (output / "failure_report.json").unlink(missing_ok=True)
     write_json(output / "artifact_manifest.json", artifact_manifest(output))
     if not passed:
         raise RuntimeError("Exported geometry failed integrity/roundtrip checks; inspect saved reports")
-    LOG.info("Milestone 1 geometry checks PASS; manufacturing NOT_VERIFIED. Output: %s", output.resolve())
+    LOG.info("Geometry pipeline PASS; M1 PARTIAL, appearance PENDING, manufacturing NOT_VERIFIED. Output: %s", output.resolve())
     return execution
 
 
@@ -137,6 +155,7 @@ def parser() -> argparse.ArgumentParser:
         cmd = commands.add_parser(name, help="Build Milestone 1 only; later milestones require acceptance")
         cmd.add_argument("--spec", required=True, type=Path)
         cmd.add_argument("--output", type=Path, default=Path("output/m1"))
+        cmd.add_argument("--compare-with", type=Path, help="Previous STL for identical-camera comparison; input is preserved")
     validate = commands.add_parser("validate", help="Mesh integrity only; not print qualification")
     validate.add_argument("--model", required=True, type=Path)
     validate.add_argument("--output", type=Path, default=Path("output/mesh-validation"))
@@ -160,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect-last":
             inspect_last(args.input, args.output)
         elif args.command in {"build-base", "run"}:
-            build_base(args.spec, args.output)
+            build_base(args.spec, args.output, args.compare_with)
         elif args.command == "validate":
             from shoe_poc.validation import validate_mesh
             report = validate_mesh(args.model)
