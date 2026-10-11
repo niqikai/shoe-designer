@@ -10,4 +10,4 @@ BuildPlan 的几何段在 P0 就组织为 `parts[]`：每个 Part 含 `shell`（
 
 - `features` 按 id 键控而不是数组，Override 路径不依赖元素顺序。
 - 必须在整圈 Shell 内保持一致的参数（面内 Cell、周向 Cell 数）放在 `shell` 级，不放在 Zone 级，避免 Upper 与 HeelCounter 被分别覆盖而产生相位接缝。
-- 鞋底欧氏 Zone 只存一个基准 Cell（Midsole）；Outsole 与 Footbed Layer 的 Cell 派生为其一半，以保持固定周期场混合时的公度。
+- 鞋底欧氏 Zone 只存一个 Cell C（Midsole）；Outsole 与 Footbed Layer 共用，层间只以 ρ 区分（ADR 0010）。

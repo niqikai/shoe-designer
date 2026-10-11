@@ -84,7 +84,7 @@ Lattice 空隙中粉末能够通过的最大球径。
 _Avoid_: 孔径（含义模糊）、晶格间隙
 
 **Feasibility Table**（可行性表）:
-按 Lattice Family、Variant、Cell 形状、混合权重与 Relative Density 给出等值面阈值、Neck Thickness 与 Pore Throat 的带版本数据表。
+按 Lattice Family、Variant、Cell 形状与 Relative Density 给出等值面阈值、Neck Thickness 与 Pore Throat 的带版本数据表。
 
 ### 形状
 
@@ -212,7 +212,7 @@ Shoe Body 最底部的 Zone，由紧贴 Ground Surface 的 Skin 与其上的一�
 Sole Envelope 内除 Outsole 以外的 Zone，包括 Footbed 下方的主体与高出 Footbed、与 Shell 重叠的侧壁；承担缓震。
 
 **Footbed Layer**（脚床层）:
-Midsole 中紧贴 Footbed 的一层，Cell 更小、Relative Density 更高；属于 Midsole，不是 Zone，但在约束求解中单独校验。
+Midsole 中紧贴 Footbed 的一层，Relative Density 更高、Cell 与 Midsole 相同；属于 Midsole，不是 Zone，但在约束求解中单独校验。
 _Avoid_: 鞋垫、insole、脚床过渡
 
 **Upper**（鞋面）:

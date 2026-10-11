@@ -423,7 +423,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 ### 6.2 派生与组织规则
 
-- **鞋底 Cell**：鞋底只存一个基准 Cell C（`midsole.fill.cell_mm`）。Outsole 与 Footbed Layer 的 Cell 固定为 C/2，以保持混合时的公度（8.2）。
+- **鞋底 Cell**：鞋底只存一个 Cell C（`midsole.fill.cell_mm`），Outsole 晶格层、Midsole 与 Footbed Layer 共用，层间只以 ρ 区分（ADR 0010）。C 与 C/2 一类的混合会在过渡带内产生颈厚从 0 起的新生 Ligament，不可打印（实测见 ADR 0010）。
 - **Shell 级参数**：`shell.cell_inplane_mm` 和 `circumferential_cells` 放在 Shell 级，Upper 与 HeelCounter 共用；两者只以 ρ 区分。
 - **Zone 集合**：由 Archetype 数据文件（`archetypes/low_top_slip_on.v1`）声明，包括有哪些 Zone、各用什么坐标系、`heel_counter` 的切分方式与比例。HeelCounter 按平面 x − x_heel ≤ ratio × Last Length 切分 **[初值]**，其中 x_heel 是 `heel_point` 的 x 坐标。所有按 Last Length 比例给出的位置都从 `heel_point` 量起。
 - **P0 的 Fill**：`fill.kind` 只有 `lattice`，`family` 只有 `gyroid`，`variant` 只有 `network`。
@@ -494,8 +494,8 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | Zone / 层 | 坐标系 | Cell | Cell 上限 | ρ 名义值与 Tier Band |
 |---|---|---|---|---|
 | Midsole | 欧氏 | C = 10 mm | 12 mm **[初值]** | soft 0.15 [0.125, 0.175)；balanced 0.20 [0.175, 0.235)；firm 0.27 [0.235, 0.305] **[初值]** |
-| Footbed Layer（Midsole 顶部 4 mm） | 欧氏 | C/2 | 随 C | Midsole 当地 ρ + 0.05；Tier Band 随 Midsole 档位平移 |
-| Outsole（3 mm 晶格层，下方是 1.2 mm Skin） | 欧氏 | C/2 | 随 C | 0.35 [0.32, 0.38] **[初值]** |
+| Footbed Layer（Midsole 顶部 4 mm） | 欧氏 | C（同 Midsole） | 随 C | Midsole 当地 ρ + 0.05；Tier Band 随 Midsole 档位平移 |
+| Outsole（3 mm 晶格层，下方是 1.2 mm Skin） | 欧氏 | C | 随 C | 0.35 [0.32, 0.38] **[初值]** |
 | Upper（Wall Thickness 4 mm） | 随形 | 面内 8 mm（中间高度；t 向恒为此值）；法向 = Wall Thickness | 面内 10 mm **[初值]** | airy 0.20 [0.175, 0.225)；balanced 0.25 [0.225, 0.285)；dense 0.32 [0.285, 0.355] **[初值]** |
 | HeelCounter | 随形 | 与 Upper 共用 | 与 Upper 共用 | 0.35 [0.32, 0.38] **[初值]** |
 
@@ -520,19 +520,19 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 欧氏部分的检查点：
 - **位置**：沿中线在 [0, Last Length] 上每 5 mm **[实现]** 取一个采样点，另加 `heel_stack_point` 与 `forefoot_stack_point`；Midsole、Footbed Layer、Outsole 都在这些位置检查。
-- **取值**：每个点用当地 ρ 和当地有效 Cell，有效 Cell 由 C、C/2 和 8.2 的混合权重 w 决定。
+- **取值**：每个点用当地 ρ 和 Cell C。
 - **当地 Midsole 主体厚度 T**：在阶段 A 估算，记 t_layers = t_skin + t_out + t_fbl（见 8.1）。
   - x ≤ `heel_stack_point` 处：T = Heel Stack − t_layers；
   - x ≥ `forefoot_stack_point` 处：T = Forefoot Stack − t_layers（Toe Spring 段趾下厚度不变）；
   - 两点之间：线性插值。
-- **Transition 带**：带内另取 w ∈ {0.25, 0.5, 0.75}。
+- **Transition 与 Grading 带**：带内 ρ 单调插值（8.2），Neck Thickness 与 Pore Throat 对 ρ 单调，因此只检查带的两端（即两侧层各自的 ρ），不取中间点。
 
 **可行区间**：查 Feasibility Table（7.5），得到 [ρ_min, ρ_max]。
 - ρ_min：使 Neck Thickness ≥ 最小壁厚 + `neck_margin_mm`（Profile 字段，见 9.1）的最小 ρ。
 - ρ_max：使 Pore Throat ≥ 该点所在孔喉级别下限（9.1）的最大 ρ。
 - 孔喉级别：
-  - 薄层：Shell 中各 Zone、Footbed Layer、Outsole，以及 Midsole 中 w_sole > 0 的点。即 Cell 小于基准 C 的点，不论原因是厚度不足，还是处在 Outsole↔Midsole 过渡带或 Footbed Layer 的 Grading 带内。
-  - 芯部：Midsole 中 w_sole = 0 的点。
+  - 薄层：Shell 中各 Zone、Footbed Layer 及其 Grading 带（d_F ≤ 1.5·t_fbl）、Outsole 及其过渡带，以及 Midsole 中 T < C 的点（厚度不足一个 Cell，排粉路径短）。
+  - 芯部：Midsole 的其余点。
 
 **求解顺序**：
 
@@ -600,18 +600,16 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | 维度 | 取值 |
 |---|---|
 | 晶格族与变体 | P0 只有 Gyroid network |
-| Cell 形状 (L_s/L_n, L_t/L_n) | 以法向 Cell L_n 归一化；取值集合 {0.5, 0.625, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6} **[实现]**；欧氏 Cell 为 (1, 1) |
-| 混合权重 w | 仅欧氏 C : C/2 混合使用，取 {0, 0.25, 0.5, 0.75, 1} |
+| Cell 形状 (L_s/L_n, L_t/L_n) | 以法向 Cell L_n 归一化；取值集合 {0.5, 0.625, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6} **[实现]**；欧氏 Cell 为 (1, 1)，此时表只随 ρ 一维变化；c、最小 Neck Thickness 与 Pore Throat 按 C 缩放 |
 | ρ | 0.05–0.60，步长 0.005 **[实现]** |
 
 **输出量**（按 L_n 归一化，使用时乘以实际尺寸）：
-- 等值面阈值 c：使材料体积分数等于 ρ。混合场的 c 按混合后的实测体积分数标定。
+- 等值面阈值 c：使材料体积分数等于 ρ。
 - 最小 Neck Thickness：定义见 10.2 与 ADR 0009（两节点间山口处表面距离的 2 倍），在无切面的周期 Cell 上用参考方法（解析梯度加 Newton 求山口，误差 ≤ 0.01 mm）计算，与 Printability Check 的定义相同。Shell 的 (L_s, L_n, L_t) 中，最小颈厚与 L_s 无关。
 - Pore Throat：三轴方向逾渗瓶颈中的最小值。
 
 **计算方法**：
 - 体素不大于 L_n/200 **[实现]**；
-- 混合场的周期取 C，内含 2×2×2 个 C/2 Cell；
 - Neck Thickness 的定义与 Printability Check 完全相同（同为山口定义，不做骨架化）。
 
 **定义域**：
@@ -662,22 +660,19 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 **通则**：
 
-1. 所有带状区都以对应边界为中心，半宽 W/2；权重 w 按到该边界的距离线性变化。
-2. Cell 的空间变化一律通过固定周期场的混合实现（ADR 0002）：
-   - 欧氏部分在 C 与 C/2 两个场之间按 w 混合；
-   - 任何情况下都不得把位置相关的 Cell 代入坐标。
+1. 所有带状区都以对应边界为中心，半宽 W/2；插值权重 w 按到该边界的距离线性变化。w 只是 ρ 的插值权重，不是 Cell 的混合权重。
+2. 鞋底不做 Cell 的空间变化：Outsole 晶格层、Midsole、Footbed Layer 共用一个 Cell C，Grading 与 Transition 只改变阈值（ρ）（ADR 0002、ADR 0010）。任何情况下都不得把位置相关的 Cell 代入坐标。
 3. ρ 的变化只改变阈值，不改变周期。
 4. 多条带重叠时，按 8.1 表的顺序，先列出的 Zone 优先。
 
 | 位置 | 边界 | 宽度 W | 做法 |
 |---|---|---|---|
-| Outsole ↔ Midsole | d_G = t_skin + t_out | min(`vertical_max_mm`, t_out)，默认 3 mm | w_Outsole 在边界 ± W/2 内（默认 d_G ∈ [2.7, 5.7]）从 1 线性降到 0；ρ 同步插值 |
-| Midsole 内 Footbed Layer 的 Grading | d_F = t_fbl | t_fbl，默认 4 mm；不受 `transitions/*` 影响 | w_FBL 在 d_F ∈ [t_fbl/2, 3·t_fbl/2]（默认 [2, 6]）内从 1 线性降到 0；ρ = ρ_Midsole(x) + `rho_delta` · w_FBL；d_F ≤ t_fbl/2 处是均匀的 C/2 与 ρ_Midsole(x) + `rho_delta` |
-| Midsole 薄处 | — | — | w_thin = clamp((C − T)/(C/2), 0, 1) |
+| Outsole ↔ Midsole | d_G = t_skin + t_out | min(`vertical_max_mm`, t_out)，默认 3 mm | w_Outsole 在边界 ± W/2 内（默认 d_G ∈ [2.7, 5.7]）从 1 线性降到 0；ρ 在带内线性插值（ρ = ρ_Midsole(x) + (ρ_Outsole − ρ_Midsole(x)) · w_Outsole），Cell 不变 |
+| Midsole 内 Footbed Layer 的 Grading | d_F = t_fbl | t_fbl，默认 4 mm；不受 `transitions/*` 影响 | w_FBL 在 d_F ∈ [t_fbl/2, 3·t_fbl/2]（默认 [2, 6]）内从 1 线性降到 0；ρ = ρ_Midsole(x) + `rho_delta` · w_FBL；d_F ≤ t_fbl/2 处是均匀的 ρ_Midsole(x) + `rho_delta`，Cell 仍为 C |
 | Upper ↔ HeelCounter | x = x_heel + `extent_x_ratio` × Last Length | `lateral_width_mm`，默认 6 mm | Cell 相同，只插值 ρ |
 | 跨坐标系（鞋底 Zone ↔ Shell Zone） | Sole Envelope 边界 | `cross_frame_width_mm`，默认 6 mm | 见 8.3 |
 
-鞋底某点的最终 Cell 权重取各项中的最大值：w_sole = max(w_Outsole, w_FBL, w_thin)。
+Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell 的晶格，Cell 与 ρ 都不变，只在 7.3 归入薄层孔喉级别。
 
 ### 8.3 场
 
@@ -694,15 +689,15 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 φ_X = clamp((c_X − f_X) / max(|∇f_X|, g_min), −δ, +δ)
 
 - 材料相为 {φ < 0}。
-- g_min = 0.5 · 2π / Cell_min **[实现]**；δ = 1.0 mm **[实现]**。
+- g_min = 0.5 · 2π / Cell_min **[实现]**（鞋底 Cell_min = C，即 g_min = 0.5 · 2π / C）；δ = 1.0 mm **[实现]**。
 - |∇f_X|：欧氏侧用解析式；随形侧当前在体素栅格上做中心差分，分块时 halo 加 1，以保证确定性。
 - **点求值要求（设计约束）**：最终合成场（混合、与 Rim/Skin 的平滑并集、随形映射，含 φ 的零集）必须能在任意（非栅格）点上确定性求值（ADR 0006），因为 10.2 的细阶段需要对零集做 Newton 投影并在体素之间采样。随形侧的 |∇f_X| 因此需要一个可在任意点求值的等价实现（例如对 (s, t_mm, d_Last) 映射做解析或点上有限差分，不依赖体素栅格）；同一点的结果不得依赖分块。
 
-**欧氏混合**：
+**鞋底场**：
 
-φ_sole = (1 − w_sole) · φ_C + w_sole · φ_{C/2}
+φ_sole = φ_C，阈值 c(ρ(p))，ρ(p) 按 8.2 逐点取值，c 取自 Feasibility Table。
 
-两项使用同一个阈值 c(ρ, w_sole)，取自 Feasibility Table。
+鞋底内部没有 Cell 混合，因此不产生新生 Ligament（ADR 0010）。
 
 **跨坐标系混合**：
 
@@ -713,7 +708,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
   - 此范围之外，包络内的点 w_x ≡ 0；
   - 包络外的点不属于 Shoe Body，不需要取值。
 - **两侧参数的取法**：与该点最终归属哪个 Zone 无关，以保证场在包络边界上连续。
-  - φ_sole：按 8.1 表的前三行判定（忽略"在 Sole Envelope 内"这个条件），再按 8.2 的鞋底 Grading 与 Transition 得到 ρ、w_sole 和 c(ρ, w_sole)。
+  - φ_sole：按 8.1 表的前三行判定（忽略"在 Sole Envelope 内"这个条件），再按 8.2 的鞋底 Grading 与 Transition 得到 ρ 和 c(ρ)。
   - φ_shell：按 x 判定为 Upper 或 HeelCounter，取其 ρ（含两者之间的插值）及 c(ρ)。
 
 **Rim 与 Skin**：
@@ -851,7 +846,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 - 参考颈厚 ≤ 1.5 mm 的 Ligament，测量误差 ≤ 0.05 mm；其余（含受节点限制的 Ligament，其节点约定带来约 0.04 mm 差异）≤ 0.2 mm。
 - 检出：参考颈厚 ≤ 1.5 mm 的 Ligament 100% 检出，且不出现读数低于最小壁厚 + `neck_margin_mm`（即 1.05 mm）的虚假输出。
 - 对照基准是：对 G1 各 Zone 的单个周期 Cell，按同一定义（山口定义）用解析梯度加 Newton 求出的参考值（不依赖细栅格，估计误差 ≤ 0.01 mm）。h_check = 0.25 mm 的结果与之比较。
-- 验证必须覆盖每个 Zone 的 Cell 形状，含 C:C/2 混合（w ∈ {0.25, 0.5, 0.75}）与随形部分两端的 Cell 形状。
+- 验证必须覆盖每个 Zone 的 Cell 形状，含鞋底 ρ 过渡带（Outsole↔Midsole 与 Footbed Layer 的 Grading）与随形部分两端的 Cell 形状。
 - 由 15.1 的单元测试保证。
 
 ### 10.3 Donning Check
@@ -965,10 +960,10 @@ shoegen schema  --target full|llm|buildplan|manifest
   - Outsole 3 mm
   - Midsole 主体 11.8 mm
   - Footbed Layer 4 mm
-- **晶格与坐标系**：使用该档位的 Tuning Table 值，在独立的欧氏坐标系中生成；Transition 与 Grading 同 8.2。
+- **晶格与坐标系**：使用该档位的 Tuning Table 值，在独立的欧氏坐标系中生成，三层共用一个 Cell C，层间只以 ρ 区分；Transition 与 Grading 同 8.2。
 - **边界**：四个侧面是开放的裁切面，顶面是 Footbed Layer，不加 Skin。
 - **用途**：压缩试验，标定 Cushioning 的刚度量级。Build Manifest 中记录试块包含的 Cell 数。
-- **流程**：Coupon Build 不经过 Shape Source，也不经过 Resolver 阶段 B。三层的 ρ 与 Cell 仍按 7.3 的欧氏部分做约束求解，检查点取试块中心的竖线。
+- **流程**：Coupon Build 不经过 Shape Source，也不经过 Resolver 阶段 B。三层的 ρ 与 Cell C 仍按 7.3 的欧氏部分做约束求解，检查点取试块中心的竖线。
 
 ### 12.4 退出码
 
@@ -994,7 +989,7 @@ shoegen schema  --target full|llm|buildplan|manifest
 | Preview Build（0.5 mm） | ≤ 1 分钟 | 同上 |
 | 单只鞋 Print Mesh | 预期约 400–500 万三角面、200–250 MB | — |
 
-- **已有实测**：0.25 mm 下鞋底大小区域的网格阶段峰值约 5.8 GB；整鞋包围盒（2.5–3.5 亿体素）上，Hildebrand–Rüegsegger 局部厚度（该方法已被 ADR 0009 否决）与困粉两项体素检查共 29–43 s，峰值约 5.5 GB。分块粗阶段实测（合成鞋底，1580 万 Lattice 体素，7,301 根 Ligament）：1 个 worker 4.8 分钟 / 0.49 GB；4 个 worker 1.3 分钟 / 1.95 GB；6 个 worker 1.05 分钟 / 2.5 GB。细阶段约占总时间 95%（单核 0.037 s/Ligament）。最坏情形外推（全三维 Lattice、全部 C/2）：4 个 worker 约 3–4.5 分钟、约 3 GB。默认 worker 数为 4 **[实现]**（16 GB M4）。
+- **已有实测**：0.25 mm 下鞋底大小区域的网格阶段峰值约 5.8 GB；整鞋包围盒（2.5–3.5 亿体素）上，Hildebrand–Rüegsegger 局部厚度（该方法已被 ADR 0009 否决）与困粉两项体素检查共 29–43 s，峰值约 5.5 GB。分块粗阶段实测（合成鞋底，1580 万 Lattice 体素，7,301 根 Ligament）：1 个 worker 4.8 分钟 / 0.49 GB；4 个 worker 1.3 分钟 / 1.95 GB；6 个 worker 1.05 分钟 / 2.5 GB。细阶段约占总时间 95%（单核 0.037 s/Ligament）。最坏情形外推（全三维 Lattice、鞋底 Cell 取下限 8 mm 时韧带最多）：4 个 worker 约 3–4.5 分钟、约 3 GB。默认 worker 数为 4 **[实现]**（16 GB M4）。
 - **内存的阶段性**：网格阶段与校验阶段不同时驻留。体素类校验在释放场与网格之后进行。
 - **资源预检**：由 Shape Bundle 体积与体素尺寸估算各阶段峰值内存，估算系数由基准测试测定 **[实现]**。估算值超过预算（默认 8 GB，可配置）时提前退出，退出码 6。
 - **超时**：由 `--timeout` 控制。超时后写入 failed 状态的 Build Manifest，退出码 7。
@@ -1045,7 +1040,7 @@ shoegen schema  --target full|llm|buildplan|manifest
 - Neck Thickness 精度与检出：参考为基准式（benchmark）解析山口真值（解析梯度加 Newton，误差 ≤ 0.01 mm）
   - 参考颈厚 ≤ 1.5 mm 的 Ligament 误差 ≤ 0.05 mm，其余 ≤ 0.2 mm
   - 参考颈厚 ≤ 1.5 mm 的 Ligament 100% 检出；无读数低于 1.05 mm 的虚假输出
-  - 覆盖每个 Zone 的 Cell 形状，含 C:C/2 混合（w = 0.25、0.5、0.75）与随形部分两端的 Cell 形状
+  - 覆盖每个 Zone 的 Cell 形状，含鞋底 ρ 过渡带（Outsole↔Midsole 与 Footbed Layer 的 Grading）与随形部分两端的 Cell 形状
   - 分块与不分块的结果逐位一致（Ligament 集合与颈厚），含跨块边界，并含强制小块的情形
   - 场的点求值：同一点在不同分块下结果一致
 
@@ -1170,7 +1165,8 @@ examples/specs/                 # G1–G5 的 DesignSpec
 
 | 风险 | 为什么不确定 | 先行验证 |
 |---|---|---|
-| 混合区的颈厚 | 对两个 gyroid 场（C:C/2）做线性混合，在测试混合层中产生大量颈厚 < 1 mm 的 Ligament（单层 1,332 个）。这是混合场本身的性质，不是测量误差；可能使 Outsole/Midsole/Footbed 的 Layer 过渡不可行 | 定稿调参前，用 Feasibility Table 的混合维度 (w) 验证 |
+| ~~混合区的颈厚~~（已由 ADR 0010 解决） | 规格曾设的 C:C/2 φ 混合在 w≈0.53–0.84 处新生颈厚从 0 起的 Ligament，过渡带 0.4–1.4 mm 宽、薄壁占比 9–10 %（限值 1 %）；相位对齐、并集、阈值补偿、改变 W、硬界面均无效。已改为单一鞋底 Cell，Grading 只改 ρ | 已解决（设计变更）；回归由 15.1 的过渡带用例覆盖 |
+| 跨坐标系混合 sole（C = 10 欧氏）↔ Shell（(L_s, 8, 4) 随形） | φ = (1 − w_x)·φ_sole + w_x·φ_shell 混合的是两张不同的网络，按同一新生机制必然产生 Ligament，预计在宽度约 Δw × `cross_frame_width_mm` 的带内出现颈厚很小的 Ligament（Δw 为其颈厚低于限值的 w_x 区间）。可能需要豁免或重新设计，候选方案：把接缝按 Cut Edge 处理、Rim 式实体接缝、使两侧网络匹配 | `heel-transition` 的 Crop Build 之前，必须用与 ADR 0010 同样的均匀 w 扫描和平板测试在 harness 中验证
 | 分块精确性依赖点求值的逐位确定性 | 接缝精确要求合成场在同一点返回逐位相同的浮点数，与分块方式无关（NumPy 已验证）。GPU、并行或基于栅格差分求梯度模的实现必须保证这一点；上升路径超过 16 mm 回退 halo 时报内部错误。参数（σ、persistence 等）只在一个种子上调定，未做留出验证；自适应 σ 是可能的改进（可回收胖薄向 Cell 中的 23 次漏检与 59 个虚假输出，参考值均 ≥ 1.2 mm） | 在实际合成场实现上重跑分块与不分块的逐位对比（含强制小块）；做留出验证 |
 | Openness 定稿值是否落在可行区间 | 审查期间的颈厚实测用过不同算法，数值有差异；按 ADR 0009 的山口定义，benchmark 给出 airy 0.20 在 Collar 端 (·, 8, 4) 的颈厚为 1.106 mm，高于 1.0 + 0.05 的门槛，余量约 0.055 mm。Shell 的该值与 L_s 无关 | 先用同一定义生成 Feasibility Table，再定 `tuning.v1`；复核 airy 在 Collar 端的值，若不足再微调 ρ |
 | 跨坐标系过渡带的 Island 与薄壁 | 只在简化几何上实测过 | `heel-transition` 的 0.25 mm Crop Build |
