@@ -198,6 +198,13 @@
           "maximum": 1,
           "title": "Opening End X Fraction",
           "type": "number"
+        },
+        "transition_mm": {
+          "default": 15.0,
+          "exclusiveMinimum": 0,
+          "maximum": 60,
+          "title": "Transition Mm",
+          "type": "number"
         }
       },
       "required": [
@@ -307,6 +314,34 @@
           "maximum": 20,
           "minimum": 1,
           "title": "Margin Mm",
+          "type": "number"
+        },
+        "sidewall_inset_mm": {
+          "default": 2.0,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Sidewall Inset Mm",
+          "type": "number"
+        },
+        "toe_rise_mm": {
+          "default": 6.0,
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Toe Rise Mm",
+          "type": "number"
+        },
+        "heel_rise_mm": {
+          "default": 2.0,
+          "maximum": 15,
+          "minimum": 0,
+          "title": "Heel Rise Mm",
+          "type": "number"
+        },
+        "edge_radius_mm": {
+          "default": 2.0,
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Edge Radius Mm",
           "type": "number"
         }
       },

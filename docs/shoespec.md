@@ -47,9 +47,14 @@ arbitrary lasts.
 | `upper.opening_parameters.collar_height_mm` | mm | 10–100 above normalized last base |
 | `opening_start_x_fraction` | dimensionless | 0–0.8 of last X length |
 | `opening_end_x_fraction` | dimensionless | >0–1; at least 0.1 after start |
+| `upper.opening_parameters.transition_mm` | mm | >0–60; optional, default 15; longitudinal collar transition |
 | `upper.pattern_parameters.type` | — | `none`; continuous upper in Milestone 1 |
 | `sole.height_mm` | mm | 5–60 |
 | `sole.profile_parameters.margin_mm` | mm | 1–20; at least thickness + clearance |
+| `sole.profile_parameters.sidewall_inset_mm` | mm | 0–10; optional, default 2; less than sole height |
+| `sole.profile_parameters.toe_rise_mm` | mm | 0–20; optional, default 6 |
+| `sole.profile_parameters.heel_rise_mm` | mm | 0–15; optional, default 2 |
+| `sole.profile_parameters.edge_radius_mm` | mm | 0–10; optional, default 2; at most half sole height |
 | `lattice.period_mm` | mm | 5–50 |
 | `lattice.threshold` | dimensionless | 0.05–1.5; not an actual wall thickness |
 | `lattice.resolution_mm` | mm | 0.2–5; at most period / 4 |
@@ -58,6 +63,16 @@ The opening fractions locate the longitudinal extent of the opening cutter.
 They do not represent a shoe size or a guarantee of fit. Parameters may still
 be geometrically incompatible with a particular last after schema validation;
 the CAD pipeline must diagnose those cases.
+
+The repair adds optional profile fields without changing `schema_version="0.1"`.
+Legacy JSON loads the stated defaults, and saving the validated model writes
+those defaults explicitly. Numeric strings, booleans and nonfinite values are
+rejected for the new fields by the same strict rules as existing lengths.
+The radius bound leaves room for both sole edges; the inset/height bound avoids
+a sidewall taper that collapses its depth. Toe and heel rise describe upward
+profile changes and are not arbitrarily limited to the nominal flat sole height.
+ShoeSpec validation cannot establish that a particular last admits a chosen
+transition, taper, radius or offset; actual CAD construction must check this.
 
 Lattice values reserve the required protocol section. They are validated but
 are **not used to generate lattice geometry in Milestone 1**. Upper ventilation,
@@ -76,3 +91,41 @@ printing test, or a wearability assessment.
 To save a validated spec use `spec.model_dump_json(indent=2)`. A spec loaded
 with `ShoeSpec.load` contains resolved absolute asset/profile paths so that a
 saved copy can be loaded from an output directory without changing its meaning.
+
+## Independent surface measurements
+
+`shoe_poc.validation.surface.validate_surface_samples(last_shape, build, spec)`
+returns a JSON-serializable report using the actual normalized CAD last and final
+shoe, with `build.opening`, `build.cavity` and `build.sole` as actual CAD bodies.
+It does not read generator section offsets or stored overlap values to determine
+whether dimensions pass. UV points are classified against face trims, evaluated
+on the exact last surfaces, and probed outward along CAD face normals. OCCT line
+intersections and solid classification identify the first material interval in
+the final shoe. That interval gives normal-direction clearance and directional
+wall thickness at the sampled site.
+
+The numerical M1 fit targets are `upper.clearance_mm ± 0.25 mm` and
+`upper.thickness_mm ± 0.35 mm`. These are experimental geometry tolerances, not
+manufacturing specifications. For the legacy example they mean 1.0 mm clearance
+and 2.5 mm directional thickness. A transverse-only offset may violate these
+normal-direction targets on steep or concave regions; such deviations must be
+reported, rather than replaced by nominal parameter values.
+
+At most 512 deterministic sites are selected. The report records sample points,
+normals, material intervals, signed deviations, observed minimum/maximum/mean,
+maximum absolute error, face coverage and unmeasurable regions. Sites in or near
+the actual opening cutter and at the sole connection are explicitly excluded.
+Sole exclusion additionally uses geometric distance from the measured material
+interval to the actual CAD sole, allowing a raised sole junction without hiding
+the upper behind a fixed elevated cutoff. The actual opening/cavity common
+volume, final-shoe/opening common volume and final-shoe/last common volume are
+checked independently. A failed measured target or blocked opening gives
+`geometry_status="FAIL"`; unmeasurable planned sites or incomplete face coverage
+give `PARTIAL`, even when all measurable values satisfy their targets.
+
+`geometry_status="PASS"` applies only to executed sampled checks. The overall
+surface report remains `PARTIAL`, and global minimum wall thickness, global
+minimum clearance, global self-intersections, physical fit, visual acceptance
+and manufacturing qualification remain `NOT_VERIFIED`. Face counts and planar
+surface area fractions are geometry descriptors; they do not establish a smooth
+appearance or replace the user's review of the generated previews.

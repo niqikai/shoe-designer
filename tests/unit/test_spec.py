@@ -156,3 +156,53 @@ def test_load_does_not_mask_invalid_json(tmp_path):
     source.write_text('{"schema_version":', encoding="utf-8")
     with pytest.raises(ValidationError):
         ShoeSpec.load(source)
+
+
+def test_legacy_v01_loads_repair_defaults(spec_data):
+    spec = ShoeSpec.model_validate(spec_data)
+    assert spec.schema_version == "0.1"
+    assert spec.upper.opening_parameters.transition_mm == 15.0
+    profile = spec.sole.profile_parameters
+    assert (profile.sidewall_inset_mm, profile.toe_rise_mm,
+            profile.heel_rise_mm, profile.edge_radius_mm) == (2.0, 6.0, 2.0, 2.0)
+    assert ShoeSpec.model_validate_json(spec.model_dump_json()) == spec
+
+
+@pytest.mark.parametrize(("keys", "value"), [
+    (("upper", "opening_parameters", "transition_mm"), 0),
+    (("upper", "opening_parameters", "transition_mm"), 60.1),
+    (("upper", "opening_parameters", "transition_mm"), "15"),
+    (("sole", "profile_parameters", "sidewall_inset_mm"), -0.1),
+    (("sole", "profile_parameters", "sidewall_inset_mm"), 10.1),
+    (("sole", "profile_parameters", "toe_rise_mm"), 20.1),
+    (("sole", "profile_parameters", "heel_rise_mm"), 15.1),
+    (("sole", "profile_parameters", "edge_radius_mm"), 10.1),
+    (("sole", "profile_parameters", "edge_radius_mm"), True),
+])
+def test_invalid_repair_profile_values(spec_data, keys, value):
+    with pytest.raises(ValidationError):
+        ShoeSpec.model_validate(change(spec_data, keys, value))
+
+
+def test_radius_and_inset_must_fit_sole_height(spec_data):
+    spec_data["sole"]["height_mm"] = 5
+    spec_data["sole"]["profile_parameters"]["edge_radius_mm"] = 3
+    with pytest.raises(ValidationError, match="half"):
+        ShoeSpec.model_validate(spec_data)
+    spec_data["sole"]["profile_parameters"]["edge_radius_mm"] = 2
+    spec_data["sole"]["profile_parameters"]["sidewall_inset_mm"] = 5
+    with pytest.raises(ValidationError, match="less than"):
+        ShoeSpec.model_validate(spec_data)
+
+
+def test_toe_rise_is_not_arbitrarily_constrained_by_flat_height(spec_data):
+    spec_data["sole"]["height_mm"] = 5
+    spec_data["sole"]["profile_parameters"]["toe_rise_mm"] = 20
+    assert ShoeSpec.model_validate(spec_data).sole.profile_parameters.toe_rise_mm == 20
+
+
+def test_checked_in_schema_matches_runtime_and_optional_defaults():
+    checked_in = json.loads((SPEC_PATH.parents[2] / "config/shoe_spec.schema.json").read_text())
+    assert checked_in == ShoeSpec.model_json_schema()
+    assert "transition_mm" not in checked_in["$defs"]["OpeningParameters"]["required"]
+    assert checked_in["$defs"]["OpeningParameters"]["properties"]["transition_mm"]["default"] == 15.0

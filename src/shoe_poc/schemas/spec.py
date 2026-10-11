@@ -76,6 +76,7 @@ class OpeningParameters(StrictModel):
     collar_height_mm: Annotated[float, Field(ge=10, le=100)]
     opening_start_x_fraction: Annotated[float, Field(ge=0, le=0.8)]
     opening_end_x_fraction: Annotated[float, Field(gt=0, le=1)]
+    transition_mm: Annotated[float, Field(gt=0, le=60)] = 15.0
 
     @model_validator(mode="after")
     def ordered_opening(self) -> Self:
@@ -98,11 +99,24 @@ class UpperParameters(StrictModel):
 
 class SoleProfileParameters(StrictModel):
     margin_mm: Annotated[float, Field(ge=1, le=20)]
+    sidewall_inset_mm: Annotated[float, Field(ge=0, le=10)] = 2.0
+    toe_rise_mm: Annotated[float, Field(ge=0, le=20)] = 6.0
+    heel_rise_mm: Annotated[float, Field(ge=0, le=15)] = 2.0
+    edge_radius_mm: Annotated[float, Field(ge=0, le=10)] = 2.0
 
 
 class SoleParameters(StrictModel):
     height_mm: Annotated[float, Field(ge=5, le=60)]
     profile_parameters: SoleProfileParameters
+
+    @model_validator(mode="after")
+    def useful_profile(self) -> Self:
+        profile = self.profile_parameters
+        if profile.edge_radius_mm * 2 > self.height_mm:
+            raise ValueError("sole edge_radius_mm must not exceed half the sole height_mm")
+        if profile.sidewall_inset_mm >= self.height_mm:
+            raise ValueError("sole sidewall_inset_mm must be less than sole height_mm")
+        return self
 
 
 class LatticeParameters(StrictModel):
