@@ -1,42 +1,48 @@
-# Milestone 1 geometry
+# Milestone 1 geometry and shape repair
 
-`LastLoader` reads the configured local STEP file, records its SHA-256, source length-unit tokens and original `FILE_NAME` record, and requires one valid B-Rep solid. The supplied test asset has a nonstandard unquoted license notice in `FILE_NAME`. The loader replaces that metadata record with syntactically valid STEP metadata in a temporary file and preserves the original record in the report. The `DATA` section remains unchanged. The temporary file is deleted after import; the purchased source is never rewritten.
+`LastLoader` imports the configured licensed STEP, records its SHA-256, original header and units, and requires one valid B-Rep solid. The malformed `FILE_NAME` metadata is repaired only in a temporary copy; the original file and `DATA` section stay unchanged. `normalize_last` applies the explicitly configured proper rigid transform. The sample orientation remains provisional; foot side and shoe size are not inferred.
 
-`analyze_shape` measures solids, faces, shells, edges, vertices, bounding box, area and volume, checks OCCT topology validity and closed shells, and reports dimensions in millimetres. It does not infer shoe size, foot side, or toe direction. `normalize_last` applies the configured proper orthonormal rotation and translation with OCCT's rigid transformation API, and records a 4×4 matrix using column vectors. The sample configuration leaves orientation unconfirmed and side unknown. Its proposed +X toe / +Z up convention follows inspection of the source's low forefoot and high heel/ankle regions; the datums remain explicit configuration. User confirmation is still required.
+## Selected envelope method
 
-## Why the upper uses section reconstruction
+The repair selects `local-exact-cad-offset-v3`, retaining the actual foot surfaces rather than reconstructing a convex envelope.
 
-Direct OCCT offsets of the actual test asset were attempted with ARC and INTERSECTION joins. Both failed at the trial distances. The implemented fallback reconstructs the actual last's transverse sections; it does not replace the last with a box or ellipsoid.
+1. Derive a partition plane at 66% of the normalized last's height. It must be above the retained shoe surface; the generator checks that artificial partition geometry is removed by the configured collar.
+2. Intersect the source with a clipping half-space to obtain the genuine foot B-Rep. For this asset it has 175 faces, compared with 235 on the full source. A clipping box is a cutting tool, not a replacement shoe geometry.
+3. Apply OCCT `PerformByJoin` normal offsets with ARC joins, 0.00001 mm numerical tolerance, to clearance and clearance + upper thickness. Require valid single solids.
+4. Extend both volumes with the original source ankle above partition minus 2 mm. This keeps the complete source in the cavity and exterior. The extension has **no offset clearance or wall-thickness qualification** and must lie in the removed opening region.
+5. Require exact B-Rep last/cavity/exterior containment, with residual volume at most 0.01 mm³. Recheck source, cavity and opening exclusion after assembly.
 
-1. Tessellate the real normalized last at 0.25 mm linear deflection.
-2. Collect triangles overlapping 36 transverse support slabs normal to X. Each slab extends slightly more than one section spacing on each side, so adjacent profiles cover their intervening geometry.
-3. Compute each slab's 48 uniformly spaced YZ support directions.
-4. Shift support lines by clearance plus a 0.6 mm reconstruction allowance, then intersect adjacent lines to form a **circumscribed** convex polygon. Repeat at clearance + allowance + nominal upper thickness. Fixed supporting directions keep profile correspondence deterministic.
-5. Create nested, closed, ruled B-Rep lofts, including end caps extending past the last ends.
-6. Cut the inner envelope and an open-to-exterior collar tool from the outer envelope.
-7. Subtract the exact imported last again from the final assembly as a hard exclusion constraint.
+Independent same-argument experiments establish that whole-source offsets at 1 and 3.5 mm return `IsDone=False`, while the clipped foot produces valid single offset solids and zero omitted source-foot volume in about 2 seconds per offset. The standalone repaired envelope has zero last-outside-cavity, cavity-outside-exterior and last-outside-exterior volumes. Input-specific results do not guarantee arbitrary replacement lasts work without template adaptation.
 
-The nested envelopes provide a controllable transverse offset difference. Convexification bridges local concavities, and the ruled result is visibly faceted. The 0.6 mm allowance is an experimental reconstruction parameter, not a certified error bound. Exact B-Rep containment checks require that the entire imported last is inside the cavity envelope, the entire cavity is inside the outer envelope, and the entire last is inside the outer envelope. A failed containment check stops generation. Nominal section offset is **not** proof of minimum global wall thickness or certified fit clearance. Both require further measurement. A previous experimental inscribed-ray envelope failed these containment checks and produced unintended toe/side holes; it was rejected. The implementation uses circumscribed support polygons to prevent that failure. The exact-last Boolean exclusion independently proves the model has not filled the original last volume.
+No approximation is applied to the source foot surfaces, so source reconstruction error is recorded as zero by identity, not as a sampled global offset accuracy claim. Actual clearance and directional wall thickness are measured separately against the final shoe.
 
-The collar uses a vertical cutting prism defined by the configured X fractions and height above the normalized last's minimum Z. A zero start fraction extends the cut beyond the heel extremum. This creates a low rear collar and an open entry into the cavity. Physical foot insertion, collar stretch and comfort have not been verified.
+## Rejected reconstruction experiments
 
-## Sole and assembly
+The planned true CAD-section reconstruction was implemented and exercised. It extracts genuine plane intersection wires, preserves re-entrant contours, establishes arc-length correspondence, uses periodic splines with shared parameters and includes rounded pole closures. Three-millimetre initial stations are adaptively refined at most three times. Fit is measured on actual zero-offset OCCT solids at independent planes, rather than relying only on the SciPy interpolant.
 
-`SoleGenerator` derives the sole outline from the convex hull of the real last's sampled XY projection, offsets that outline by the configured margin, and extrudes it. The sole bottom is `last_min_z - sole.height_mm`; thus height is the nominal distance below the lowest last point. Stock overlaps the last base by up to 18 mm to connect the rising heel and forefoot. Cavity subtraction creates the internal contoured footbed. The convex support outline deliberately bridges the medial arch and is a documented template simplification.
+The original last has a branching ankle cross-section, so a full-height single transverse loft is unsupported. Separate transverse-foot and horizontal-ankle patches reached sampled actual-CAD errors of 0.2147 and 0.1890 mm, respectively, below the 0.25 mm target. Nevertheless their fusion was impractically expensive, and a continuation trial was invalid. Those experiments are **not accepted generated shoes**. Their STEP checkpoints, fit measurements and failure logs remain in ignored `output/m1_repair/debug/`. `reconstructed_section_envelopes` is an explicit diagnostic and is never an automatic fallback that converts a failed production build into success.
 
-`ShoeAssembler` fuses the outer envelope and sole stock before cutting the inner cavity, exact last and entry tool. It rejects invalid geometry, multiple solids, nonpositive volume, a missing entry cut, or residual intersection volume above 0.01 mm³ with the last, cavity or opening. A CAD intersection with a transverse Y line at the forefoot additionally measures two positive sidewall material intervals; this proves nonzero local directional thickness only. Individual upper, sole, cavity and opening shapes remain available to callers for diagnostics. Root CLI validation separately handles STEP/STL round trips and mesh integrity.
+The prior wide support-slab/convex-polygon method is no longer selected. It inflated the upper and erased local concavities; ruled lofts and copied end sections caused the faceted skin and flat end caps. The original `output/m1/` is preserved for comparison.
 
-Changing `sole.height_mm` moves the sole bottom and changes the actual extruded solid. It does not alter the last or the upper. The integration test compares distinct resulting volumes and extents.
+## Collar, sole and assembly requirements
 
-## API
+The collar must use a smooth transition from the existing rear height to the actual front-vamp surface. A vertical termination face must not intersect the retained upper. Its closed three-dimensional rim is obtained from the real exterior/cutter intersection. Generation must reject a configuration that exposes the artificial partition or unqualified ankle continuation.
+
+The repaired sole must follow lower-foot contours, preserve the `last_min_z - sole.height_mm` bottom datum, and use the configured inset, toe/heel rises and edge radius. Source-derived connection and transition geometry must preserve the cavity and avoid a ledge at the upper junction. These are experimental template controls, not manufacturing specifications.
+
+`ShoeAssembler` must require one valid positive-volume solid and independently retain the original last/cavity/opening exclusions. A valid Boolean result alone is insufficient for M1 appearance acceptance.
+
+## Independent evidence and API
+
+`validate_surface_samples` uses trim-classified points and outward normals from the actual last, ray intersections with the final shoe, and material midpoint classification. It does not reuse generator rings or declare the configured thickness as a measurement. Reports retain actual sample locations, observed deviations, excluded opening/sole regions and unmeasurable locations. Finite sampling does not certify global minima or physical fit.
 
 ```python
 loaded = LastLoader().load(spec.last.file)
 normalized_last, normalization = normalize_last(loaded.shape, spec.last.coordinate_system)
-last_metadata = analyze_shape(normalized_last)
 result = ShoeAssembler().build(normalized_last, spec)
 # result.shape, result.upper, result.sole, result.cavity, result.opening
-# result.metadata contains algorithm, approximation, exclusion and timing evidence.
 ```
 
-Source assets and all derived STEP/STL previews stay in ignored local directories. The test asset carries a CC BY-NC-ND 4.0 notice; purchase rights require review before redistribution or commercial use. This POC reports geometry only and does not claim manufacturing, physical printing or wear validation.
+Actual exported STL supplies the preview. Optional `--compare-with` renders the old and repaired meshes with identical cameras and scale, plus sections against the real last. No smooth shading or image editing substitutes for a geometry change.
+
+Pipeline, sampled geometry, appearance/user acceptance, manufacturing, physical printing and wear are separate report levels. M1 remains PARTIAL while appearance acceptance is pending. Derived assets remain local and ignored by Git; source provenance and license records are maintained in the asset documentation.
