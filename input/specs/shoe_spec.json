@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1",
+  "design_id": "slip_on_m1_experimental",
+  "unit": "mm",
+  "last": {
+    "file": "../lasts/sneaker_last.stp",
+    "coordinate_system": {
+      "rotation": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+      "translation_mm": [0.0, 0.0, 0.0],
+      "orientation_confirmed": false,
+      "convention": "X_heel_to_toe_Y_width_Z_up"
+    },
+    "side": "unknown",
+    "source": "User-purchased sneaker last; Phase 0 test asset only",
+    "license_status": "pending_confirmation"
+  },
+  "shoe": {"template": "slip_on_01", "size": null},
+  "upper": {
+    "thickness_mm": 2.5,
+    "clearance_mm": 1.0,
+    "opening_parameters": {
+      "collar_height_mm": 45.0,
+      "opening_start_x_fraction": 0.02,
+      "opening_end_x_fraction": 0.55
+    },
+    "pattern_parameters": {"type": "none"}
+  },
+  "sole": {"height_mm": 20.0, "profile_parameters": {"margin_mm": 6.0}},
+  "lattice": {"type": "gyroid", "period_mm": 12.0, "threshold": 0.3, "resolution_mm": 1.0},
+  "manufacturing": {
+    "process": "SLS",
+    "material_profile": {"id": "tpu_experimental", "material": "TPU", "status": "EXPERIMENTAL"},
+    "rules_profile": {"id": "sls_tpu_experimental", "file": "../../config/manufacturing_rules.json", "status": "EXPERIMENTAL"}
+  }
+}

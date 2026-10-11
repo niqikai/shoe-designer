@@ -1,0 +1,400 @@
+{
+  "$defs": {
+    "CoordinateSystem": {
+      "additionalProperties": false,
+      "description": "Input transform: p_design_mm = rotation @ p_source_mm + translation_mm.",
+      "properties": {
+        "rotation": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Rotation",
+          "type": "array"
+        },
+        "translation_mm": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Translation Mm",
+          "type": "array"
+        },
+        "orientation_confirmed": {
+          "title": "Orientation Confirmed",
+          "type": "boolean"
+        },
+        "convention": {
+          "const": "X_heel_to_toe_Y_width_Z_up",
+          "default": "X_heel_to_toe_Y_width_Z_up",
+          "title": "Convention",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rotation",
+        "translation_mm",
+        "orientation_confirmed"
+      ],
+      "title": "CoordinateSystem",
+      "type": "object"
+    },
+    "LastSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "coordinate_system": {
+          "$ref": "#/$defs/CoordinateSystem"
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right",
+            "unknown"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "source": {
+          "default": "User-supplied test asset",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "license_status": {
+          "default": "pending_confirmation",
+          "enum": [
+            "pending_confirmation",
+            "confirmed"
+          ],
+          "title": "License Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "coordinate_system",
+        "side"
+      ],
+      "title": "LastSpec",
+      "type": "object"
+    },
+    "LatticeParameters": {
+      "additionalProperties": false,
+      "description": "Reserved protocol values. Milestone 1 does not generate lattice geometry.",
+      "properties": {
+        "type": {
+          "const": "gyroid",
+          "title": "Type",
+          "type": "string"
+        },
+        "period_mm": {
+          "maximum": 50,
+          "minimum": 5,
+          "title": "Period Mm",
+          "type": "number"
+        },
+        "threshold": {
+          "maximum": 1.5,
+          "minimum": 0.05,
+          "title": "Threshold",
+          "type": "number"
+        },
+        "resolution_mm": {
+          "maximum": 5,
+          "minimum": 0.2,
+          "title": "Resolution Mm",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "period_mm",
+        "threshold",
+        "resolution_mm"
+      ],
+      "title": "LatticeParameters",
+      "type": "object"
+    },
+    "ManufacturingParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "process": {
+          "const": "SLS",
+          "title": "Process",
+          "type": "string"
+        },
+        "material_profile": {
+          "$ref": "#/$defs/MaterialProfile"
+        },
+        "rules_profile": {
+          "$ref": "#/$defs/RulesProfile"
+        }
+      },
+      "required": [
+        "process",
+        "material_profile",
+        "rules_profile"
+      ],
+      "title": "ManufacturingParameters",
+      "type": "object"
+    },
+    "MaterialProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "material": {
+          "const": "TPU",
+          "title": "Material",
+          "type": "string"
+        },
+        "status": {
+          "const": "EXPERIMENTAL",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "material",
+        "status"
+      ],
+      "title": "MaterialProfile",
+      "type": "object"
+    },
+    "OpeningParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "collar_height_mm": {
+          "maximum": 100,
+          "minimum": 10,
+          "title": "Collar Height Mm",
+          "type": "number"
+        },
+        "opening_start_x_fraction": {
+          "maximum": 0.8,
+          "minimum": 0,
+          "title": "Opening Start X Fraction",
+          "type": "number"
+        },
+        "opening_end_x_fraction": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Opening End X Fraction",
+          "type": "number"
+        }
+      },
+      "required": [
+        "collar_height_mm",
+        "opening_start_x_fraction",
+        "opening_end_x_fraction"
+      ],
+      "title": "OpeningParameters",
+      "type": "object"
+    },
+    "PatternParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "none",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "PatternParameters",
+      "type": "object"
+    },
+    "RulesProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "file": {
+          "minLength": 1,
+          "title": "File",
+          "type": "string"
+        },
+        "status": {
+          "const": "EXPERIMENTAL",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "status"
+      ],
+      "title": "RulesProfile",
+      "type": "object"
+    },
+    "ShoeParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "template": {
+          "const": "slip_on_01",
+          "title": "Template",
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Size"
+        }
+      },
+      "required": [
+        "template",
+        "size"
+      ],
+      "title": "ShoeParameters",
+      "type": "object"
+    },
+    "SoleParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "height_mm": {
+          "maximum": 60,
+          "minimum": 5,
+          "title": "Height Mm",
+          "type": "number"
+        },
+        "profile_parameters": {
+          "$ref": "#/$defs/SoleProfileParameters"
+        }
+      },
+      "required": [
+        "height_mm",
+        "profile_parameters"
+      ],
+      "title": "SoleParameters",
+      "type": "object"
+    },
+    "SoleProfileParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "margin_mm": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Margin Mm",
+          "type": "number"
+        }
+      },
+      "required": [
+        "margin_mm"
+      ],
+      "title": "SoleProfileParameters",
+      "type": "object"
+    },
+    "UpperParameters": {
+      "additionalProperties": false,
+      "properties": {
+        "thickness_mm": {
+          "maximum": 8,
+          "minimum": 0.8,
+          "title": "Thickness Mm",
+          "type": "number"
+        },
+        "clearance_mm": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Clearance Mm",
+          "type": "number"
+        },
+        "opening_parameters": {
+          "$ref": "#/$defs/OpeningParameters"
+        },
+        "pattern_parameters": {
+          "$ref": "#/$defs/PatternParameters"
+        }
+      },
+      "required": [
+        "thickness_mm",
+        "clearance_mm",
+        "opening_parameters",
+        "pattern_parameters"
+      ],
+      "title": "UpperParameters",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "design_id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$",
+      "title": "Design Id",
+      "type": "string"
+    },
+    "unit": {
+      "const": "mm",
+      "title": "Unit",
+      "type": "string"
+    },
+    "last": {
+      "$ref": "#/$defs/LastSpec"
+    },
+    "shoe": {
+      "$ref": "#/$defs/ShoeParameters"
+    },
+    "upper": {
+      "$ref": "#/$defs/UpperParameters"
+    },
+    "sole": {
+      "$ref": "#/$defs/SoleParameters"
+    },
+    "lattice": {
+      "$ref": "#/$defs/LatticeParameters"
+    },
+    "manufacturing": {
+      "$ref": "#/$defs/ManufacturingParameters"
+    }
+  },
+  "required": [
+    "schema_version",
+    "design_id",
+    "unit",
+    "last",
+    "shoe",
+    "upper",
+    "sole",
+    "lattice",
+    "manufacturing"
+  ],
+  "title": "ShoeSpec",
+  "type": "object"
+}

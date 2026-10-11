@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1",
+  "status": "experimental_unvalidated",
+  "units": "mm",
+  "process": "SLS",
+  "material_profile": "TPU_unselected",
+  "source": "placeholder values for Milestone 1 configuration scaffolding",
+  "commercial_process_validation": false,
+  "rules": {
+    "minimum_wall_thickness_mm": {
+      "value": null,
+      "status": "not_configured"
+    },
+    "minimum_feature_size_mm": {
+      "value": null,
+      "status": "not_configured"
+    },
+    "minimum_clearance_mm": {
+      "value": null,
+      "status": "not_configured"
+    }
+  },
+  "notes": [
+    "No TPU grade or factory process window has been selected.",
+    "Null thresholds are intentionally not treated as passing checks.",
+    "This file does not certify a model as printable or production-ready."
+  ]
+}
