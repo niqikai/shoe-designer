@@ -2,7 +2,7 @@
 
 The project uses a user-purchased STEP shoe last as a local development and validation asset. Its vendor/source URL, creator attribution, and purchase-specific license terms are currently **unknown / not supplied**. The purchase does not by itself establish permission to modify, redistribute, publish, or use the asset commercially. The commercial license status is **unconfirmed** and must be checked against the purchase terms before any such use.
 
-The supplied attribution/license notice for this project is **CC BY-NC-ND 4.0**. The canonical legal code is [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International](https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode.en). This notice is recorded as a handling constraint; it does not establish that the unknown purchased source was released under that license or replace the source's actual terms.
+The actual STEP file's `FILE_NAME` header contains **CC BY-NC-ND 4.0**. The canonical legal code is [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International](https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode.en). This is evidence found in the supplied file; the vendor identity and any additional purchase authorization remain unconfirmed. Keep these results local and verify purchase permission before commercial use or distribution.
 
 ## Handling rules
 

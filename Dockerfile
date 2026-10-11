@@ -12,10 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.lock ./
 COPY src ./src
 COPY config ./config
-RUN python -m pip install --no-cache-dir '.[test]'
+COPY tests ./tests
+COPY conftest.py ./
+RUN python -m pip install --no-cache-dir -r requirements.lock \
+    && python -m pip install --no-cache-dir --no-deps .
 
 # Mount local inputs and outputs at runtime. Do not bake the licensed STEP asset
 # or generated geometry into the image.

@@ -37,3 +37,11 @@ def test_nonmanifold_edge_is_detected():
     report = validate_mesh(mesh)
     assert next(c for c in report["checks"] if c["name"] == "nonmanifold_edges")["value"] > 0
     assert report["geometry_status"] == "FAIL"
+
+
+def test_watertight_through_hole_is_not_a_continuous_base_upper():
+    mesh = trimesh.creation.torus(major_radius=5, minor_radius=1)
+    assert mesh.is_watertight
+    report = validate_mesh(mesh)
+    assert next(c for c in report["checks"] if c["name"] == "base_shell_euler_number")["status"] == "FAIL"
+    assert report["geometry_status"] == "FAIL"

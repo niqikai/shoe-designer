@@ -9,7 +9,8 @@ import trimesh
 from shoe_poc.reporting import utc_now
 
 
-def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0) -> dict:
+def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0,
+                  expected_euler_number: int | None = 2) -> dict:
     mesh = trimesh.load_mesh(model, process=True) if isinstance(model, Path) else model
     if not isinstance(mesh, trimesh.Trimesh) or not len(mesh.faces):
         raise ValueError("Expected a nonempty triangle mesh")
@@ -37,6 +38,11 @@ def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0) -
     check("nonmanifold_edges", nonmanifold == 0, nonmanifold, 0)
     check("connected_components", components == 1, components, 1)
     check("consistent_winding", bool(mesh.is_winding_consistent), bool(mesh.is_winding_consistent), True)
+    if expected_euler_number is not None:
+        # A continuous, unperforated base upper/sole with one entry cavity has
+        # genus zero. Watertight meshes can still have unwanted through-holes.
+        check("base_shell_euler_number", mesh.euler_number == expected_euler_number,
+              int(mesh.euler_number), expected_euler_number)
     check("positive_volume_mm3", finite and volume > 0, volume, "> 0")
     check("model_extents_mm", finite and bool(np.all(mesh.extents > 0))
           and bool(np.all(mesh.extents <= max_extent_mm)), extents, [0, max_extent_mm])
@@ -51,4 +57,5 @@ def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0) -
             "manufacturing_status": "NOT_VERIFIED", "overall_status": "PARTIAL",
             "bounds_mm": mesh.bounds.tolist() if finite else None, "extents_mm": extents,
             "volume_mm3": volume, "vertices": len(mesh.vertices), "triangles": len(mesh.faces),
+            "euler_number": int(mesh.euler_number),
             "checks": checks}

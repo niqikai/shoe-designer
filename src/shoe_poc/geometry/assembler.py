@@ -1,0 +1,71 @@
+"""One-piece upper and sole assembly; every build enforces cavity exclusion."""
+from dataclasses import dataclass
+import time
+from .upper import UpperGenerator
+from .sole import SoleGenerator
+
+
+def volume_of(shape):
+    if shape is None:
+        return 0.0
+    if isinstance(shape, (list, tuple)):
+        return sum(volume_of(s) for s in shape)
+    return sum(s.volume for s in shape.solids())
+
+
+@dataclass
+class ShoeBuild:
+    shape: object
+    metadata: dict
+    upper: object
+    sole: object
+    cavity: object
+    opening: object
+
+
+class ShoeAssembler:
+    def build(self, last_shape, spec) -> ShoeBuild:
+        start = time.monotonic()
+        upper, cavity, opening, outer, upper_metadata = UpperGenerator().generate(last_shape, spec)
+        sole_stock, sole_metadata = SoleGenerator().generate(last_shape, spec)
+        sole = sole_stock.cut(cavity, last_shape)
+        # Fuse enclosing bodies before cavity subtraction to avoid coincident
+        # seams between separately trimmed upper and sole.
+        shoe = outer.fuse(sole_stock).cut(cavity, last_shape, opening).clean()
+        if not shoe.is_valid or len(shoe.solids()) != 1 or shoe.volume <= 0:
+            raise ValueError(f'Assembly is not a valid single solid (valid={shoe.is_valid}, solids={len(shoe.solids())})')
+        last_overlap = volume_of(shoe.intersect(last_shape))
+        cavity_overlap = volume_of(shoe.intersect(cavity))
+        opening_overlap = volume_of(shoe.intersect(opening))
+        tolerance_mm3 = 0.01
+        if max(last_overlap, cavity_overlap, opening_overlap) > tolerance_mm3:
+            raise ValueError(f'Cavity/opening exclusion failed: {last_overlap}, {cavity_overlap}, {opening_overlap} mm3')
+        removed_at_opening = volume_of(outer.intersect(opening))
+        cavity_entry_volume = volume_of(cavity.intersect(opening))
+        if removed_at_opening <= 1 or cavity_entry_volume <= 1:
+            raise ValueError('Configured collar does not intersect the upper; no entry opening was created')
+        # A transverse CAD line through the forefoot must cross two nonzero
+        # material intervals. This is local evidence, not a minimum-wall test.
+        from build123d import Edge
+        last_box = last_shape.bounding_box()
+        probe_x = last_box.min.X + 0.70 * last_box.size.X
+        probe_z = last_box.min.Z + 0.60 * spec.upper.opening_parameters.collar_height_mm
+        probe_line = Edge.make_line((probe_x, last_box.min.Y-20, probe_z), (probe_x, last_box.max.Y+20, probe_z))
+        probe_result = upper.intersect(probe_line)
+        wall_intervals = [edge.length for edge in probe_result.edges()] if probe_result is not None else []
+        if len(wall_intervals) < 2 or min(wall_intervals) <= 1e-5:
+            raise ValueError('Upper sidewall probe did not find two nonzero material intervals; this last/template requires adaptation')
+        return ShoeBuild(shoe, {
+            'template': spec.shoe.template, 'upper': upper_metadata, 'sole': sole_metadata,
+            'elapsed_seconds': time.monotonic()-start,
+            'solid_count': len(shoe.solids()), 'topology_valid': shoe.is_valid,
+            'last_intersection_volume_mm3': last_overlap,
+            'cavity_intersection_volume_mm3': cavity_overlap,
+            'opening_intersection_volume_mm3': opening_overlap,
+            'opening_removed_envelope_volume_mm3': removed_at_opening,
+            'cavity_entry_intersection_volume_mm3': cavity_entry_volume,
+            'intersection_tolerance_mm3': tolerance_mm3,
+            'upper_wall_probe': {'method': 'CAD common of upper and transverse Y line', 'x_mm': probe_x, 'z_mm': probe_z, 'material_interval_lengths_mm': wall_intervals, 'scope': 'Local directional thickness only; global minimum NOT_VERIFIED'},
+            'upper_volume_mm3': volume_of(upper), 'sole_volume_mm3': volume_of(sole),
+            'limitations': ['Uniform minimum wall thickness not measured.', 'Physical insertion, fit, comfort and material performance are not verified.', 'Sole uses a convex plan-view support envelope; medial arch contour is simplified.'],
+        }, upper, sole, cavity, opening)
