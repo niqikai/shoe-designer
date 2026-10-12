@@ -16,19 +16,11 @@ import time
 import numpy as np
 import trimesh
 
-from shoe_poc.cli import build_base
+from shoe_poc.cli import GENERATED_NAMES, _prepare_build_output, build_base
 from shoe_poc.last import analyze_shape
 from shoe_poc.reporting import sha256, utc_now, write_json
 from shoe_poc.schemas import ShoeSpec
-
-
-GENERATED_NAMES = (
-    "shoe_spec.json", "last_metadata.json", "last_normalized.step",
-    "base_shoe.step", "base_shoe.stl", "preview.png", "geometry_report.json",
-    "validation_report.json", "roundtrip_report.json", "execution_report.json",
-    "artifact_manifest.json", "failure_report.json", "parameter_change_report.json",
-    "surface_report.json", "comparison.png", "last_normalized.stl",
-)
+from shoe_poc.resource_limits import MemoryBudget
 
 
 def read_json(path: Path) -> dict:
@@ -63,6 +55,7 @@ def measure(directory: Path) -> dict:
                   for name in ("base_shoe.step", "base_shoe.stl", "last_normalized.step", "shoe_spec.json")},
         "execution_elapsed_seconds": read_json(directory / "execution_report.json")["elapsed_seconds"],
         "execution_status": read_json(directory / "execution_report.json")["status"],
+        "run_id": read_json(directory / "execution_report.json").get("run_id"),
         "surface_sampling_status": read_json(directory / "surface_report.json")["geometry_status"],
         "input_sha256": read_json(directory / "last_metadata.json")["source"]["sha256"],
     }
@@ -83,16 +76,8 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
     data["sole"]["height_mm"] = height_mm
     variant_spec = ShoeSpec.model_validate(data)
     original = measure(baseline)
-    output.mkdir(parents=True, exist_ok=True)
-    # Only remove known generated files. Baseline artifacts and unrelated files
-    # are never touched; old pre-fix variant models/reports cannot survive.
-    cleared = []
-    for name in GENERATED_NAMES:
-        path = output / name
-        if path.is_file():
-            path.unlink()
-            cleared.append(name)
     variant_path = output / "shoe_spec.json"
+    cleared = _prepare_build_output(output, variant_path, Path(spec.last.file), None)
     write_json(variant_path, variant_spec.model_dump(mode="json"))
     build_base(variant_path, output)
     variant = measure(output)
@@ -106,7 +91,7 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
     checks = {
         "same_actual_last_source": original["input_sha256"] == variant["input_sha256"],
         "both_execution_checks_pass": original["execution_status"] == variant["execution_status"] == "PASS",
-        "neither_surface_sampling_fails": all(v["surface_sampling_status"] != "FAIL" for v in (original, variant)),
+        "both_surface_sampling_pass": all(v["surface_sampling_status"] == "PASS" for v in (original, variant)),
         "both_valid_single_cad_solid": all(v["cad"]["topology_valid"] and v["cad"]["solid_count"] == 1 for v in (original, variant)),
         "both_watertight_connected_meshes_without_unintended_handles": all(
             v["mesh"]["watertight"] and v["mesh"]["winding_consistent"]
@@ -157,11 +142,15 @@ def main() -> int:
     parser.add_argument("--baseline", type=Path, default=Path("output/m1"))
     parser.add_argument("--output", type=Path, default=Path("output/m1/variant"))
     parser.add_argument("--height-mm", type=float, default=25.0)
+    parser.add_argument("--max-rss-mb", type=float, default=8192)
     args = parser.parse_args()
+    if not np.isfinite(args.max_rss_mb) or args.max_rss_mb <= 0:
+        parser.error("--max-rss-mb must be a positive finite number")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     report_path = args.output.resolve().parent / "parameter_change_report.json"
     try:
-        report = verify(args.spec, args.baseline, args.output, args.height_mm)
+        with MemoryBudget(args.max_rss_mb, args.output, "verify-parameters"):
+            report = verify(args.spec, args.baseline, args.output, args.height_mm)
     except Exception as error:
         write_json(report_path, {"status": "FAIL", "generated_at": utc_now(), "error": str(error),
                                 "error_type": type(error).__name__, "scope": "Full-shoe parameter comparison"})

@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import time
 import traceback
+from uuid import uuid4
 
 import numpy as np
 from pydantic import ValidationError
@@ -14,6 +15,56 @@ from pydantic import ValidationError
 from shoe_poc.reporting import artifact_manifest, environment, sha256, utc_now, write_json
 
 LOG = logging.getLogger("shoe_poc")
+
+# Clear only this pipeline's files before a new generation. Preserve logs,
+# diagnostics, variants and unrelated user files.
+GENERATED_NAMES = (
+    "shoe_spec.json", "last_metadata.json", "last_normalized.step", "last_normalized.stl",
+    "base_shoe.step", "base_shoe.stl", "upper.stl", "cavity.stl", "preview.png",
+    "upper_cavity_overlay.png", "comparison.png", "geometry_report.json",
+    "validation_report.json", "roundtrip_report.json", "surface_report.json",
+    "execution_report.json", "failure_report.json", "mesh_export_report.json",
+    "artifact_manifest.json", "test_report.json", "parameter_change_report.json",
+    "acceptance_report.json",
+)
+
+
+def _prepare_build_output(output: Path, spec_path: Path, last_path: Path,
+                          compare_with: Path | None) -> list[str]:
+    generated = {(output / name).resolve() for name in GENERATED_NAMES}
+    if last_path.resolve() in generated:
+        raise InputError("Source last must differ from generated output files")
+    if compare_with is not None and compare_with.resolve() in generated:
+        raise InputError("Comparison input must differ from generated output files; preserve the previous STL")
+    if spec_path.resolve() in generated and spec_path.resolve() != (output / "shoe_spec.json").resolve():
+        raise InputError("Input spec conflicts with a generated output file")
+    output.mkdir(parents=True, exist_ok=True)
+    cleared = []
+    for name in GENERATED_NAMES:
+        path = output / name
+        if path.is_file() and path.resolve() != spec_path.resolve():
+            path.unlink()
+            cleared.append(name)
+    return cleared
+
+
+def _record_build_failure(output: Path, run_id: str, error: Exception, elapsed: float) -> None:
+    path = output / "execution_report.json"
+    try:
+        previous = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        previous = {}
+    if previous.get("run_id") != run_id:
+        previous = {}
+        # Invalid input can fail before output preparation. Old reports cannot
+        # be reused as evidence for that new failed attempt.
+        for name in GENERATED_NAMES:
+            if name.endswith("_report.json") or name == "artifact_manifest.json":
+                (output / name).unlink(missing_ok=True)
+    write_json(path, {**previous, "task": "Milestone 1 build-base", "run_id": run_id,
+                     "status": "FAIL", "milestone_status": "PARTIAL",
+                     "generated_at": utc_now(), "error": str(error),
+                     "elapsed_seconds": previous.get("elapsed_seconds", elapsed)})
 
 
 class InputError(ValueError):
@@ -40,24 +91,28 @@ def inspect_last(path: Path, output: Path) -> dict:
     return metadata
 
 
-def build_base(spec_path: Path, output: Path, compare_with: Path | None = None) -> dict:
+def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
+               *, run_id: str | None = None) -> dict:
     if compare_with is not None:
         if not compare_with.is_file():
             raise FileNotFoundError(f"Comparison STL does not exist: {compare_with}")
         if compare_with.resolve() == (output / "base_shoe.stl").resolve():
             raise InputError("Comparison STL must differ from the generated base_shoe.stl; preserve the previous input")
-    from build123d import export_step, export_stl, import_step
+    from build123d import export_step, import_step
+    from shoe_poc.exporting import export_mesh
     from shoe_poc.geometry.assembler import ShoeAssembler
     from shoe_poc.last import LastLoader, analyze_shape, normalize_last
-    from shoe_poc.preview import render_comparison, render_preview
+    from shoe_poc.preview import render_comparison, render_preview, render_upper_gate
     from shoe_poc.schemas import ShoeSpec
     from shoe_poc.validation import validate_mesh
 
-    output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    write_json(output / "execution_report.json", {"task": "Milestone 1 build-base",
-               "status": "RUNNING", "generated_at": utc_now()})
     spec = ShoeSpec.load(spec_path)
+    cleared = _prepare_build_output(output, spec_path, Path(spec.last.file), compare_with)
+    run_id = run_id or str(uuid4())
+    write_json(output / "execution_report.json", {"task": "Milestone 1 build-base",
+               "status": "RUNNING", "run_id": run_id, "generated_at": utc_now(),
+               "stale_generated_files_removed": cleared})
     timings = {}
 
     def stage(name, action):
@@ -86,9 +141,17 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None) 
     write_json(output / "shoe_spec.json", spec.model_dump(mode="json"))
     result = stage("build_base", lambda: ShoeAssembler().build(last, spec))
     write_json(output / "geometry_report.json", result.metadata)
+    exports = {}
+    for name, shape in [("upper", result.upper), ("cavity", result.cavity),
+                         ("last_normalized", last)]:
+        exports[name] = stage(f"export_{name}_preview_stl", lambda name=name, shape=shape:
+                              export_mesh(shape, output / f"{name}.stl"))
+    stage("render_upper_gate", lambda: render_upper_gate(output / "upper.stl", output / "cavity.stl",
+                                                         output / "last_normalized.stl",
+                                                         output / "upper_cavity_overlay.png"))
     stage("export_step", lambda: export_step(result.shape, output / "base_shoe.step"))
-    stage("export_stl", lambda: export_stl(result.shape, output / "base_shoe.stl",
-                                         tolerance=0.15, angular_tolerance=0.1))
+    exports["base_shoe"] = stage("export_stl", lambda: export_mesh(result.shape, output / "base_shoe.stl"))
+    write_json(output / "mesh_export_report.json", exports)
     reloaded = stage("reimport_step", lambda: import_step(output / "base_shoe.step"))
     original = analyze_shape(result.shape)
     roundtrip = analyze_shape(reloaded)
@@ -114,15 +177,14 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None) 
     write_json(output / "surface_report.json", surface)
     stage("render_preview", lambda: render_preview(output / "base_shoe.stl", output / "preview.png"))
     if compare_with is not None:
-        stage("export_last_preview_stl", lambda: export_stl(last, output / "last_normalized.stl",
-                                                            tolerance=0.15, angular_tolerance=0.1))
         stage("render_comparison", lambda: render_comparison(compare_with, output / "base_shoe.stl",
                                                               output / "last_normalized.stl",
                                                               output / "comparison.png"))
     passed = (mesh["geometry_status"] == "PASS" and roundtrip_checks["status"] == "PASS"
               and surface["geometry_status"] != "FAIL")
     execution = {"task": "Milestone 1 build-base", "status": "PASS" if passed else "FAIL",
-                 "milestone_status": "PARTIAL" if passed else "FAIL",
+                 "run_id": run_id, "stale_generated_files_removed": cleared,
+                 "milestone_status": "PARTIAL",
                  "appearance_acceptance": "PENDING",
                  "scope": "CAD and exported geometry only; full POC/manufacturing/print NOT_VERIFIED",
                  "generated_at": utc_now(), "input_file": str(Path(spec.last.file)),
@@ -134,7 +196,9 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None) 
                              if name in {"base_shoe.step", "base_shoe.stl", "last_normalized.step",
                                          "last_metadata.json", "shoe_spec.json", "geometry_report.json",
                                          "roundtrip_report.json", "validation_report.json", "surface_report.json",
-                                         "preview.png", "comparison.png", "last_normalized.stl"}}}
+                                         "preview.png", "comparison.png", "last_normalized.stl",
+                                         "upper.stl", "cavity.stl", "upper_cavity_overlay.png",
+                                         "mesh_export_report.json"}}}
     write_json(output / "execution_report.json", execution)
     if passed:
         (output / "failure_report.json").unlink(missing_ok=True)
@@ -175,11 +239,12 @@ def main(argv: list[str] | None = None) -> int:
     budget = MemoryBudget(args.max_rss_mb, args.output, args.command)
     budget.__enter__()
     before = time.perf_counter()
+    run_id = str(uuid4())
     try:
         if args.command == "inspect-last":
             inspect_last(args.input, args.output)
         elif args.command in {"build-base", "run"}:
-            build_base(args.spec, args.output, args.compare_with)
+            build_base(args.spec, args.output, args.compare_with, run_id=run_id)
         elif args.command == "validate":
             from shoe_poc.validation import validate_mesh
             report = validate_mesh(args.model)
@@ -188,20 +253,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if report["geometry_status"] == "PASS" else 3
     except (InputError, ValidationError, FileNotFoundError, json.JSONDecodeError) as error:
         LOG.error("Input error: %s", error)
+        if args.command in {"build-base", "run"}:
+            _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
         write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
                    "type": type(error).__name__, "elapsed_seconds": time.perf_counter() - before})
-        if args.command in {"build-base", "run"}:
-            write_json(args.output / "execution_report.json", {"task": "Milestone 1 build-base", "status": "FAIL",
-                       "generated_at": utc_now(), "error": str(error), "elapsed_seconds": time.perf_counter() - before})
         return 2
     except Exception as error:
         LOG.error("Geometry/runtime error: %s", error)
+        if args.command in {"build-base", "run"}:
+            _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
         write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
                    "type": type(error).__name__, "traceback": traceback.format_exc(),
                    "elapsed_seconds": time.perf_counter() - before})
-        if args.command in {"build-base", "run"}:
-            write_json(args.output / "execution_report.json", {"task": "Milestone 1 build-base", "status": "FAIL",
-                       "generated_at": utc_now(), "error": str(error), "elapsed_seconds": time.perf_counter() - before})
         return 3
     finally:
         budget.__exit__()

@@ -37,6 +37,8 @@ class MemoryBudget:
                 write_json(self.output / "failure_report.json", report)
                 if self.command in {"run", "build-base"}:
                     write_json(self.output / "execution_report.json", report)
+                elif self.command == "verify-parameters":
+                    write_json(self.output.parent / "parameter_change_report.json", report)
                 # An OCCT operation cannot be safely interrupted by raising a
                 # Python exception from a background thread. Exit the CLI only.
                 os._exit(3)

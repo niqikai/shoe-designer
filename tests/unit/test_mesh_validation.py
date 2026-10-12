@@ -45,3 +45,18 @@ def test_watertight_through_hole_is_not_a_continuous_base_upper():
     report = validate_mesh(mesh)
     assert next(c for c in report["checks"] if c["name"] == "base_shell_euler_number")["status"] == "FAIL"
     assert report["geometry_status"] == "FAIL"
+
+
+def test_watertight_point_contact_has_nonmanifold_vertex():
+    mesh = trimesh.creation.icosphere(subdivisions=1)
+    first = 0
+    second = int(np.argmax(np.linalg.norm(mesh.vertices-mesh.vertices[first], axis=1)))
+    mesh.faces[mesh.faces == second] = first
+    mesh.remove_unreferenced_vertices()
+    assert mesh.is_watertight
+    # Even when no particular genus is requested, a zero-thickness point
+    # joining two surface sheets cannot qualify as a manifold printable wall.
+    report = validate_mesh(mesh, expected_euler_number=None)
+    entry = next(c for c in report["checks"] if c["name"] == "nonmanifold_vertex_links")
+    assert entry["status"] == "FAIL" and entry["value"] == 1
+    assert report["singular_vertices"][0]["link_components"] == 2

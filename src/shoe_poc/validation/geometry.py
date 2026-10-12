@@ -9,6 +9,41 @@ import trimesh
 from shoe_poc.reporting import utc_now
 
 
+def singular_vertex_links(mesh):
+    """A closed manifold vertex has one connected cyclic triangle link.
+
+    Two sheets meeting only at a vertex can pass edge incidence and watertight
+    checks. Retain their real locations instead of treating them as valid walls.
+    """
+    singular = []
+    for index, face_indices in enumerate(mesh.vertex_faces):
+        incident = mesh.faces[face_indices[face_indices >= 0]]
+        others = incident[incident != index]
+        if len(others) != 2 * len(incident):
+            singular.append({"vertex_index": index, "point_mm": mesh.vertices[index].tolist(),
+                             "reason": "Repeated vertex in incident triangle"})
+            continue
+        neighbors = {}
+        for first, second in others.reshape(-1, 2):
+            neighbors.setdefault(first, set()).add(second)
+            neighbors.setdefault(second, set()).add(first)
+        remaining = set(neighbors)
+        components = 0
+        while remaining:
+            components += 1
+            pending = [remaining.pop()]
+            while pending:
+                for other in neighbors[pending.pop()]:
+                    if other in remaining:
+                        remaining.remove(other)
+                        pending.append(other)
+        if components != 1 or any(len(link) != 2 for link in neighbors.values()):
+            singular.append({"vertex_index": index, "point_mm": mesh.vertices[index].tolist(),
+                             "link_components": components,
+                             "cyclic_link": all(len(link) == 2 for link in neighbors.values())})
+    return singular
+
+
 def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0,
                   expected_euler_number: int | None = 2) -> dict:
     mesh = trimesh.load_mesh(model, process=True) if isinstance(model, Path) else model
@@ -25,6 +60,7 @@ def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0,
     extents = mesh.extents.tolist() if finite else None
     volume = float(mesh.volume) if finite else None
     degenerate = int(np.count_nonzero(mesh.area_faces <= 1e-10)) if finite else None
+    singular = singular_vertex_links(mesh)
     checks = []
 
     def check(name, passed, value, threshold):
@@ -36,6 +72,7 @@ def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0,
     check("watertight", bool(mesh.is_watertight), bool(mesh.is_watertight), True)
     check("boundary_edges", boundary == 0, boundary, 0)
     check("nonmanifold_edges", nonmanifold == 0, nonmanifold, 0)
+    check("nonmanifold_vertex_links", not singular, len(singular), 0)
     check("connected_components", components == 1, components, 1)
     check("consistent_winding", bool(mesh.is_winding_consistent), bool(mesh.is_winding_consistent), True)
     if expected_euler_number is not None:
@@ -58,4 +95,5 @@ def validate_mesh(model: Path | trimesh.Trimesh, max_extent_mm: float = 500.0,
             "bounds_mm": mesh.bounds.tolist() if finite else None, "extents_mm": extents,
             "volume_mm3": volume, "vertices": len(mesh.vertices), "triangles": len(mesh.faces),
             "euler_number": int(mesh.euler_number),
+            "singular_vertices": singular,
             "checks": checks}

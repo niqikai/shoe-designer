@@ -2,7 +2,9 @@
 from pathlib import Path
 import pytest
 
-from shoe_poc.reporting import environment, utc_now, write_json
+import json
+
+from shoe_poc.reporting import environment, sha256, utc_now, write_json
 
 
 def pytest_addoption(parser):
@@ -34,6 +36,13 @@ def pytest_sessionfinish(session, exitstatus):
     results = session.config._shoe_results
     counts = {status: sum(entry["status"] == status for entry in results.values())
               for status in ("PASS", "FAIL", "NOT_TESTED")}
+    output = Path(target).parent
+    execution_path = output / "execution_report.json"
+    execution = json.loads(execution_path.read_text()) if execution_path.is_file() else {}
+    provenance = {"run_id": execution.get("run_id"),
+                  "base_shoe_stl_sha256": sha256(output / "base_shoe.stl")
+                  if (output / "base_shoe.stl").is_file() else None}
     write_json(Path(target), {"generated_at": utc_now(), "pytest_exit_code": int(exitstatus),
                              "collected": session.testscollected, "counts": counts,
-                             "tests": results, "environment": environment()})
+                             "tests": results, "environment": environment(),
+                             "build_provenance": provenance})

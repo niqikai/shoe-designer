@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from shoe_poc.reporting import artifact_manifest, utc_now, write_json
+from shoe_poc.reporting import artifact_manifest, sha256, utc_now, write_json
 
 
 def report(output: Path, document: Path) -> dict:
@@ -16,6 +16,20 @@ def report(output: Path, document: Path) -> dict:
     last, geometry, mesh, tests, execution, parameters, roundtrip, surface = [read(name) for name in (
         "last_metadata", "geometry_report", "validation_report", "test_report",
         "execution_report", "parameter_change_report", "roundtrip_report", "surface_report")]
+    evidence_provenance = {}
+    if execution.get("run_id"):
+        expected = execution["run_id"]
+        provenance = tests.get("build_provenance", {})
+        model = output / "base_shoe.stl"
+        tests_current = (provenance.get("run_id") == expected and model.is_file()
+                         and provenance.get("base_shoe_stl_sha256") == sha256(model))
+        parameters_current = parameters.get("baseline", {}).get("run_id") == expected
+        evidence_provenance = {"run_id": expected, "test_report_matches_current_build": tests_current,
+                               "parameter_report_matches_current_build": parameters_current}
+        if not tests_current:
+            tests = {}
+        if not parameters_current:
+            parameters = {}
     requirements = {}
     supplementary = {
         4: lambda name: "tests/unit/test_spec.py::" in name,
@@ -32,27 +46,31 @@ def report(output: Path, document: Path) -> dict:
                                             "PASS" if matching and all(s == "PASS" for s in matching)
                                             else "NOT_TESTED")
     core_tests = all(requirements[f"T{i:02d}"] == "PASS" for i in (1, 2, 3, 5, 6, 7, 16, 19))
+    tests_fail = (tests.get("pytest_exit_code", 0) != 0
+                  or tests.get("counts", {}).get("FAIL", 0) > 0
+                  or any(entry.get("status") == "FAIL" for entry in tests.get("tests", {}).values()))
     tests_pass = (tests.get("pytest_exit_code") == 0
                   and tests.get("counts", {}).get("FAIL") == 0
-                  and core_tests)
+                  and core_tests and not tests_fail)
     executed = {
         "CAD_and_export_pipeline": execution.get("status", "NOT_TESTED"),
         "mesh_integrity": mesh.get("geometry_status", "NOT_TESTED"),
         "roundtrip": roundtrip.get("status", "NOT_TESTED"),
         "surface_samples": surface.get("geometry_status", "NOT_TESTED"),
         "parameter_change": parameters.get("status", "NOT_TESTED"),
-        "tests": "PASS" if tests_pass else "FAIL" if tests.get("pytest_exit_code", 0) != 0 else "NOT_TESTED",
+        "tests": "FAIL" if tests_fail else "PASS" if tests_pass else "NOT_TESTED",
     }
     technical = ("FAIL" if "FAIL" in executed.values() else
                  "PASS" if all(value == "PASS" for value in executed.values()) else "PARTIAL")
     result = {
-        "milestone": 1, "overall_status": "FAIL" if technical == "FAIL" else "PARTIAL",
+        "milestone": 1, "overall_status": "PARTIAL",
         "technical_status": technical, "appearance_acceptance": "PENDING",
         "user_acceptance": "PENDING", "generated_at": utc_now(),
         "acceptance_levels": {**executed, "global_minimum_wall_thickness": "NOT_VERIFIED",
                               "full_Phase0_end_to_end": "NOT_TESTED", "manufacturing_rules": "NOT_VERIFIED",
                               "physical_print": "NOT_TESTED", "wearability": "NOT_VERIFIED"},
         "test_requirements": requirements, "pytest": tests.get("counts", {}),
+        "evidence_provenance": evidence_provenance,
         "same_spec_repeatability": {
             "status": requirements["T19"],
             "scope": "Independent M1 CLI build compared in CAD volume and coordinates; no byte identity claim"},
@@ -171,7 +189,7 @@ def main():
     args = parser.parse_args()
     result = report(args.output, args.document)
     print(f"M1 {result['overall_status']}; technical {result['technical_status']}; appearance PENDING")
-    return 3 if result["overall_status"] == "FAIL" else 0
+    return 3 if result["technical_status"] == "FAIL" else 0
 
 
 if __name__ == "__main__":
