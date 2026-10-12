@@ -200,7 +200,7 @@
           "type": "number"
         },
         "transition_mm": {
-          "default": 15.0,
+          "default": 60.0,
           "exclusiveMinimum": 0,
           "maximum": 60,
           "title": "Transition Mm",

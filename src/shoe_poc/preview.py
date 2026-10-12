@@ -83,6 +83,44 @@ def render_preview(model: Path, output: Path) -> None:
     plt.close(fig)
 
 
+def render_upper_gate(upper_model: Path, cavity_model: Path, last_model: Path, output: Path) -> None:
+    """Reimported component meshes and shared-plane overlays before assembly."""
+    upper, cavity, last = [trimesh.load_mesh(path) for path in
+                           (upper_model, cavity_model, last_model)]
+    frame = np.vstack((np.minimum(upper.bounds[0], cavity.bounds[0]),
+                       np.maximum(upper.bounds[1], cavity.bounds[1])))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), facecolor="#f3f5f7")
+    for axis, mesh, label in [(axes[0, 0], upper, "Repaired upper · actual STL"),
+                              (axes[0, 1], cavity, "Cavity · cutaway ankle continuation included")]:
+        axis.imshow(rasterize(mesh, 28, -55, frame_bounds=frame))
+        axis.set_title(label)
+        axis.set_axis_off()
+    y = float(last.bounds[:, 1].mean())
+    x = float(last.bounds[0, 0] + .7 * last.extents[0])
+    for axis, origin, normal, coordinates, title in [
+            (axes[1, 0], [0, y, 0], [0, 1, 0], [0, 2], "Longitudinal overlay"),
+            (axes[1, 1], [x, 0, 0], [1, 0, 0], [1, 2], "Forefoot overlay")]:
+        for mesh, color, label in [(last, "#444444", "Real last"),
+                                    (cavity, "#4a9c53", "Cavity"),
+                                    (upper, "#148eaa", "Upper material")]:
+            section = mesh.section(plane_origin=origin, plane_normal=normal)
+            if section is not None:
+                for index, points in enumerate(section.discrete):
+                    axis.plot(points[:, coordinates[0]], points[:, coordinates[1]],
+                              color=color, linewidth=1.2, label=label if index == 0 else None)
+        axis.set_aspect("equal")
+        axis.set_xlabel("X (mm)" if coordinates[0] == 0 else "Y (mm)")
+        axis.set_ylabel("Z (mm)")
+        axis.set_title(title)
+        axis.legend()
+        axis.grid(alpha=.2)
+    fig.suptitle("Upper/cavity geometry gate · flat-face shading, no smoothing", fontsize=16)
+    fig.tight_layout(rect=(0, 0, 1, .96))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=130)
+    plt.close(fig)
+
+
 def render_comparison(previous_model: Path, model: Path, last_model: Path,
                       output: Path) -> None:
     """Compare reimported STL geometry with identical cameras and scale.

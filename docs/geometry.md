@@ -24,9 +24,15 @@ The original last has a branching ankle cross-section, so a full-height single t
 
 The prior wide support-slab/convex-polygon method is no longer selected. It inflated the upper and erased local concavities; ruled lofts and copied end sections caused the faceted skin and flat end caps. The original `output/m1/` is preserved for comparison.
 
-## Collar, sole and assembly requirements
+## Curved collar
 
-The collar must use a smooth transition from the existing rear height to the actual front-vamp surface. A vertical termination face must not intersect the retained upper. Its closed three-dimensional rim is obtained from the real exterior/cutter intersection. Generation must reject a configuration that exposes the artificial partition or unqualified ankle continuation.
+The collar cutter uses a quintic Bezier roof from the configured rear height to the actual front-vamp surface. The zero first/second endpoint derivatives preserve the level rear collar. Its extrusion spans the true local exterior; the resulting three-dimensional rim follows the actual exterior/cutter intersection rather than a rectangular opening boundary. The template retains the configured front position with a 0.00001 mm numerical separation at the roof endpoint, avoiding an exposed vertical termination face.
+
+Actual STL review rejected the initial 15 mm transition: its 34.86 mm rise still looked abrupt despite continuous derivatives. The experimental default is now 60 mm. The rear height and front-position parameters keep their meaning. Runtime checks extract the actual OCCT section, require one closed exterior rim and one connected cavity entry region, and bound front-position error to 0.25 mm. CAD edge endpoint tangents and native curve/vertex discrepancies are reported separately. Synthetic CAD regressions detect the former vertical-cut corners and multiple entry windows. The partition guard rejects any collar exposing the artificial cap or unqualified ankle continuation.
+
+`upper_cavity_overlay.png` shows separately reimported component meshes and identical-plane sections against the real last. This component review precedes approval of the assembled shoe; mathematical continuity alone is insufficient for appearance acceptance.
+
+## Sole and assembly requirements
 
 The repaired sole must follow lower-foot contours, preserve the `last_min_z - sole.height_mm` bottom datum, and use the configured inset, toe/heel rises and edge radius. Source-derived connection and transition geometry must preserve the cavity and avoid a ledge at the upper junction. These are experimental template controls, not manufacturing specifications.
 

@@ -161,7 +161,7 @@ def test_load_does_not_mask_invalid_json(tmp_path):
 def test_legacy_v01_loads_repair_defaults(spec_data):
     spec = ShoeSpec.model_validate(spec_data)
     assert spec.schema_version == "0.1"
-    assert spec.upper.opening_parameters.transition_mm == 15.0
+    assert spec.upper.opening_parameters.transition_mm == 60.0
     profile = spec.sole.profile_parameters
     assert (profile.sidewall_inset_mm, profile.toe_rise_mm,
             profile.heel_rise_mm, profile.edge_radius_mm) == (2.0, 6.0, 2.0, 2.0)
@@ -205,4 +205,4 @@ def test_checked_in_schema_matches_runtime_and_optional_defaults():
     checked_in = json.loads((SPEC_PATH.parents[2] / "config/shoe_spec.schema.json").read_text())
     assert checked_in == ShoeSpec.model_json_schema()
     assert "transition_mm" not in checked_in["$defs"]["OpeningParameters"]["required"]
-    assert checked_in["$defs"]["OpeningParameters"]["properties"]["transition_mm"]["default"] == 15.0
+    assert checked_in["$defs"]["OpeningParameters"]["properties"]["transition_mm"]["default"] == 60.0

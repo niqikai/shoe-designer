@@ -76,7 +76,7 @@ class OpeningParameters(StrictModel):
     collar_height_mm: Annotated[float, Field(ge=10, le=100)]
     opening_start_x_fraction: Annotated[float, Field(ge=0, le=0.8)]
     opening_end_x_fraction: Annotated[float, Field(gt=0, le=1)]
-    transition_mm: Annotated[float, Field(gt=0, le=60)] = 15.0
+    transition_mm: Annotated[float, Field(gt=0, le=60)] = 60.0
 
     @model_validator(mode="after")
     def ordered_opening(self) -> Self:

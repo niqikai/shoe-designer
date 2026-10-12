@@ -47,7 +47,7 @@ arbitrary lasts.
 | `upper.opening_parameters.collar_height_mm` | mm | 10–100 above normalized last base |
 | `opening_start_x_fraction` | dimensionless | 0–0.8 of last X length |
 | `opening_end_x_fraction` | dimensionless | >0–1; at least 0.1 after start |
-| `upper.opening_parameters.transition_mm` | mm | >0–60; optional, default 15; longitudinal collar transition |
+| `upper.opening_parameters.transition_mm` | mm | >0–60; optional, default 60; longitudinal collar transition (experimental; 15 mm retained a steep lip on the source last) |
 | `upper.pattern_parameters.type` | — | `none`; continuous upper in Milestone 1 |
 | `sole.height_mm` | mm | 5–60 |
 | `sole.profile_parameters.margin_mm` | mm | 1–20; at least thickness + clearance |

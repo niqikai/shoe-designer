@@ -275,12 +275,15 @@ def section_envelopes(shape, clearance, thickness, section_count=None, radial_co
                        Plane(origin=(box.min.X-10,box.min.Y-10,split_z-2)))
     continuation=shape.intersect(continuation_clip)
     def offset(distance):
-        operation=BRepOffsetAPI_MakeOffsetShape()
-        operation.PerformByJoin(foot.wrapped,distance,1e-5,BRepOffset_Skin,False,False,GeomAbs_Arc,True)
-        if not operation.IsDone(): raise ValueError('Local CAD ARC offset failed')
-        result=Solid(operation.Shape())
-        if not result.is_valid or len(result.solids())!=1:
-            raise ValueError('Local CAD ARC offset is not a valid single solid')
+        if distance==0:
+            result=foot
+        else:
+            operation=BRepOffsetAPI_MakeOffsetShape()
+            operation.PerformByJoin(foot.wrapped,distance,1e-5,BRepOffset_Skin,False,False,GeomAbs_Arc,True)
+            if not operation.IsDone(): raise ValueError('Local CAD ARC offset failed')
+            result=Solid(operation.Shape())
+            if not result.is_valid or len(result.solids())!=1:
+                raise ValueError('Local CAD ARC offset is not a valid single solid')
         joined=result.fuse(continuation).clean()
         if not joined.is_valid or len(joined.solids())!=1:
             raise ValueError('Local CAD offset and exact ankle continuation do not form a valid single solid')
