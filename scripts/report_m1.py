@@ -16,12 +16,18 @@ def report(output: Path, document: Path) -> dict:
     last, geometry, mesh, tests, execution, parameters, roundtrip, surface = [read(name) for name in (
         "last_metadata", "geometry_report", "validation_report", "test_report",
         "execution_report", "parameter_change_report", "roundtrip_report", "surface_report")]
+    repeatability = read("repeatability_report")
+    test_path = output / "test_report.json"
+    if (repeatability.get("run_id") != execution.get("run_id") or not test_path.is_file()
+            or repeatability.get("test_report_sha256") != sha256(test_path)):
+        repeatability = {}
     evidence_provenance = {}
     if execution.get("run_id"):
         expected = execution["run_id"]
         provenance = tests.get("build_provenance", {})
         model = output / "base_shoe.stl"
-        tests_current = (provenance.get("run_id") == expected and model.is_file()
+        tests_current = (provenance.get("directory") == str(output.resolve())
+                         and provenance.get("run_id") == expected and model.is_file()
                          and provenance.get("base_shoe_stl_sha256") == sha256(model))
         parameters_current = parameters.get("baseline", {}).get("run_id") == expected
         evidence_provenance = {"run_id": expected, "test_report_matches_current_build": tests_current,
@@ -57,11 +63,13 @@ def report(output: Path, document: Path) -> dict:
         "mesh_integrity": mesh.get("geometry_status", "NOT_TESTED"),
         "roundtrip": roundtrip.get("status", "NOT_TESTED"),
         "surface_samples": surface.get("geometry_status", "NOT_TESTED"),
+        "exterior_junction_samples": geometry.get("junction", {}).get("geometry_status", "NOT_TESTED"),
+        "bottom_round_samples": geometry.get("sole", {}).get("bottom_round_validation", {}).get("geometry_status", "NOT_TESTED"),
         "parameter_change": parameters.get("status", "NOT_TESTED"),
         "tests": "FAIL" if tests_fail else "PASS" if tests_pass else "NOT_TESTED",
     }
     technical = ("FAIL" if "FAIL" in executed.values() else
-                 "PASS" if all(value == "PASS" for value in executed.values()) else "PARTIAL")
+                 "PASS" if all(value in {"PASS", "NOT_REQUIRED"} for value in executed.values()) else "PARTIAL")
     result = {
         "milestone": 1, "overall_status": "PARTIAL",
         "technical_status": technical, "appearance_acceptance": "PENDING",
@@ -73,6 +81,8 @@ def report(output: Path, document: Path) -> dict:
         "evidence_provenance": evidence_provenance,
         "same_spec_repeatability": {
             "status": requirements["T19"],
+            "relative_deltas_by_protocol": repeatability.get("relative_deltas_by_protocol", {}),
+            "absolute_volume_accuracy": "NOT_VERIFIED",
             "scope": "Independent M1 CLI build compared in CAD volume and coordinates; no byte identity claim"},
         "algorithm_version": geometry.get("algorithm_version", "Not recorded by this generation"),
         "actual_source": last.get("source", {}),
@@ -96,6 +106,12 @@ def report(output: Path, document: Path) -> dict:
     geometry_summary = {key: geometry.get(key) for key in (
         "algorithm_version", "solid_count", "topology_valid", "last_intersection_volume_mm3",
         "cavity_intersection_volume_mm3", "opening_intersection_volume_mm3", "upper_wall_probe")}
+    junction = geometry.get("junction", {}).get("validation", {})
+    geometry_summary["junction_sampling"] = {key: junction.get(key) for key in (
+        "geometry_status", "angle_limit_degrees", "exterior_sample_count", "regions",
+        "excluded_boundary_sample_count", "measurement_error_count", "tolerance_scope")}
+    rounding = geometry.get("sole", {}).get("bottom_round_validation", {})
+    geometry_summary["bottom_round_sampling"] = {key: value for key, value in rounding.items() if key != "records"}
     json_block = lambda value: "```json\n" + json.dumps(value, ensure_ascii=False, indent=2) + "\n```"
     text = f"""# Milestone 1 — 基础鞋型修复验收报告
 
@@ -110,6 +126,8 @@ def report(output: Path, document: Path) -> dict:
 ## 2. 已完成功能
 
 算法版本：`{result['algorithm_version']}`。具体成形方法、拟合过程和实际参数以 `geometry_report.json` 为准。没有对应运行证据的能力不计为通过。
+
+鞋面保留真实 CAD 足部曲面并做局部法向偏移，鞋口采用平顺曲线切削，鞋底使用低足部截面驱动的周期轮廓及真实外表面过渡带。端部和底边已按实际 CAD 检查。原计划的真实截面重建也已实现和测试，但鞋楦踝部的分叉截面使分片融合无法稳定满足要求，因此未选作生产成形方法；失败证据保留在调试目录。选定方法不重拟合源曲面，其源形状拟合误差为零；偏移精度另由独立采样测量，不能把源曲面误差当作壁厚误差。
 
 ## 3. 实际生成文件
 
@@ -152,7 +170,13 @@ def report(output: Path, document: Path) -> dict:
 
 完整位置、排除区域、无法测量区域和偏差见 `surface_report.json`。壁厚与间隙只对实际采样位置负责，不证明全局最小值。鞋口边缘、鞋底加强区和其他排除位置不能被统计结果掩盖。
 
+连接检查来自最终 CAD 的实际相邻面外向法向；完整记录见 `geometry_report.json` 的 `junction.validation`。2° 法向角度上限和 0.02 mm 底边半径误差上限均为本轮实验性数值目标，有限检查不证明全局 G1 连续或制造合格。
+
 参数变化：{parameters.get('status', 'NOT_TESTED')}；底高 `{parameters.get('baseline_value_mm', '未知')} → {parameters.get('variant_value_mm', '未知')}` mm；实际 CAD 体积变化 `{parameters.get('cad_volume_delta_mm3', '未测量')}` mm³。
+
+同参数重复构建采用固定的 Gauss–Kronrod / BSpline-span 体积协议，point 与 XY-plane 两项均须满足原 `1e-8` 相对重复性阈值；细化结果和两协议的绝对差异见 `repeatability_report.json`。默认非自适应体积积分的失败记录保留在调试目录，不能当成真实形状变化，也不通过放宽容差消除失败。积分误差估计只涉及 quadrature，不是完整 CAD 绝对体积误差界。
+
+{json_block(result['same_spec_repeatability'])}
 
 ## 7. 性能
 

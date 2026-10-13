@@ -53,6 +53,10 @@ The first M1 result passed the implemented topology/export checks but had a face
 
 The execution report separates pipeline status from milestone status. M1 remains `PARTIAL` while appearance/user acceptance is pending, even if topology, export and numerical tests pass. A failed numerical check produces a failed execution. Manufacturing, physical printing and wear remain separate qualification levels. M2 starts only after M1 user acceptance.
 
+The selected repair retains the imported CAD foot surfaces through local normal offsets, uses a curved collar and a lower-foot periodic sole with an actual exterior transition band. The CLI requires the sampled exterior junction and bottom round to qualify; complete positions, exclusions and errors remain in `geometry_report.json`. See [repair acceptance](docs/milestone1_repair_report.md) for the recorded results and [geometry](docs/geometry.md) for the selected algorithm and unsuccessful reconstruction trials.
+
+Each generation clears only known pipeline files from its output directory, preserving diagnostics and unrelated files. Tests and sole-height comparison evidence are associated with the current run; rerun them after rebuilding the model. The parameter comparison also accepts `--max-rss-mb` with the same 8192 MiB default.
+
 ## Configuration and outputs
 
 ShoeSpec is JSON with explicit millimetre units for geometry. Manufacturing rules in [config/manufacturing_rules.json](config/manufacturing_rules.json) are experimental and informational for this milestone; they do not certify printability. Milestone 1 outputs belong under `output/m1/`, including the inspected last metadata/normalized STEP and base shoe STEP/STL where those operations succeed. Generated files are not source-controlled.

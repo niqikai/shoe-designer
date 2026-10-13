@@ -48,6 +48,8 @@ def test_all_technical_checks_do_not_accept_appearance(tmp_path):
         "validation_report": {"geometry_status": "PASS"},
         "roundtrip_report": {"status": "PASS"},
         "surface_report": {"geometry_status": "PASS"},
+        "geometry_report": {"junction": {"geometry_status": "PASS"},
+                            "sole": {"bottom_round_validation": {"geometry_status": "PASS"}}},
         "parameter_change_report": {"status": "PASS"},
         "test_report": {"pytest_exit_code": 0, "counts": {"FAIL": 0}, "tests": tests},
     }
@@ -80,3 +82,11 @@ def test_reports_from_previous_generation_are_not_current_evidence(tmp_path):
     assert result["acceptance_levels"]["tests"] == "NOT_TESTED"
     assert result["acceptance_levels"]["parameter_change"] == "NOT_TESTED"
     assert not result["evidence_provenance"]["test_report_matches_current_build"]
+
+
+def test_failed_exterior_junction_is_not_hidden_by_pipeline_pass(tmp_path):
+    (tmp_path / "execution_report.json").write_text('{"status":"PASS"}')
+    (tmp_path / "geometry_report.json").write_text(json.dumps({"junction": {"geometry_status": "FAIL"}}))
+    result = module.report(tmp_path, tmp_path / "report.md")
+    assert result["technical_status"] == "FAIL"
+    assert result["overall_status"] == "PARTIAL"

@@ -25,7 +25,7 @@ GENERATED_NAMES = (
     "validation_report.json", "roundtrip_report.json", "surface_report.json",
     "execution_report.json", "failure_report.json", "mesh_export_report.json",
     "artifact_manifest.json", "test_report.json", "parameter_change_report.json",
-    "acceptance_report.json",
+    "acceptance_report.json", "repeatability_report.json",
 )
 
 
