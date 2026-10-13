@@ -101,22 +101,39 @@ def _ray_hits(intersector, point, direction, length):
     return unique
 
 
+class _LoadedSolidClassifier:
+    """Reuse one native classifier for an unchanged B-Rep within one probe run."""
+    def __init__(self, shape):
+        from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+        self.classifier = BRepClass3d_SolidClassifier(shape.wrapped)
+
+    def inside(self, point):
+        from OCP.TopAbs import TopAbs_IN, TopAbs_ON
+        from OCP.gp import gp_Pnt
+        self.classifier.Perform(gp_Pnt(*point), CAD_TOLERANCE_MM)
+        return self.classifier.State() in (TopAbs_IN, TopAbs_ON)
+
+
 def _inside(shape, point):
-    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
-    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
-    from OCP.gp import gp_Pnt
-    classifier = BRepClass3d_SolidClassifier(shape.wrapped)
-    classifier.Perform(gp_Pnt(*point), CAD_TOLERANCE_MM)
-    return classifier.State() in (TopAbs_IN, TopAbs_ON)
+    return _LoadedSolidClassifier(shape).inside(point)
 
 
-def _distance_to_shape(shape, point):
+def _distance_to_shape(shape, point, solid_classifiers=None):
     from build123d import Vertex
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    # DistShapeShape detects an interior vertex for a Solid, but a Compound of
+    # that same solid can return distance to its boundary instead. Classify the
+    # actual member solids first so material membership remains independent of
+    # the wrapper returned by a Boolean/import operation. Faces and empty shapes
+    # have no solids and retain the usual geometric distance behavior.
+    if solid_classifiers is None:
+        solid_classifiers = tuple(_LoadedSolidClassifier(solid) for solid in shape.solids())
+    if any(classifier.inside(point) for classifier in solid_classifiers):
+        return 0.0
     distance = BRepExtrema_DistShapeShape(Vertex(*point).wrapped, shape.wrapped)
     if not distance.IsDone():
         raise ValueError("CAD distance to opening did not complete")
-    # DistShapeShape returns zero inside a solid, as required for removed sites.
+    # At this point the vertex lies outside every solid member.
     return float(distance.Value())
 
 
@@ -152,6 +169,14 @@ def validate_surface_samples(last_shape, build, spec) -> dict:
               "sampled_clearance_mm": _stats([], spec.upper.clearance_mm),
               "sampled_thickness_mm": _stats([], spec.upper.thickness_mm)}
     if valid:
+        # Loading the same source or shoe for each point dominated measured
+        # runtime. Classifier state is refreshed by Perform for every query;
+        # keep these native objects call-local so another build cannot reuse a
+        # stale shape. The solid-member contract also covers Compound wrappers.
+        last_classifier = _LoadedSolidClassifier(last_shape)
+        shoe_classifier = _LoadedSolidClassifier(build.shape)
+        opening_classifiers = tuple(_LoadedSolidClassifier(s) for s in build.opening.solids())
+        sole_classifiers = tuple(_LoadedSolidClassifier(s) for s in build.sole.solids())
         sites, coverage = _candidate_sites(last_shape)
         report["coverage"] = coverage
         box = last_shape.bounding_box()
@@ -171,19 +196,19 @@ def validate_surface_samples(last_shape, build, spec) -> dict:
                     entry["reason"] = "sole_connection"
                     report["excluded_samples"].append(entry)
                     continue
-                if _distance_to_shape(build.opening, point) <= report["exclusion_policy"]["opening_rim_distance_mm"]:
+                if _distance_to_shape(build.opening, point, opening_classifiers) <= report["exclusion_policy"]["opening_rim_distance_mm"]:
                     entry["reason"] = "opening_removed_surface_or_rim"
                     report["excluded_samples"].append(entry)
                     continue
                 p, n = np.asarray(point), np.asarray(normal)
                 # Verify orientation against the actual solid rather than assuming
                 # every face's parameterization has an outward derivative normal.
-                if not _inside(last_shape, p-n*1e-3) or _inside(last_shape, p+n*1e-3):
+                if not last_classifier.inside(p-n*1e-3) or last_classifier.inside(p+n*1e-3):
                     raise ValueError("last normal is tangent, ambiguous, or not outward")
                 hits = _ray_hits(intersector, point, normal, ray_length)
                 boundaries = sorted(set([0.0, *hits, ray_length]))
                 intervals = [(a, b) for a, b in zip(boundaries, boundaries[1:])
-                             if b-a > 1e-5 and _inside(build.shape, p+n*((a+b)/2))]
+                             if b-a > 1e-5 and shoe_classifier.inside(p+n*((a+b)/2))]
                 if not intervals:
                     raise ValueError("outward ray found no shoe material away from excluded opening/sole regions")
                 a, b = intervals[0]
@@ -192,7 +217,7 @@ def validate_surface_samples(last_shape, build, spec) -> dict:
                 # The sole can rise above the last base. Exclude the actual
                 # material interval where it intersects or approaches the CAD
                 # sole, rather than declaring a tall fixed-height blind band.
-                if any(_distance_to_shape(build.sole, p+n*t) <= report["exclusion_policy"]["sole_junction_distance_mm"]
+                if any(_distance_to_shape(build.sole, p+n*t, sole_classifiers) <= report["exclusion_policy"]["sole_junction_distance_mm"]
                        for t in (a+1e-4, (a+b)/2, b-1e-4)):
                     entry["reason"] = "actual_sole_or_junction_material_interval"
                     entry["material_intervals_mm"] = [[float(a), float(b)] for a, b in intervals]

@@ -255,6 +255,29 @@ def reconstructed_section_envelopes(shape, clearance, thickness, section_count=N
     }
 
 
+def _local_arc_offset(foot, distance):
+    """Run the selected native offset, rejecting failed or null CAD results.
+
+    Native topology validity is not a global self-intersection certificate.
+    Unsupported collisions must fail rather than selecting another algorithm.
+    """
+    from build123d import Solid
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+    from OCP.BRepOffset import BRepOffset_Skin
+    from OCP.GeomAbs import GeomAbs_Arc
+    if distance == 0:
+        return foot
+    operation = BRepOffsetAPI_MakeOffsetShape()
+    operation.PerformByJoin(foot.wrapped, distance, 1e-5, BRepOffset_Skin,
+                            False, False, GeomAbs_Arc, True)
+    if not operation.IsDone() or operation.Shape().IsNull():
+        raise ValueError('Local CAD ARC offset failed to produce a nonnull shape')
+    result = Solid(operation.Shape())
+    if not result.is_valid or len(result.solids()) != 1:
+        raise ValueError('Local CAD ARC offset is not a valid single solid')
+    return result
+
+
 def section_envelopes(shape, clearance, thickness, section_count=None, radial_count=512):
     """Exact local CAD offsets; the removed ankle retains the original source.
 
@@ -263,9 +286,6 @@ def section_envelopes(shape, clearance, thickness, section_count=None, radial_co
     The caller must verify that the continuation boundary is removed by collar.
     """
     from build123d import Solid,Plane
-    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
-    from OCP.BRepOffset import BRepOffset_Skin
-    from OCP.GeomAbs import GeomAbs_Arc
     box=shape.bounding_box()
     split_z=box.min.Z+.66*box.size.Z
     clip=Solid.make_box(box.size.X+20,box.size.Y+20,split_z-box.min.Z+10,
@@ -275,15 +295,7 @@ def section_envelopes(shape, clearance, thickness, section_count=None, radial_co
                        Plane(origin=(box.min.X-10,box.min.Y-10,split_z-2)))
     continuation=shape.intersect(continuation_clip)
     def offset(distance):
-        if distance==0:
-            result=foot
-        else:
-            operation=BRepOffsetAPI_MakeOffsetShape()
-            operation.PerformByJoin(foot.wrapped,distance,1e-5,BRepOffset_Skin,False,False,GeomAbs_Arc,True)
-            if not operation.IsDone(): raise ValueError('Local CAD ARC offset failed')
-            result=Solid(operation.Shape())
-            if not result.is_valid or len(result.solids())!=1:
-                raise ValueError('Local CAD ARC offset is not a valid single solid')
+        result=_local_arc_offset(foot,distance)
         joined=result.fuse(continuation).clean()
         if not joined.is_valid or len(joined.solids())!=1:
             raise ValueError('Local CAD offset and exact ankle continuation do not form a valid single solid')

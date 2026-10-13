@@ -119,3 +119,77 @@ def test_raised_actual_sole_junction_is_excluded_without_hiding_upper_thin_regio
     build.shape = build.shape.cut(box_at(-10, -5, 12, 8, 30, 7))
     report = validate_surface_samples(last, build, spec)
     assert check_by_name(report, "sampled_directional_thickness")["status"] == "FAIL"
+
+
+def test_distance_solid_membership_is_preserved_by_compound_wrapper():
+    from build123d import Compound
+    from shoe_poc.validation.surface import _distance_to_shape
+    solid = Solid.make_box(10, 10, 10)
+    compound = Compound([solid])
+    assert _distance_to_shape(solid, (5, 5, 5)) == 0
+    assert _distance_to_shape(compound, (5, 5, 5)) == 0
+    assert _distance_to_shape(solid, (15, 5, 5)) == pytest.approx(5)
+    assert _distance_to_shape(compound, (15, 5, 5)) == pytest.approx(5)
+    members = Compound([solid, box_at(20, 0, 0, 10, 10, 10)])
+    assert _distance_to_shape(members, (25, 5, 5)) == 0
+    # Surface-only queries must still use geometric distance, not classify a
+    # face as though it were a closed solid.
+    top_face = next(face for face in solid.faces() if face.normal_at().Z > 0.99)
+    assert _distance_to_shape(top_face, (5, 5, 15)) == pytest.approx(5)
+
+
+def test_actual_raised_sole_compound_excludes_material_without_hiding_thin_upper(spec):
+    from build123d import Compound
+    last, build = actual_shell()
+    raised = box_at(31, -3.5, 0, 7, 27, 11)
+    build.sole = Compound([build.sole.fuse(raised)])
+    build.shape = build.shape.fuse(raised)
+    report = validate_surface_samples(last, build, spec)
+    assert any(s['reason'] == 'actual_sole_or_junction_material_interval'
+               for s in report['excluded_samples'])
+    assert check_by_name(report, 'sampled_directional_thickness')['status'] == 'PASS'
+    build.shape = build.shape.cut(box_at(-10, -5, 12, 8, 30, 7))
+    report = validate_surface_samples(last, build, spec)
+    assert check_by_name(report, 'sampled_directional_thickness')['status'] == 'FAIL'
+
+
+def test_actual_opening_compound_wrapper_preserves_exclusions(spec):
+    from build123d import Compound
+    last, build = actual_shell()
+    original = validate_surface_samples(last, build, spec)
+    build.opening = Compound([build.opening])
+    wrapped = validate_surface_samples(last, build, spec)
+    assert wrapped['geometry_status'] == original['geometry_status'] == 'PASS'
+    assert len(wrapped['samples']) == len(original['samples'])
+    assert len(wrapped['excluded_samples']) == len(original['excluded_samples'])
+    assert wrapped['unmeasurable_regions'] == []
+
+
+def test_reused_native_classifier_refreshes_inside_on_and_cavity_states():
+    from shoe_poc.validation.surface import _LoadedSolidClassifier, _inside
+    # A genuine sealed void exercises OUT inside the outer bounding box, and
+    # alternating queries ensure a previous IN/ON result cannot leak forward.
+    solid = Solid.make_box(10, 10, 10).cut(box_at(3, 3, 3, 4, 4, 4))
+    assert solid.is_valid and len(solid.solids()) == 1
+    classifier = _LoadedSolidClassifier(solid)
+    queries = [((1, 5, 5), True), ((5, 5, 5), False),
+               ((0, 5, 5), True), ((15, 5, 5), False),
+               ((3, 5, 5), True), ((1, 5, 5), True)]
+    for _ in range(3):
+        for point, expected in queries:
+            assert classifier.inside(point) is expected
+            assert classifier.inside(point) == _inside(solid, point)
+
+
+def test_cached_solid_members_preserve_exact_compound_distance_queries():
+    from build123d import Compound
+    from shoe_poc.validation.surface import _LoadedSolidClassifier, _distance_to_shape
+    hollow = Solid.make_box(10, 10, 10).cut(box_at(3, 3, 3, 4, 4, 4))
+    shape = Compound([hollow, box_at(20, 0, 0, 10, 10, 10)])
+    classifiers = tuple(_LoadedSolidClassifier(solid) for solid in shape.solids())
+    for _ in range(2):
+        for point, expected in [((25, 5, 5), 0), ((15, 5, 5), 5),
+                                ((5, 5, 5), 2), ((3, 5, 5), 0), ((1, 5, 5), 0)]:
+            assert _distance_to_shape(shape, point, classifiers) == pytest.approx(expected)
+            assert _distance_to_shape(shape, point, classifiers) == pytest.approx(
+                _distance_to_shape(shape, point))

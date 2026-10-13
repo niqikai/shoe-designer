@@ -108,3 +108,33 @@ def test_input_failure_discards_previous_run_evidence(tmp_path):
     assert not (tmp_path / "test_report.json").exists()
     recorded = json.loads((tmp_path / "execution_report.json").read_text())
     assert recorded["status"] == "FAIL" and recorded["run_id"] == "current"
+
+
+def test_direct_build_caller_preserves_failure_evidence(tmp_path):
+    from shoe_poc.cli import build_base
+    spec = tmp_path / "bad_spec.json"
+    spec.write_text('{"unit":"inch"}')
+    output = tmp_path / "reports"
+    with pytest.raises(ValueError):
+        build_base(spec, output, run_id="variant-attempt")
+    execution = json.loads((output / "execution_report.json").read_text())
+    failure = json.loads((output / "failure_report.json").read_text())
+    assert execution["status"] == failure["status"] == "FAIL"
+    assert execution["run_id"] == failure["run_id"] == "variant-attempt"
+    assert execution["milestone_status"] == "PARTIAL"
+
+
+def test_import_failure_keeps_elapsed_stage_record(tmp_path):
+    from shoe_poc.cli import build_base
+    data = json.loads((Path(__file__).resolve().parents[2] / "input/specs/shoe_spec.json").read_text())
+    data["last"]["file"] = str(tmp_path / "missing.step")
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(data))
+    output = tmp_path / "report"
+    with pytest.raises(FileNotFoundError):
+        build_base(spec, output)
+    report = json.loads((output / "execution_report.json").read_text())
+    assert report["status"] == "FAIL"
+    assert report["last_completed_or_failed_stage"] == "import_last"
+    assert report["last_stage_status"] == "FAILED"
+    assert report["timings_seconds"]["import_last"] > 0

@@ -93,6 +93,20 @@ def inspect_last(path: Path, output: Path) -> dict:
 
 def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                *, run_id: str | None = None) -> dict:
+    run_id = run_id or str(uuid4())
+    started = time.perf_counter()
+    try:
+        return _build_base(spec_path, output, compare_with, run_id=run_id)
+    except Exception as error:
+        _record_build_failure(output, run_id, error, time.perf_counter()-started)
+        write_json(output / "failure_report.json", {"status": "FAIL", "run_id": run_id,
+                   "type": type(error).__name__, "error": str(error),
+                   "traceback": traceback.format_exc(), "elapsed_seconds": time.perf_counter()-started})
+        raise
+
+
+def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
+                *, run_id: str) -> dict:
     if compare_with is not None:
         if not compare_with.is_file():
             raise FileNotFoundError(f"Comparison STL does not exist: {compare_with}")
@@ -109,7 +123,6 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
     started = time.perf_counter()
     spec = ShoeSpec.load(spec_path)
     cleared = _prepare_build_output(output, spec_path, Path(spec.last.file), compare_with)
-    run_id = run_id or str(uuid4())
     write_json(output / "execution_report.json", {"task": "Milestone 1 build-base",
                "status": "RUNNING", "run_id": run_id, "generated_at": utc_now(),
                "stale_generated_files_removed": cleared})
@@ -118,9 +131,18 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
     def stage(name, action):
         LOG.info("%s", name)
         before = time.perf_counter()
-        result = action()
-        timings[name] = time.perf_counter() - before
-        return result
+        stage_status = "FAILED"
+        try:
+            result = action()
+            stage_status = "COMPLETED"
+            return result
+        finally:
+            timings[name] = time.perf_counter() - before
+            write_json(output / "execution_report.json", {"task": "Milestone 1 build-base",
+                       "status": "RUNNING", "run_id": run_id, "generated_at": utc_now(),
+                       "stale_generated_files_removed": cleared, "timings_seconds": timings,
+                       "elapsed_seconds": time.perf_counter()-started,
+                       "last_completed_or_failed_stage": name, "last_stage_status": stage_status})
 
     loaded = stage("import_last", lambda: load_last(spec.last.file))
     source_geometry = analyze_shape(loaded.shape)
@@ -168,6 +190,7 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                         "normalized_last_bounds_max_delta_mm": normalized_bounds_delta,
                         "stl_bbox_max_delta_mm": stl_bbox_delta,
                         "bbox_tolerance_mm": 0.3, "volume_relative_tolerance": 1e-5,
+                        "volume_measurement_protocol": original["volume_measurement"],
                         "status": "PASS" if roundtrip["topology_valid"] and roundtrip["solid_count"] == 1
                         and step_bbox_delta <= 0.3 and stl_bbox_delta <= 0.3 and volume_delta <= 1e-5 else "FAIL"}
     write_json(output / "roundtrip_report.json", roundtrip_checks)
@@ -181,11 +204,16 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                                                               output / "last_normalized.stl",
                                                               output / "comparison.png"))
     passed = (mesh["geometry_status"] == "PASS" and roundtrip_checks["status"] == "PASS"
-              and surface["geometry_status"] != "FAIL")
+              and surface["geometry_status"] == "PASS"
+              and result.metadata.get("junction", {}).get("geometry_status") == "PASS"
+              and result.metadata.get("sole", {}).get("bottom_round_validation", {}).get("geometry_status")
+              in {"PASS", "NOT_REQUIRED"})
     execution = {"task": "Milestone 1 build-base", "status": "PASS" if passed else "FAIL",
                  "run_id": run_id, "stale_generated_files_removed": cleared,
                  "milestone_status": "PARTIAL",
                  "appearance_acceptance": "PENDING",
+                 "junction_sampling_status": result.metadata["junction"]["geometry_status"],
+                 "bottom_round_sampling_status": result.metadata["sole"]["bottom_round_validation"]["geometry_status"],
                  "scope": "CAD and exported geometry only; full POC/manufacturing/print NOT_VERIFIED",
                  "generated_at": utc_now(), "input_file": str(Path(spec.last.file)),
                  "input_sha256": loaded.source["sha256"], "spec_source": str(spec_path.resolve()),
@@ -204,7 +232,7 @@ def build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
         (output / "failure_report.json").unlink(missing_ok=True)
     write_json(output / "artifact_manifest.json", artifact_manifest(output))
     if not passed:
-        raise RuntimeError("Exported geometry failed integrity/roundtrip checks; inspect saved reports")
+        raise RuntimeError("Exported geometry or sampled CAD checks failed; inspect saved reports")
     LOG.info("Geometry pipeline PASS; M1 PARTIAL, appearance PENDING, manufacturing NOT_VERIFIED. Output: %s", output.resolve())
     return execution
 

@@ -16,7 +16,7 @@ import time
 import numpy as np
 import trimesh
 
-from shoe_poc.cli import GENERATED_NAMES, _prepare_build_output, build_base
+from shoe_poc.cli import _prepare_build_output, build_base
 from shoe_poc.last import analyze_shape
 from shoe_poc.reporting import sha256, utc_now, write_json
 from shoe_poc.schemas import ShoeSpec
@@ -57,6 +57,9 @@ def measure(directory: Path) -> dict:
         "execution_status": read_json(directory / "execution_report.json")["status"],
         "run_id": read_json(directory / "execution_report.json").get("run_id"),
         "surface_sampling_status": read_json(directory / "surface_report.json")["geometry_status"],
+        "junction_sampling_status": geometry["junction"]["geometry_status"],
+        "upper_volume_mm3": geometry["upper_volume_mm3"],
+        "lower_foot_station_profiles": geometry["sole"]["lower_foot_station_profiles"],
         "input_sha256": read_json(directory / "last_metadata.json")["source"]["sha256"],
     }
 
@@ -80,18 +83,36 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
     cleared = _prepare_build_output(output, variant_path, Path(spec.last.file), None)
     write_json(variant_path, variant_spec.model_dump(mode="json"))
     build_base(variant_path, output)
+    return compare_existing(baseline, output, started=started, cleared=cleared, original=original)
+
+
+def compare_existing(baseline: Path, output: Path, *, started=None, cleared=None, original=None) -> dict:
+    """Measure saved independently generated models without rebuilding them.
+
+    Height changes the lower wall/rocker intersection slightly in XY. The
+    contract is the bottom datum, unchanged upper and lower-contour reference;
+    retain every measured XY delta rather than assert a pure Z translation.
+    """
+    reuse = original is None
+    started = time.perf_counter() if started is None else started
+    baseline, output = baseline.resolve(), output.resolve()
+    original = measure(baseline) if original is None else original
     variant = measure(output)
+    baseline_spec = ShoeSpec.load(baseline / "shoe_spec.json")
+    variant_spec = ShoeSpec.load(output / "shoe_spec.json")
+    height_mm = variant_spec.sole.height_mm
+    expected_spec = baseline_spec.model_dump()
+    expected_spec["sole"]["height_mm"] = height_mm
     delta = height_mm - original["sole_height_mm"]
     bounds0 = np.asarray([original["cad"]["bbox_mm"]["min"], original["cad"]["bbox_mm"]["max"]])
     bounds1 = np.asarray([variant["cad"]["bbox_mm"]["min"], variant["cad"]["bbox_mm"]["max"]])
-    expected = np.zeros((2, 3))
-    expected[0, 2] = -delta
     bound_change = bounds1 - bounds0
     extent_change = np.asarray(variant["cad"]["bbox_mm"]["size"]) - original["cad"]["bbox_mm"]["size"]
     checks = {
         "same_actual_last_source": original["input_sha256"] == variant["input_sha256"],
         "both_execution_checks_pass": original["execution_status"] == variant["execution_status"] == "PASS",
         "both_surface_sampling_pass": all(v["surface_sampling_status"] == "PASS" for v in (original, variant)),
+        "both_exterior_junction_sampling_pass": all(v["junction_sampling_status"] == "PASS" for v in (original, variant)),
         "both_valid_single_cad_solid": all(v["cad"]["topology_valid"] and v["cad"]["solid_count"] == 1 for v in (original, variant)),
         "both_watertight_connected_meshes_without_unintended_handles": all(
             v["mesh"]["watertight"] and v["mesh"]["winding_consistent"]
@@ -99,8 +120,13 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
             for v in (original, variant)),
         "both_envelopes_contain_last_and_cavity": all(max(v["containment_mm3"].values()) <= 0.01 for v in (original, variant)),
         "both_preserve_cavity_and_opening": all(max(v["exclusion_mm3"].values()) <= 0.01 for v in (original, variant)),
-        "only_bottom_moves_by_requested_height": bool(np.allclose(bound_change, expected, atol=1e-6, rtol=0)),
-        "overall_z_extent_increases_by_requested_height": bool(np.allclose(extent_change, [0, 0, delta], atol=1e-6, rtol=0)),
+        "height_increases": delta > 0,
+        "bottom_moves_by_requested_height": bool(np.isclose(bound_change[0, 2], -delta, atol=1e-6, rtol=0)),
+        "highest_point_stays_fixed": bool(np.isclose(bound_change[1, 2], 0, atol=1e-6, rtol=0)),
+        "overall_z_extent_increases_by_requested_height": bool(np.isclose(extent_change[2], delta, atol=1e-6, rtol=0)),
+        "lower_foot_contour_reference_unchanged": original["lower_foot_station_profiles"] == variant["lower_foot_station_profiles"],
+        "upper_geometry_volume_unchanged_within_existing_volume_tolerance": abs(variant["upper_volume_mm3"]-original["upper_volume_mm3"]) <= .01,
+        "only_height_parameter_changes": expected_spec == variant_spec.model_dump(),
         "variant_full_cad_volume_increases": variant["cad"]["volume_mm3"] > original["cad"]["volume_mm3"],
         "variant_full_mesh_volume_increases": variant["mesh"]["volume_mm3"] > original["mesh"]["volume_mm3"],
         "variant_model_files_differ": all(original["files"][name]["sha256"] != variant["files"][name]["sha256"] for name in ("base_shoe.step", "base_shoe.stl")),
@@ -122,6 +148,8 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
         "variant_value_mm": height_mm, "parameter_delta_mm": delta,
         "cad_bbox_min_max_delta_mm": bound_change.tolist(), "cad_extents_delta_mm": extent_change.tolist(),
         "cad_volume_delta_mm3": variant["cad"]["volume_mm3"] - original["cad"]["volume_mm3"],
+        "upper_volume_delta_mm3": variant["upper_volume_mm3"]-original["upper_volume_mm3"],
+        "xy_change_scope": "Height changes the lower Bezier wall/rocker intersection; all actual XY changes remain reported. Pure XY invariance is not the sole-height contract.",
         "mesh_volume_delta_mm3": variant["mesh"]["volume_mm3"] - original["mesh"]["volume_mm3"],
         "tolerances": {"cad_coordinate_mm": 1e-6, "containment_and_exclusion_mm3": 0.01},
         "checks": checks, "baseline": original, "variant": variant,
@@ -131,7 +159,8 @@ def verify(spec_path: Path, baseline: Path, output: Path, height_mm: float) -> d
             "vertices_equal_within_1e_6_mm": same_vertices, "triangle_connectivity_equal": same_faces},
         "identical_spec_full_shoe_rebuild_repeatability": {"status": "NOT_TESTED",
             "reason": "This run changes sole height; it does not repeat the entire full-shoe build at an identical ShoeSpec."},
-        "stale_variant_files_removed_before_build": cleared,
+        "stale_variant_files_removed_before_build": cleared or [],
+        "comparison_reuses_saved_models": reuse,
         "elapsed_seconds": time.perf_counter() - started,
     }
 

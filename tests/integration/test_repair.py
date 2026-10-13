@@ -13,17 +13,27 @@ import numpy as np
 import pytest
 
 from shoe_poc.schemas import ShoeSpec
+from shoe_poc.reporting import sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.real_last
 
 
 @pytest.fixture(scope="module")
-def repair_output():
+def repair_output(request):
     folder = Path(os.environ.get("SHOE_POC_REPAIR_OUTPUT", ROOT / "output/m1_repair"))
-    required = ("shoe_spec.json", "last_normalized.step", "base_shoe.step", "surface_report.json")
+    required = ("shoe_spec.json", "last_normalized.step", "base_shoe.step", "base_shoe.stl",
+                "surface_report.json", "execution_report.json", "geometry_report.json",
+                "validation_report.json", "roundtrip_report.json")
     if not all((folder / name).is_file() for name in required):
         pytest.skip("Actual real-last M1 repair artifacts unavailable; repair integration NOT_TESTED")
+    execution = json.loads((folder / "execution_report.json").read_text())
+    # Freeze the actual artifact fixture's identity at test time. The JSON
+    # report destination alone does not identify the model that was tested.
+    request.config._shoe_repair_provenance = {
+        "directory": str(folder.resolve()), "run_id": execution.get("run_id"),
+        "base_shoe_stl_sha256": sha256(folder / "base_shoe.stl"),
+    }
     return folder
 
 
@@ -50,7 +60,72 @@ def test_repair_v01_defaults_are_saved_with_actual_cad(repair_output, repaired_s
     # Independent final-solid Boolean: a watertight shell alone does not prove
     # that the actual licensed last remains excluded from the exported shoe.
     overlap = shoe.intersect(last)
-    assert sum(s.volume for s in overlap.solids()) <= 0.01
+    overlap_volume = sum(s.volume for s in overlap.solids()) if overlap is not None else 0.0
+    assert overlap_volume <= 0.01
+
+
+def test_saved_real_positive_pipeline_contract_and_current_artifacts(repair_output, surface_report):
+    """A truthful FAIL report alone cannot qualify the positive repair fixture."""
+    read = lambda name: json.loads((repair_output / f"{name}.json").read_text())
+    execution, geometry, mesh, roundtrip = [read(name) for name in (
+        "execution_report", "geometry_report", "validation_report", "roundtrip_report")]
+    spec = ShoeSpec.load(repair_output / "shoe_spec.json")
+    assert execution["run_id"]
+    assert execution["status"] == "PASS"
+    assert execution["milestone_status"] == "PARTIAL"
+    assert execution["appearance_acceptance"] == "PENDING"
+    assert mesh["geometry_status"] == roundtrip["status"] == surface_report["geometry_status"] == "PASS"
+    assert mesh["manufacturing_status"] == surface_report["manufacturing_status"] == "NOT_VERIFIED"
+    # A previous model/report pair must not pass by occupying the same paths.
+    outputs = execution["outputs"]
+    assert {"base_shoe.step", "base_shoe.stl", "last_normalized.step", "shoe_spec.json",
+            "geometry_report.json", "surface_report.json", "validation_report.json",
+            "roundtrip_report.json"} <= outputs.keys()
+    for name, recorded in outputs.items():
+        artifact = repair_output / name
+        assert artifact.is_file(), name
+        assert artifact.stat().st_size == recorded["bytes"], name
+        assert sha256(artifact) == recorded["sha256"], name
+    assert execution["input_sha256"] == sha256(Path(spec.last.file))
+    assert not (repair_output / "failure_report.json").exists()
+
+    targets = surface_report["targets_mm"]
+    assert targets == {"clearance": spec.upper.clearance_mm, "thickness": spec.upper.thickness_mm}
+    tolerances = surface_report["tolerances_mm"]
+    assert tolerances["clearance_absolute_error"] == .25
+    assert tolerances["thickness_absolute_error"] == .35
+    assert tolerances["cad_intersection"] == 1e-6
+    assert not surface_report["unmeasurable_regions"]
+    coverage = surface_report["coverage"]
+    assert coverage["planned_site_count"] == min(512, coverage["candidate_count"])
+    assert coverage["sampled_face_count"] == coverage["last_face_count"]
+    assert coverage["faces_without_valid_uv_site"] == coverage["faces_omitted_by_budget"] == []
+    samples = surface_report["samples"]
+    assert samples
+    for sample in samples:
+        assert sample["status"] == "PASS"
+        assert abs(sample["clearance_mm"]-targets["clearance"]) <= .25
+        assert abs(sample["thickness_mm"]-targets["thickness"]) <= .35
+        assert sample["clearance_deviation_mm"] == pytest.approx(sample["clearance_mm"]-targets["clearance"], abs=1e-12)
+        assert sample["thickness_deviation_mm"] == pytest.approx(sample["thickness_mm"]-targets["thickness"], abs=1e-12)
+    for field, statistics in (("clearance", "sampled_clearance_mm"), ("thickness", "sampled_thickness_mm")):
+        values = [sample[f"{field}_mm"] for sample in samples]
+        stats = surface_report[statistics]
+        assert stats["count"] == len(samples)
+        assert stats["minimum_mm"] == min(values)
+        assert stats["maximum_mm"] == max(values)
+        assert stats["mean_mm"] == pytest.approx(float(np.mean(values)), abs=1e-12)
+    junction = geometry["junction"]
+    assert junction["geometry_status"] == junction["validation"]["geometry_status"] == "PASS"
+    validation = junction["validation"]
+    assert validation["measurement_error_count"] == 0
+    assert validation["records"]
+    assert all(r["status"] == "PASS" and r["normal_angle_degrees"] <= validation["angle_limit_degrees"]
+               for r in validation["records"])
+    assert all(validation["regions"][region]["geometry_status"] == "PASS"
+               and validation["regions"][region]["sample_count"] > 0 for region in ("heel", "middle", "toe"))
+    rounding = geometry["sole"]["bottom_round_validation"]
+    assert rounding["geometry_status"] == ("PASS" if spec.sole.profile_parameters.edge_radius_mm else "NOT_REQUIRED")
 
 
 def test_saved_real_sampling_reports_errors_exclusions_and_unknowns(surface_report):
