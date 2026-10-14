@@ -138,3 +138,39 @@ def test_import_failure_keeps_elapsed_stage_record(tmp_path):
     assert report["last_completed_or_failed_stage"] == "import_last"
     assert report["last_stage_status"] == "FAILED"
     assert report["timings_seconds"]["import_last"] > 0
+
+
+def test_design_baseline_never_overwrites_itself(tmp_path):
+    from shoe_poc.cli import build_base
+    saved = tmp_path / "execution_report.json"
+    saved.write_text('{"run_id":"previous","status":"PASS"}')
+    with pytest.raises(InputError, match="baseline and output must differ"):
+        build_base(tmp_path / "spec.json", tmp_path, design_baseline=tmp_path)
+    assert json.loads(saved.read_text())["run_id"] == "previous"
+    assert not (tmp_path / "failure_report.json").exists()
+
+
+@pytest.mark.parametrize("changed_field", ["clearance_mm", "thickness_mm"])
+def test_design_comparison_rejects_changed_fit_before_build(tmp_path, changed_field):
+    from shoe_poc.cli import build_base
+    from shoe_poc.reporting import sha256
+    root = Path(__file__).resolve().parents[2]
+    data = json.loads((root / "input/specs/shoe_spec.json").read_text())
+    # Only input validation runs: these placeholders must never be imported.
+    source = tmp_path / "source.step"
+    source.write_text("immutable source")
+    data["last"]["file"] = str(source)
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    for name in ("base_shoe.step", "last_normalized.step", "cavity.step"):
+        (baseline / name).write_text("preserved original")
+    (baseline / "shoe_spec.json").write_text(json.dumps(data))
+    (baseline / "last_metadata.json").write_text(json.dumps({"source": {"sha256": sha256(source)}}))
+    data["upper"][changed_field] += .2
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(data))
+    with pytest.raises(InputError, match="retain the baseline clearance and upper thickness"):
+        build_base(spec, tmp_path / "new", design_baseline=baseline)
+    assert (baseline / "base_shoe.step").read_text() == "preserved original"
+    failure = json.loads((tmp_path / "new/failure_report.json").read_text())
+    assert failure["status"] == "FAIL"

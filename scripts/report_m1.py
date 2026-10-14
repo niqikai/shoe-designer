@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import shlex
 
 from shoe_poc.reporting import artifact_manifest, sha256, utc_now, write_json
 
@@ -17,6 +18,7 @@ def report(output: Path, document: Path) -> dict:
         "last_metadata", "geometry_report", "validation_report", "test_report",
         "execution_report", "parameter_change_report", "roundtrip_report", "surface_report")]
     repeatability = read("repeatability_report")
+    design = read("design_report")
     test_path = output / "test_report.json"
     if (repeatability.get("run_id") != execution.get("run_id") or not test_path.is_file()
             or repeatability.get("test_report_sha256") != sha256(test_path)):
@@ -68,6 +70,9 @@ def report(output: Path, document: Path) -> dict:
         "parameter_change": parameters.get("status", "NOT_TESTED"),
         "tests": "FAIL" if tests_fail else "PASS" if tests_pass else "NOT_TESTED",
     }
+    if design:
+        executed["annotated_design_geometry"] = (design.get("geometry_status", "NOT_TESTED")
+            if design.get("run_id") == execution.get("run_id") else "NOT_TESTED")
     technical = ("FAIL" if "FAIL" in executed.values() else
                  "PASS" if all(value in {"PASS", "NOT_REQUIRED"} for value in executed.values()) else "PARTIAL")
     result = {
@@ -85,6 +90,9 @@ def report(output: Path, document: Path) -> dict:
             "absolute_volume_accuracy": "NOT_VERIFIED",
             "scope": "Independent M1 CLI build compared in CAD volume and coordinates; no byte identity claim"},
         "algorithm_version": geometry.get("algorithm_version", "Not recorded by this generation"),
+        "annotated_design": {key: design.get(key) for key in (
+            "geometry_status", "metrics_status", "appearance_acceptance", "baseline_directory",
+            "baseline_files", "baseline_comparison", "forefoot_constraint") } if design else {},
         "actual_source": last.get("source", {}),
         "limitations": geometry.get("limitations", []) + [
             "Appearance requires actual-image review and user acceptance; topology alone cannot qualify the shoe template.",
@@ -113,6 +121,34 @@ def report(output: Path, document: Path) -> dict:
     rounding = geometry.get("sole", {}).get("bottom_round_validation", {})
     geometry_summary["bottom_round_sampling"] = {key: value for key, value in rounding.items() if key != "records"}
     json_block = lambda value: "```json\n" + json.dumps(value, ensure_ascii=False, indent=2) + "\n```"
+    resolved = read("shoe_spec")
+    spec_command = shlex.quote(execution.get("spec_source", "input/specs/shoe_spec.json"))
+    out_command = shlex.quote(str(output))
+    doc_command = shlex.quote(str(document))
+    variant_height = float(resolved.get("sole", {}).get("profile_parameters", {}).get("height_mm", 20))+5
+    baseline_command = (f" --design-baseline {shlex.quote(design['baseline_directory'])}" if design.get("baseline_directory") else "")
+    comparison = execution.get("comparison_input") or ("output/m1_repair/base_shoe.stl" if design else "output/m1/base_shoe.stl")
+    compare_command = f" --compare-with {shlex.quote(comparison)}"
+    test_environment = (f"SHOE_POC_SPEC={spec_command} SHOE_POC_REPAIR_OUTPUT={out_command} SHOE_POC_DESIGN_OUTPUT={out_command} " if design else f"SHOE_POC_REPAIR_OUTPUT={out_command} ")
+    design_text = ""
+    if design:
+        underfoot = design.get("underfoot", {})
+        design_text = f"""
+## 标注修复的独立记录
+
+实际设计描述符来自 CAD 截面、开口交线和最终实体法线测量，`metrics_status={design.get('metrics_status')}`；数值描述不自动成为外形通过。源楦/原腔体对称差、每一项检查与受约束前掌宽度见 `design_report.json`；参考腔体来源见 `baseline/reference_provenance.json`，不能把重建参考冒充原输出已有的 STEP。
+
+鞋体最高点 `{design.get('shoe_peak_z_mm')}` mm。独立足底采样 `{underfoot.get('sample_count', len(underfoot.get('samples', [])))}` 点，最小观测材料区间 `{underfoot.get('minimum_measured_directional_material_mm')}` mm，检查状态 `{underfoot.get('geometry_status')}`；后跟、中足、前掌覆盖和误差逐项记录。鞋面采样排除鞋底加强区，不能替代该测量；两类有限采样都不证明全局最小厚度。
+
+| 图中问题 | 本轮处理 | 状态界限 |
+| --- | --- | --- |
+| 1 / 4 鞋背高峰、侧面轮廓 | 前移鞋口前缘，使用三维切削曲面降低并展宽鞋背峰 | 有尺寸及同角度图证据，外形仍待确认 |
+| 5 鞋口线条生硬 | 后跟与两侧采用连续高度变化；检查实际相交口沿闭环及切向 | 有限连续性检查不代替视觉和穿入验证 |
+| 3 厚重直侧墙 | 减小底高与下缘外扩，增加曲壁控制 | 实际截面结果及图像为准，不能把输入位移当实测弧度 |
+| 6 前掌上翘不足 | 提高外底翘度并提前翘度起点 | 实测外底升高，不改变楦内脚位 |
+| 2 / 7 / 8 鞋头偏重、前掌宽、水滴比例 | 减少可避免的鞋底扩张，保留真实楦与1mm净空、2.5mm壁厚 | 前掌比例尚未解决，不能通过侵腔或缩楦宣称修复 |
+
+"""
     text = f"""# Milestone 1 — 基础鞋型修复验收报告
 
 ## 1. 完成状态
@@ -142,10 +178,10 @@ def report(output: Path, document: Path) -> dict:
 执行记录、参数 SHA-256 和耗时以 `execution_report.json` 为准。修复验证使用以下命令；命令列在此处不代表执行成功：
 
 ```sh
-.venv/bin/python -m shoe_poc run --spec input/specs/shoe_spec.json --output output/m1_repair --compare-with output/m1/base_shoe.stl
-.venv/bin/python scripts/verify_parameters.py --spec input/specs/shoe_spec.json --baseline output/m1_repair --output output/m1_repair/variant
-.venv/bin/python -m pytest -q --report-json output/m1_repair/test_report.json
-.venv/bin/python scripts/report_m1.py --output output/m1_repair --document docs/milestone1_repair_report.md
+.venv/bin/python -m shoe_poc run --spec {spec_command} --output {out_command}{compare_command}{baseline_command}
+.venv/bin/python scripts/verify_parameters.py --spec {spec_command} --baseline {out_command} --output {out_command}/variant --height-mm {variant_height:g}
+{test_environment}.venv/bin/python -m pytest -q --report-json {out_command}/test_report.json
+.venv/bin/python scripts/report_m1.py --output {out_command} --document {doc_command}
 ```
 
 ## 5. 测试结果
@@ -178,6 +214,7 @@ def report(output: Path, document: Path) -> dict:
 
 {json_block(result['same_spec_repeatability'])}
 
+{design_text}
 ## 7. 性能
 
 CLI 耗时 `{execution.get('elapsed_seconds', '未记录')}` 秒；阶段耗时 `{execution.get('timings_seconds', {})}`；进程峰值 RSS `{execution.get('environment', {}).get('process_peak_rss_bytes', '未记录')}` 字节；STL 三角面 `{mesh.get('triangles', '未记录')}`。采样 RSS 保护不是操作系统硬限制。Linux/Docker 未实际运行则保持 NOT_TESTED。

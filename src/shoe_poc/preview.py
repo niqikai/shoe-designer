@@ -122,7 +122,7 @@ def render_upper_gate(upper_model: Path, cavity_model: Path, last_model: Path, o
 
 
 def render_comparison(previous_model: Path, model: Path, last_model: Path,
-                      output: Path) -> None:
+                      output: Path, *, previous_label="Original M1", current_label="M1 repair") -> None:
     """Compare reimported STL geometry with identical cameras and scale.
 
     Sections overlay the source last, so changes to the exterior cannot hide
@@ -135,8 +135,8 @@ def render_comparison(previous_model: Path, model: Path, last_model: Path,
     fig, axes = plt.subplots(4, 2, figsize=(15, 18), facecolor="#f3f5f7")
     for row, (elev, azim, title) in enumerate([
             (28, -55, "Perspective"), (0, -90, "Side"), (90, -90, "Top")]):
-        for column, (mesh, label) in enumerate([(previous, "Original M1"),
-                                                (current, "M1 repair")]):
+        for column, (mesh, label) in enumerate([(previous, previous_label),
+                                                (current, current_label)]):
             axes[row, column].imshow(rasterize(mesh, elev, azim, frame_bounds=frame))
             axes[row, column].set_title(f"{label} · {title}")
             axes[row, column].set_axis_off()
@@ -145,8 +145,8 @@ def render_comparison(previous_model: Path, model: Path, last_model: Path,
     for axis, origin, normal, indices, title in [
             (axes[3, 0], [0, y, 0], [0, 1, 0], [0, 2], "Longitudinal section"),
             (axes[3, 1], [x, 0, 0], [1, 0, 0], [1, 2], "Forefoot section")]:
-        for mesh, color, label in [(previous, "#d88a2f", "Original M1"),
-                                    (current, "#148eaa", "M1 repair"),
+        for mesh, color, label in [(previous, "#d88a2f", previous_label),
+                                    (current, "#148eaa", current_label),
                                     (last, "#444444", "Real last")]:
             section = mesh.section(plane_origin=origin, plane_normal=normal)
             if section is not None:

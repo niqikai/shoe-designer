@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.real_last
 
 @pytest.fixture(scope="module")
 def spec():
-    result = ShoeSpec.load(ROOT / "input/specs/shoe_spec.json")
+    result = ShoeSpec.load(Path(os.environ.get("SHOE_POC_SPEC", ROOT / "input/specs/shoe_spec.json")))
     if not Path(result.last.file).exists():
         pytest.skip("Real licensed STEP asset unavailable; real geometry NOT_TESTED")
     return result
@@ -129,7 +130,7 @@ def test_T19_real_headless_cli_M1_end_to_end(spec, built, tmp_path):
     # probe (~224 s), STEP/STL roundtrips and rendering exceed the old 300 s
     # allowance. Keep the full validation contract and allow a bounded 600 s.
     result = subprocess.run([sys.executable, "-m", "shoe_poc", "run", "--spec",
-                             str(ROOT / "input/specs/shoe_spec.json"), "--output", str(tmp_path)],
+                             str(Path(os.environ.get("SHOE_POC_SPEC", ROOT / "input/specs/shoe_spec.json"))), "--output", str(tmp_path)],
                             capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, result.stdout + result.stderr
     for filename in ("last_metadata.json", "last_normalized.step", "shoe_spec.json", "base_shoe.step",

@@ -40,4 +40,5 @@ def pytest_sessionfinish(session, exitstatus):
     write_json(Path(target), {"generated_at": utc_now(), "pytest_exit_code": int(exitstatus),
                              "collected": session.testscollected, "counts": counts,
                              "tests": results, "environment": environment(),
-                             "build_provenance": provenance})
+                             "build_provenance": provenance,
+                             "design_build_provenance": getattr(session.config, "_shoe_design_provenance", {})})
