@@ -8,10 +8,11 @@ ALGORITHM_VERSION = "cad-lower-foot-periodic-rocker-sole-v7"
 
 def _rocker(x, box, profile):
     t = np.clip((x-box.min.X)/box.size.X, 0, 1)
+    toe_start = getattr(profile, 'toe_start_fraction', .68)
     def smooth(q):
         return q*q*q*(10+q*(-15+6*q))
     return (profile.heel_rise_mm*smooth(np.clip((.22-t)/.22, 0, 1))
-            + profile.toe_rise_mm*smooth(np.clip((t-.68)/.32, 0, 1)))
+            + profile.toe_rise_mm*smooth(np.clip((t-toe_start)/(1-toe_start), 0, 1)))
 
 
 def _lower_foot_sections(last_shape, spec):
@@ -60,7 +61,7 @@ class SoleGenerator:
         if round_validation['geometry_status'] == 'FAIL':
             raise ValueError(f"Actual bottom round failed: {round_validation['maximum_radius_deviation_mm']} mm radius deviation")
         metadata.update({
-            "algorithm_version": ALGORITHM_VERSION,
+            "algorithm_version": ("cad-lower-foot-periodic-rocker-sole-v8" if profile.sidewall_bulge_mm else ALGORITHM_VERSION),
             "method": "Closed periodic lower-foot CAD skin, actual exterior normal-constrained junction, exact quintic rocker floor and native bottom fillet",
             "transition": transition, "actual_profile_parameters": profile.model_dump(),
             "bottom_round_validation": round_validation,

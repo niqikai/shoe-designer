@@ -6,6 +6,9 @@ def _volume(shape):
 
 
 def _collar_tool(last_shape, outer, spec):
+    if getattr(spec.upper.opening_parameters, 'collar_style', 'quintic_roof') == 'sculpted_3d':
+        from .collar import sculpted_collar_tool
+        return sculpted_collar_tool(last_shape, outer, spec)
     from build123d import Edge, Wire, Face, Solid, Plane
     box=last_shape.bounding_box()
     opening_spec=spec.upper.opening_parameters
@@ -52,6 +55,7 @@ def _collar_tool(last_shape, outer, spec):
     if not opening.is_valid or len(opening.solids())!=1:
         raise ValueError('Curved collar cutter is invalid')
     return opening,{'method':'Closed 3D rim from exact upper intersection with a quintic Bezier collar roof',
+                    'collar_style':'quintic_roof',
                     'transition_mm':transition,'requested_transition_mm':opening_spec.transition_mm,
                     'front_transition_x_mm':[front_start,x1],
                     'front_transition_z_mm':[height,front_height],
@@ -108,7 +112,7 @@ class UpperGenerator:
         if cap_residual>.01:
             raise ValueError(f'REQUIRES_TEMPLATE_ADAPTATION: collar exposes {cap_residual:.6f} mm3 of artificial cap/ankle continuation')
         return upper,cavity,opening,outer,{
-            'method':'Exact local CAD normal offsets, Boolean cavity and quintic collar-roof subtraction',
+            'method':'Exact local CAD normal offsets, Boolean cavity and selected native curved collar-roof subtraction',
             'envelope':envelope_metadata,'collar':collar_metadata,
             'last_outside_cavity_volume_mm3':last_outside_cavity,
             'cavity_outside_outer_volume_mm3':cavity_outside_outer,
@@ -212,6 +216,8 @@ def _collar_rim_metrics(outer, opening):
         'one_closed_entry_loop': len(wires) == 1 and bool(wires[0].is_closed),
         'rim_edge_count': len(edges), 'rim_length_mm': sum(edge.length for edge in edges),
         'front_x_mm': box.max.X, 'rear_x_mm': box.min.X,
+        'bbox_mm': {'min': list(box.min), 'max': list(box.max)},
+        'minimum_rim_z_mm': box.min.Z, 'maximum_rim_z_mm': box.max.Z,
         'maximum_tangent_discontinuity_degrees': max((a['tangent_discontinuity_degrees'] for a in angles), default=None),
         'measured_tangent_joints': len(angles), 'tangent_joints': angles,
         'maximum_curve_endpoint_vertex_error_mm': max(cad_endpoint(edge, t, with_tangent=False)[2] for edge in edges for t in (0., 1.)),

@@ -138,7 +138,7 @@ def _rocker_cutter(box, bottom, profile):
     from build123d import Edge, Wire, Face, Solid
     (x0, x1) = (box.min.X - 20, box.max.X + 20)
     heel = box.min.X + 0.22 * box.size.X
-    toe = box.min.X + 0.68 * box.size.X
+    toe = box.min.X + profile.toe_start_fraction * box.size.X
     y = box.min.Y - 20
     low = bottom - 40.0
 
@@ -220,7 +220,13 @@ def periodic_transition(last, outer, bottom, metadata, spec):
         start[2] = bottom - 5.0
         (minus, middle, plus) = points
         (dm, dc, dp) = derivatives
-        lower = np.array([start, start + (0, 0, 3.0), minus - dm * h / 3, minus])
+        bulge = spec.sole.profile_parameters.sidewall_bulge_mm
+        lower_control = start + (0, 0, 3.0)
+        if bulge:
+            radial = np.array((np.cos(theta), np.sin(theta), 0.))
+            lower_control = start + radial*bulge
+            lower_control[2] = start[2]+(minus[2]-start[2])*.35
+        lower = np.array([start, lower_control, minus - dm * h / 3, minus])
         band0 = np.array([minus, minus + dm * h / 3, middle - dc * h / 3, middle])
         band1 = np.array([middle, middle + dc * h / 3, plus - dp * h / 3, plus])
         roof = np.array([plus + (center - plus) * q for q in (0, 1 / 3, 2 / 3, 1)])
@@ -230,4 +236,4 @@ def periodic_transition(last, outer, bottom, metadata, spec):
     body = _periodic_body(parameters, np.asarray(sections), guide_normals)
     cutter = _rocker_cutter(box, bottom, spec.sole.profile_parameters)
     (result, round_edge_count) = _round_bottom(body, cutter, spec.sole.profile_parameters.edge_radius_mm)
-    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})
+    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'sidewall_bulge_mm': spec.sole.profile_parameters.sidewall_bulge_mm, 'sidewall_control_method': 'Positive radial lower-wall Bezier control displacement, at 35% of vertical span; zero preserves the original control', 'toe_start_fraction': spec.sole.profile_parameters.toe_start_fraction, 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})

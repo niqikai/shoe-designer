@@ -68,9 +68,12 @@ class ShoeAssembler:
         from shoe_poc.validation.junction import validate_junction
         junction_validation = validate_junction(shoe, cavity, opening, last_box,
                                                maximum_z_mm=sole_stock.bounding_box().max.Z+1.)
-        return ShoeBuild(shoe, {
+        refined = (spec.upper.opening_parameters.collar_style == 'sculpted_3d'
+                   or spec.sole.profile_parameters.sidewall_bulge_mm > 0)
+        build = ShoeBuild(shoe, {
             'template': spec.shoe.template, 'upper': upper_metadata, 'sole': sole_metadata,
-            'algorithm_version': 'exact-upper-periodic-rocker-sole-assembly-v7',
+            'algorithm_version': ('exact-upper-sculpted-collar-periodic-rocker-sole-assembly-v8'
+                                  if refined else 'exact-upper-periodic-rocker-sole-assembly-v7'),
             'junction': {
                 'geometry_status': junction_validation['geometry_status'],
                 'validation': junction_validation,
@@ -98,3 +101,7 @@ class ShoeAssembler:
             'upper_volume_mm3': volume_of(upper), 'sole_volume_mm3': volume_of(sole),
             'limitations': ['Uniform minimum wall thickness not measured.', 'Physical insertion, fit, comfort and material performance are not verified.', 'Finite exterior-junction normal samples cannot certify global tangent continuity; failed samples remain explicit.'],
         }, upper, sole, cavity, opening)
+        # Private native guide for independent design validation. Keep the six
+        # public fields and JSON metadata free of a unserializable CAD object.
+        build._outer = outer
+        return build
