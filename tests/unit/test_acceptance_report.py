@@ -90,3 +90,21 @@ def test_failed_exterior_junction_is_not_hidden_by_pipeline_pass(tmp_path):
     result = module.report(tmp_path, tmp_path / "report.md")
     assert result["technical_status"] == "FAIL"
     assert result["overall_status"] == "PARTIAL"
+
+
+def test_failed_annotated_geometry_blocks_acceptance(tmp_path):
+    (tmp_path / "execution_report.json").write_text('{"status":"PASS","run_id":"current"}')
+    (tmp_path / "design_report.json").write_text('{"geometry_status":"FAIL","run_id":"current","metrics_status":"OBSERVED"}')
+    result = module.report(tmp_path, tmp_path / "report.md")
+    assert result["technical_status"] == "FAIL"
+    assert result["acceptance_levels"]["annotated_design_geometry"] == "FAIL"
+    assert result["appearance_acceptance"] == "PENDING"
+    assert result["annotation_assessment"]["7"] == "CONSTRAINED_UNRESOLVED"
+
+
+def test_previous_design_report_is_not_current_evidence(tmp_path):
+    (tmp_path / "execution_report.json").write_text('{"status":"PASS","run_id":"current"}')
+    (tmp_path / "design_report.json").write_text('{"geometry_status":"PASS","run_id":"previous"}')
+    result = module.report(tmp_path, tmp_path / "report.md")
+    assert result["acceptance_levels"]["annotated_design_geometry"] == "NOT_TESTED"
+    assert result["technical_status"] == "PARTIAL"

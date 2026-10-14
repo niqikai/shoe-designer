@@ -93,6 +93,12 @@ def report(output: Path, document: Path) -> dict:
         "annotated_design": {key: design.get(key) for key in (
             "geometry_status", "metrics_status", "appearance_acceptance", "baseline_directory",
             "baseline_files", "baseline_comparison", "forefoot_constraint") } if design else {},
+        "annotation_assessment": {
+            "1": "IMPROVED_PENDING_REVIEW", "2": "CONSTRAINED_UNRESOLVED",
+            "3": "PARTLY_IMPROVED_PENDING_REVIEW", "4": "IMPROVED_PENDING_REVIEW",
+            "5": "IMPROVED_PENDING_REVIEW", "6": "IMPROVED_PENDING_REVIEW",
+            "7": "CONSTRAINED_UNRESOLVED", "8": "CONSTRAINED_UNRESOLVED",
+        } if design else {},
         "actual_source": last.get("source", {}),
         "limitations": geometry.get("limitations", []) + [
             "Appearance requires actual-image review and user acceptance; topology alone cannot qualify the shoe template.",
@@ -125,7 +131,7 @@ def report(output: Path, document: Path) -> dict:
     spec_command = shlex.quote(execution.get("spec_source", "input/specs/shoe_spec.json"))
     out_command = shlex.quote(str(output))
     doc_command = shlex.quote(str(document))
-    variant_height = float(resolved.get("sole", {}).get("profile_parameters", {}).get("height_mm", 20))+5
+    variant_height = float(resolved.get("sole", {}).get("height_mm", 20))+5
     baseline_command = (f" --design-baseline {shlex.quote(design['baseline_directory'])}" if design.get("baseline_directory") else "")
     comparison = execution.get("comparison_input") or ("output/m1_repair/base_shoe.stl" if design else "output/m1/base_shoe.stl")
     compare_command = f" --compare-with {shlex.quote(comparison)}"

@@ -88,7 +88,7 @@ def test_design_source_frame_and_fit_are_fixed_with_real_cad_evidence(design_out
     assert current.last.coordinate_system == baseline.last.coordinate_system
     assert current.upper.clearance_mm == baseline.upper.clearance_mm == 1.
     assert current.upper.thickness_mm == baseline.upper.thickness_mm == 2.5
-    assert current.sole.profile_parameters.height_mm == 16.
+    assert current.sole.height_mm == 16.
     assert _volume(design_shapes["last"].cut(design_shapes["baseline_last"])) + _volume(
         design_shapes["baseline_last"].cut(design_shapes["last"])) <= .01
     assert _volume(design_shapes["shoe"].intersect(design_shapes["last"])) <= .01
