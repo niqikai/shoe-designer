@@ -334,7 +334,7 @@ $SHOEGEN_BLENDER -b --factory-startup --python-exit-code 1 \
 
 **覆盖范围**：
 - `last.ply` 在同一细分级下的一个面子集；
-- 覆盖 Footbed Edge 到 Collar Line 之间的环带，并向 Footbed 一侧延伸至少 6 mm（测地距离），供跨坐标系 Transition 使用。
+- 覆盖 Footbed Edge 到 Collar Line 之间的环带，并向 Footbed 一侧延伸至少 6 mm（测地距离），供 Footbed Edge 附近的最近点查询使用（Welt 与坐标系分界，8.1、ADR 0011）。
 
 **数组**：
 
@@ -402,10 +402,11 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
         "heel_counter": { "frame": "conformal", "extent_x_ratio": 0.25,
                           "fill": { "kind": "lattice", "family": "gyroid", "variant": "network", "rho": 0.35 } }
       },
-      "transitions": { "lateral_width_mm": 6.0, "cross_frame_width_mm": 6.0, "vertical_max_mm": 6.0 },
+      "transitions": { "lateral_width_mm": 6.0, "vertical_max_mm": 6.0 },
       "features": {
         "collar_rim":  { "kind": "rim",  "along": "collar_line", "height_mm": 2.0, "thickness": "wall" },
-        "ground_skin": { "kind": "skin", "zone": "outsole", "surface": "ground", "thickness_mm": 1.2 }
+        "ground_skin": { "kind": "skin", "zone": "outsole", "surface": "ground", "thickness_mm": 1.2 },
+        "welt":        { "kind": "welt", "at": "footbed_edge", "height_mm": 1.5 }
       }
     }]
   },
@@ -424,6 +425,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 ### 6.2 派生与组织规则
 
 - **鞋底 Cell**：鞋底只存一个 Cell C（`midsole.fill.cell_mm`），Outsole 晶格层、Midsole 与 Footbed Layer 共用，层间只以 ρ 区分（ADR 0010）。C 与 C/2 一类的混合会在过渡带内产生颈厚从 0 起的新生 Ligament，不可打印（实测见 ADR 0010）。
+- **Welt**：`features.welt` 是 Footbed 高度的实体条，鞋底（欧氏）与 Shell（随形）两个坐标系的晶格在其中硬切换（8.1、8.3、ADR 0011）。两个坐标系之间没有场混合，因此没有 `cross_frame_width_mm`。
 - **Shell 级参数**：`shell.cell_inplane_mm` 和 `circumferential_cells` 放在 Shell 级，Upper 与 HeelCounter 共用；两者只以 ρ 区分。
 - **Zone 集合**：由 Archetype 数据文件（`archetypes/low_top_slip_on.v1`）声明，包括有哪些 Zone、各用什么坐标系、`heel_counter` 的切分方式与比例。HeelCounter 按平面 x − x_heel ≤ ratio × Last Length 切分 **[初值]**，其中 x_heel 是 `heel_point` 的 x 坐标。所有按 Last Length 比例给出的位置都从 `heel_point` 量起。
 - **P0 的 Fill**：`fill.kind` 只有 `lattice`，`family` 只有 `gyroid`，`variant` 只有 `network`。
@@ -577,8 +579,8 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | `/geometry/parts/0/shell/wall_thickness_mm` | 3.0–6.0 |
 | `/geometry/parts/0/shell/cell_inplane_mm` | 6–10 |
 | `/geometry/parts/0/transitions/lateral_width_mm` | 2–12 |
-| `/geometry/parts/0/transitions/cross_frame_width_mm` | 2–12 |
 | `/geometry/parts/0/features/collar_rim/height_mm` | 1–6 |
+| `/geometry/parts/0/features/welt/height_mm` | 1.5–3.0 |
 | `/geometry/parts/0/features/ground_skin/thickness_mm` | 1.0–1.5 |
 | `/geometry/fit/toe_allowance_mm` | 8–20 |
 | `/resolution/voxel_mm` | 0.15–1.0 |
@@ -638,6 +640,8 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 覆盖 t_skin 时 t_out 不变，Outsole 晶格层整体上移。
 
+**坐标系分界（Welt Surface，ADR 0011）**：z_W(p) 为 `footbed_edge` 上离 p 最近点的 z。Shoe Body 中 z > z_W(p) 且最近点不在 Footbed 面上的点（含 Sole Envelope 高出 Footbed 的侧壁）属于 Shell 坐标系，按 x 判为 HeelCounter 或 Upper，用随形晶格；其余点属于鞋底坐标系，按下表前三行判定。表中"在 Sole Envelope 内"三行只适用于 z ≤ z_W(p) 的点。随形坐标在 d_Last > Wall Thickness 处照常延续（法向 Cell 仍为 Wall Thickness），不产生新生 Ligament。Welt 是实体特征，不是 Zone（同 Rim）；其内的点仍按所在坐标系判 Zone。
+
 **每一点恰属一个 Zone**，按下表从上到下判定，取第一个满足的：
 
 | 条件 | 所属 |
@@ -645,13 +649,13 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | 在 Sole Envelope 内，且 d_G ≤ t_skin | Outsole 的 Skin |
 | 在 Sole Envelope 内，且 t_skin < d_G ≤ t_skin + t_out | Outsole 的晶格层 |
 | 在 Sole Envelope 内，其余 | Midsole（其中 d_F ≤ t_fbl 的部分是 Footbed Layer） |
-| 在 Shell 内、Sole Envelope 外，且 x − x_heel ≤ `extent_x_ratio` × Last Length | HeelCounter |
-| 在 Shell 内、Sole Envelope 外，其余 | Upper |
+| 属于 Shell 坐标系，且 x − x_heel ≤ `extent_x_ratio` × Last Length | HeelCounter |
+| 属于 Shell 坐标系，其余 | Upper |
 
 **Skin 的范围**：
 - Outsole 与 Skin 的厚度都沿 Ground Surface 的法向计，Toe Spring 段同样如此。
-- Sole Envelope 侧壁、Footbed、Shell 内外表面都不加 Skin。
-- 鞋底侧壁保持开放晶格，作为排粉通道（ADR 0007）。
+- Sole Envelope 侧壁、Footbed、Shell 内外表面都不加 Skin；Welt 不是 Skin。
+- 鞋底侧壁在 Welt 以下保持开放晶格，作为排粉通道（ADR 0007）。
 - 唯一的例外：Skin 在 Ground Surface 边界处会露出约 t_skin 高的截面。
 
 **Midsole 主体厚度**：T(x, y) = z_F(x, y) − t_fbl − (z_G(x, y) + t_skin + t_out)，沿竖直方向量。其中 z_F、z_G 分别是 Footbed 与 Ground Surface 在该 (x, y) 处的高度。
@@ -670,7 +674,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | Outsole ↔ Midsole | d_G = t_skin + t_out | min(`vertical_max_mm`, t_out)，默认 3 mm | w_Outsole 在边界 ± W/2 内（默认 d_G ∈ [2.7, 5.7]）从 1 线性降到 0；ρ 在带内线性插值（ρ = ρ_Midsole(x) + (ρ_Outsole − ρ_Midsole(x)) · w_Outsole），Cell 不变 |
 | Midsole 内 Footbed Layer 的 Grading | d_F = t_fbl | t_fbl，默认 4 mm；不受 `transitions/*` 影响 | w_FBL 在 d_F ∈ [t_fbl/2, 3·t_fbl/2]（默认 [2, 6]）内从 1 线性降到 0；ρ = ρ_Midsole(x) + `rho_delta` · w_FBL；d_F ≤ t_fbl/2 处是均匀的 ρ_Midsole(x) + `rho_delta`，Cell 仍为 C |
 | Upper ↔ HeelCounter | x = x_heel + `extent_x_ratio` × Last Length | `lateral_width_mm`，默认 6 mm | Cell 相同，只插值 ρ |
-| 跨坐标系（鞋底 Zone ↔ Shell Zone） | Sole Envelope 边界 | `cross_frame_width_mm`，默认 6 mm | 见 8.3 |
+| 跨坐标系（鞋底坐标系 ↔ Shell 坐标系） | Welt Surface（z = z_W） | 无过渡带 | 两侧晶格在 Welt 的中面硬切换，接缝藏在实体 Welt 内（8.3、ADR 0011）。不做场混合：两张不同网络的任何混合都会新生颈厚从 0 起的 Ligament，并使密度在 w≈0.5 处跌到约 60 % |
 
 Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell 的晶格，Cell 与 ρ 都不变，只在 7.3 归入薄层孔喉级别。
 
@@ -691,7 +695,7 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 - 材料相为 {φ < 0}。
 - g_min = 0.5 · 2π / Cell_min **[实现]**（鞋底 Cell_min = C，即 g_min = 0.5 · 2π / C）；δ = 1.0 mm **[实现]**。
 - |∇f_X|：欧氏侧用解析式；随形侧当前在体素栅格上做中心差分，分块时 halo 加 1，以保证确定性。
-- **点求值要求（设计约束）**：最终合成场（混合、与 Rim/Skin 的平滑并集、随形映射，含 φ 的零集）必须能在任意（非栅格）点上确定性求值（ADR 0006），因为 10.2 的细阶段需要对零集做 Newton 投影并在体素之间采样。随形侧的 |∇f_X| 因此需要一个可在任意点求值的等价实现（例如对 (s, t_mm, d_Last) 映射做解析或点上有限差分，不依赖体素栅格）；同一点的结果不得依赖分块。
+- **点求值要求（设计约束）**：最终合成场（坐标系切换、与 Rim/Skin/Welt 的平滑并集、随形映射，含 φ 的零集）必须能在任意（非栅格）点上确定性求值（ADR 0006），因为 10.2 的细阶段需要对零集做 Newton 投影并在体素之间采样。随形侧的 |∇f_X| 因此需要一个可在任意点求值的等价实现（例如对 (s, t_mm, d_Last) 映射做解析或点上有限差分，不依赖体素栅格）；同一点的结果不得依赖分块。
 
 **鞋底场**：
 
@@ -699,17 +703,10 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 
 鞋底内部没有 Cell 混合，因此不产生新生 Ligament（ADR 0010）。
 
-**跨坐标系混合**：
-
-φ = (1 − w_x) · φ_sole + w_x · φ_shell，w_x = clamp(0.5 + sd_env / W, 0, 1)
-
-- **符号**：sd_env 是到 Sole Envelope 的有符号距离，包络外为正；W = `cross_frame_width_mm`。
-- **计算范围**：w_x 只在 {0 < d_Last ≤ Wall Thickness，且 t_mm ≥ −6} 内按上式计算。
-  - 此范围之外，包络内的点 w_x ≡ 0；
-  - 包络外的点不属于 Shoe Body，不需要取值。
-- **两侧参数的取法**：与该点最终归属哪个 Zone 无关，以保证场在包络边界上连续。
-  - φ_sole：按 8.1 表的前三行判定（忽略"在 Sole Envelope 内"这个条件），再按 8.2 的鞋底 Grading 与 Transition 得到 ρ 和 c(ρ)。
-  - φ_shell：按 x 判定为 Upper 或 HeelCounter，取其 ρ（含两者之间的插值）及 c(ρ)。
+**坐标系切换与 Welt**（ADR 0011）：
+- φ_lattice = φ_shell（z > z_W(p)）或 φ_sole（z ≤ z_W(p)）。两侧参数按该点所属坐标系与 Zone 取值（8.1）。切换面上不做混合，φ 在此不连续，由其中的实体 Welt 覆盖。
+- Welt = {|z − z_W(p)| ≤ `welt.height_mm`/2，且 p 不在 Footbed 正下方（最近的 Last 点不在 Footbed 面上）} ∩ Shoe Body，为实体；自 Footbed Edge 一直延伸到 Shoe Body 外表面。
+- 点求值：z_W(p) 与最近点判定用 5.5 的最近点查询，对任意点确定性可求。
 
 **Rim 与 Skin**：
 - Rim = {t_mm ≥ L(s) − `height_mm`，0 < d_Last ≤ Wall Thickness}，为实体。
@@ -717,7 +714,7 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 
 **合成**：
 
-材料实体 M = (Lattice ∪ Rim ∪ Skin) ∩ Shoe Body
+材料实体 M = (Lattice ∪ Rim ∪ Skin ∪ Welt) ∩ Shoe Body
 
 - 并与交都用光滑运算，光滑半径 0.3 mm **[初值]**。
 - Print Mesh 与 Preview Mesh 都是 M 的等值面。
@@ -816,18 +813,20 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 | 检查 | 级别 | 定义 |
 |---|---|---|
 | 薄壁占比 | > 1% 为 hard 失败；> 0 为 soft 警告 | 见下文"薄壁占比的计算" |
-| 裁切残边占比 | soft | 距 Shoe Body 边界 ≤ 0.5 mm 的 Ligament 站点中，所在 Ligament 的局部颈厚（该站点的 2R）< 最小壁厚的站点所对应的材料体积占比；只报告，不判失败 |
+| 实体接触占比 | soft | 与"裁切残边占比"同样定义，但端部受限的 Ligament 其最小内切球位于 Skin、Rim 或 Welt 表面 1.0 mm **[初值]** 以内，而不是触及 Shoe Body 边界；只报告，不判失败 |
+| 悬挂材料 | hard | 用直径 1.0 mm（= 最小壁厚）的闭球对材料做开运算，开运算结果中与最大实体分量不连通的材料体积 > 0 **[初值：> 1 mm³]** 即失败。它保证端部受限豁免不会放过"只靠细特征挂着"的材料，也能发现局部脱开的接缝（全局分量数仍为 1 时） |
+| 裁切残边占比 | soft | 距 Shoe Body 边界 ≤ 0.5 mm 的 Ligament 站点中，所在 Ligament 的局部颈厚（该站点的 2R）< 最小壁厚的站点所对应的材料体积占比，另含按步骤 4 的端部受限判定归入边界的 Ligament；只报告，不判失败 |
 | 困粉占比 | > 1% 为 hard 失败；> 0 为 soft 警告 | 见下文"困粉占比的计算" |
 
 **薄壁占比的计算**（ADR 0009）。不做曲线骨架化；颈厚的定义见 ADR 0009。
 
-1. **粗阶段**：在检查栅格（h_check = `voxel_mm`）上，由 φ 的过零点取粗表面点；d = 各 Lattice 材料体素（不含 Skin 与 Rim）到表面点的距离；u = G_σ * d，σ = 0.5 mm **[初值]**（自适应 σ，如局部最大 d 的 0.5–0.7 倍，是可能的改进）。
+1. **粗阶段**：在检查栅格（h_check = `voxel_mm`）上，由 φ 的过零点取粗表面点；d = 各 Lattice 材料体素（不含 Skin、Rim 与 Welt）到表面点的距离；u = G_σ * d，σ = 0.5 mm **[初值]**（自适应 σ，如局部最大 d 的 0.5–0.7 倍，是可能的改进）。
 2. 在材料体素上对 u 做 26 邻域最陡上升分水岭，并用持续性（ToMATo）简化，阈值 **[实现]**。相邻且截面检验通过的每一对簇是一根 Ligament：两个节点是两个 u 极大值，路径是从 u 鞍点出发、到两端极大值的最陡上升折线（节点到节点）。
 3. **细阶段**：对每根 Ligament，在路径周围的管状区域内用 φ 构造表面点云（间距 hs 约 0.07–0.16 mm **[实现]**，Newton 投影到 φ = 0），r = 到点云的距离；沿路径逐站点（节点到节点全程）在垂直于路径切线的平面内取最大 r，记为 R(s)，在最小值附近细化。Neck Thickness = 2 · min R(s)。没有内部山口时，最小值落在节点处。
-4. 距 Shoe Body 边界 ≤ 0.5 mm 或在 Lattice 区域之外的站点不参与；一根 Ligament 若没有任何可用站点，不参与薄壁判据，其材料只计入"裁切残边占比"。
+4. 站点有效性：距 Shoe Body 边界 ≤ 0.5 mm、或在 Lattice 区域（不含 Skin、Rim、Welt）之外的站点不参与；一根 Ligament 若没有任何可用站点，不参与薄壁判据，其材料只计入"裁切残边占比"。**端部受限判定**：若一根 Ligament 的 min R(s) 落在与排除区相邻的端部站点，且该处内切球触及 Shoe Body 边界（r ≥ 到边界距离 − 0.1 mm）或位于 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，即 R(s) 朝边界或实体单调减小，则该 Ligament 不参与薄壁判据，其材料计入"裁切残边占比"（边界）或"实体接触占比"（实体），均为 soft。依据：此类读数是被边界切断的楔或擦碰实体的桥，不是两节点间的山口；Ligament 自身的山口在内部站点另有读数。不能只靠距离排除站点：桥向实体单调变窄，最小值总落在排除带边缘；悬挂材料检查（hard）兜住这条豁免，防止它放过只靠细特征挂着的材料。这些阈值（1.0 mm、0.1 mm、1 mm³）都是首次估计，见 20。
 5. 每个 Lattice 材料体素归属于最近的 Ligament 路径；节点处并列时，归属于 Neck Thickness 较大者，再并列取索引最小者。
 6. 分块：核心区固定为 128³ 体素、按固定顺序遍历；默认 halo 10 mm（40 体素）**[实现]**。场按块生成，不保留全局浮点栅格。每个块对每个体素做精确性检查：经上升到达的盆地极大值必须可证明与不分块时相同。检查失败的块改用 16 mm halo 重算；重算后仍有违例则为内部错误。块不输出成品 Ligament，而是按盆地对输出记录：计数、最佳穿越点（鞍点，平局规则与不分块相同）、上升路径与最大 d。父进程按全局盆地对编号精确合并，再在全局盆地图上做持久性简化与截面检验。每个被选中的鞍点恰好归属一个块。结果必须与不分块逐位一致。细阶段对各 Ligament 相互独立，可并行。
-7. 薄壁占比 = 颈厚 < 最小壁厚的 Ligament 所占材料体积 ÷ Lattice 材料总体积（不含 Skin 与 Rim）。
+7. 薄壁占比 = 颈厚 < 最小壁厚的 Ligament 所占材料体积 ÷ Lattice 材料总体积（不含 Skin、Rim 与 Welt）；已按步骤 4 归入裁切残边或实体接触的 Ligament 不计入分子。
 8. 警告中附带前 20 个 **[实现]** 聚集区的位置与体积。
 
 **困粉占比的计算**：
@@ -944,7 +943,7 @@ shoegen schema  --target full|llm|buildplan|manifest
 |---|---|---|
 | `heel-collar` | HeelCounter 全高（Shell 中 x − x_heel ≤ `extent_x_ratio` × Last Length、位于 Sole Envelope 之外的部分），加上 t_mm ≥ L(s) − 20 mm **[初值]** 的整圈 Shell | 试穿：验证穿脱与包跟；包含 Rim |
 | `sole-section` | 以 `forefoot_stack_point` 为中心、沿 X 方向长 40 mm **[初值]** 的整宽鞋底切块 | 排粉试验 |
-| `heel-transition` | 以后跟中线与 Sole Envelope 边界的交点为中心、边长 40 mm **[初值]** 的立方体，包含跨坐标系过渡带（Rim 由 `heel-collar` 覆盖） | 0.25 mm 黄金回归 |
+| `heel-transition` | 以后跟中线与 Welt 外表面的交点为中心、边长 40 mm **[初值]** 的立方体，包含 Welt 及其上下两侧的晶格（HeelCounter 与鞋底侧壁的接缝；Rim 由 `heel-collar` 覆盖） | 0.25 mm 黄金回归；复核 Welt 处的实体接触与悬挂材料 |
 
 裁切面属于 Shoe Body 边界：
 - 困粉检查中，它被视为外部；
@@ -1033,7 +1032,9 @@ shoegen schema  --target full|llm|buildplan|manifest
 **几何**：
 - 场函数
 - Grading 与位置无关：同一 Grading 放在 x = 0 与 x = 280 处，连通分量数与 ρ 一致
-- Zone 推导
+- Zone 推导，含 Welt Surface 两侧的坐标系归属（Sole Envelope 高出 Footbed 的侧壁归 Shell 坐标系）
+- Welt 补丁：平壁 Shell 加鞋底的补丁，扫描 `welt.height_mm`（1.5 与 3.0）、悬挑 e（4 与 6 mm）、ρ 组合、方位与相位；断言内部最小颈厚不低于 Shell 自身的值，悬挂材料为 0，接缝不脱开（上下端材料路径瓶颈不低于纯 Shell），困粉为 0（harness：`.scratch/neck-acc/crossframe/`）
+- 端部受限判定：纯 Shell 平板（ρ 0.32 与 0.35）与 Skin 上的 Outsole 晶格，被边界或实体限制的读数归入裁切残边或实体接触，薄壁占比为 0；人工构造的悬挂材料被悬挂材料检查检出
 - 鞋底侧壁上，距 ground 面集边界超过 t_skin 加 1 个体素的部分，Skin 面积为 0
 - 坐标变换与 GLB 变换、镜像
 - Island 清理不删除空腔壳：外盒内含反向腔时，腔被保留，"无封闭腔"检查失败
@@ -1126,7 +1127,7 @@ examples/specs/                 # G1–G5 的 DesignSpec
 - Last 比例使用男女通用表，未经试穿校准。
 - Cushioning 未经力学标定。
 - 只支持 Gyroid network。
-- Rim 是不可拉伸的实体条。
+- Rim 与 Welt 是不可拉伸的实体条。Welt 在前掌弯折时约 20 % 压应变，会提高局部弯折刚度并可能起皱；外观上有一条 1.5 mm 的实体线；整鞋增重约 7–13 cm³（晶格材料的 4–7 %）。
 - 缺少 Surface Parameterization 的 Shape Source 无法使用。
 
 ### 18.2 P1 候选
@@ -1136,7 +1137,7 @@ examples/specs/                 # G1–G5 的 DesignSpec
 - 跨族 Transition
 - 由引擎自动计算 Surface Parameterization
 - 分性别的比例表
-- 可拉伸的 Rim
+- 可拉伸的 Rim；分段或波纹 Welt（须先过 `.scratch/neck-acc/crossframe/` 的 harness）
 - 形状参数的 Override
 - 多零件 ManufacturingMode
 - HybridLattice
@@ -1166,8 +1167,10 @@ examples/specs/                 # G1–G5 的 DesignSpec
 | 风险 | 为什么不确定 | 先行验证 |
 |---|---|---|
 | ~~混合区的颈厚~~（已由 ADR 0010 解决） | 规格曾设的 C:C/2 φ 混合在 w≈0.53–0.84 处新生颈厚从 0 起的 Ligament，过渡带 0.4–1.4 mm 宽、薄壁占比 9–10 %（限值 1 %）；相位对齐、并集、阈值补偿、改变 W、硬界面均无效。已改为单一鞋底 Cell，Grading 只改 ρ | 已解决（设计变更）；回归由 15.1 的过渡带用例覆盖 |
-| 跨坐标系混合 sole（C = 10 欧氏）↔ Shell（(L_s, 8, 4) 随形） | φ = (1 − w_x)·φ_sole + w_x·φ_shell 混合的是两张不同的网络，按同一新生机制必然产生 Ligament，预计在宽度约 Δw × `cross_frame_width_mm` 的带内出现颈厚很小的 Ligament（Δw 为其颈厚低于限值的 w_x 区间）。可能需要豁免或重新设计，候选方案：把接缝按 Cut Edge 处理、Rim 式实体接缝、使两侧网络匹配 | `heel-transition` 的 Crop Build 之前，必须用与 ADR 0010 同样的均匀 w 扫描和平板测试在 harness 中验证
+| ~~跨坐标系混合~~（已由 ADR 0011 解决） | 规格曾设的 φ 混合在 w_x ∈ (0.40, 0.75–0.90) 内颈厚 0–0.2 mm，混合区材料跌到约 60 %，并且接缝下方 4–6 mm 的重叠柱里 C = 10 鞋底网络在对轴方位上出现空层，使 17–27 % 的 30 mm 接缝段上下完全脱开（全局分量数仍为 1，现有校验看不到）；W、相位、并集、阈值补偿、硬界面、z = H 处的实体接缝均无效。改为 Footbed 高度的实体 Welt，两侧硬切换（.scratch/neck-acc/crossframe/） | 已解决（设计变更）；`heel-transition` Crop Build 复核 Welt 处的实体接触与悬挂材料 |
+| 10.2 端部受限读数与悬挂材料 | 0.5 mm 站点排除挡不住被边界切断的 Ligament：垂直平面内的最大内切球可比站点更靠近边界，致密 Shell（ρ 0.32/0.35）按字面规则 14–20 % 判为薄壁，默认 HeelCounter 单项约占全鞋 1.1 %；Outsole 晶格擦着 Skin 的桥约占 0.7 %。新规则（端部受限判定加悬挂材料检查）的 1.0 mm、0.1 mm、1 mm³ 阈值是首次估计，规则本身也只在后处理里近似实现过，未在完整的 10.2 流水线里跑过 | 按新规则重跑 harness，并在 G1 整鞋上核对裁切残边、实体接触与悬挂材料三项；复核阈值是否放过真实缺陷或误报 |
+| Welt 的力学与外观 | 1.5 mm 实体条位于前掌中性轴上方约 11 mm，弯折时约 20 % 压应变，可能起皱并提高弯折刚度 | 第 16 节的实物试穿与前掌弯折观察；P1 候选：分段或波纹 Welt（须先过 harness） |
 | 分块精确性依赖点求值的逐位确定性 | 接缝精确要求合成场在同一点返回逐位相同的浮点数，与分块方式无关（NumPy 已验证）。GPU、并行或基于栅格差分求梯度模的实现必须保证这一点；上升路径超过 16 mm 回退 halo 时报内部错误。参数（σ、persistence 等）只在一个种子上调定，未做留出验证；自适应 σ 是可能的改进（可回收胖薄向 Cell 中的 23 次漏检与 59 个虚假输出，参考值均 ≥ 1.2 mm） | 在实际合成场实现上重跑分块与不分块的逐位对比（含强制小块）；做留出验证 |
 | Openness 定稿值是否落在可行区间 | 审查期间的颈厚实测用过不同算法，数值有差异；按 ADR 0009 的山口定义，benchmark 给出 airy 0.20 在 Collar 端 (·, 8, 4) 的颈厚为 1.106 mm，高于 1.0 + 0.05 的门槛，余量约 0.055 mm。Shell 的该值与 L_s 无关 | 先用同一定义生成 Feasibility Table，再定 `tuning.v1`；复核 airy 在 Collar 端的值，若不足再微调 ρ |
-| 跨坐标系过渡带的 Island 与薄壁 | 只在简化几何上实测过 | `heel-transition` 的 0.25 mm Crop Build |
+| Welt 处的实体接触、Island 与悬挂材料 | 只在平壁补丁上实测过（336 个窗口），整鞋曲率下的 z_W 与最近点判定未验证 | `heel-transition` 的 0.25 mm Crop Build |
 | 程序化控制笼生成的 Last 的形状质量 | 决定了能否穿、好不好看，P0 无法试穿校准 | 先单独做 Shape Source，用 G1–G4 的形状目视检查，并比对比例表 |

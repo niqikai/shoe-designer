@@ -13,5 +13,5 @@
 - Shell 区域拓扑上是环带：Surface Parameterization 以归一化高度 τ（Footbed Edge 为 0，Collar Line 为 1）的等值环为周向，周向周期，接缝在后跟中线（落在 HeelCounter 内）。Collar Line 的绝对高度沿周向从后跟约 45 mm 变到 Throat 约 150 mm，绝对弧长的等值线不闭合，所以周向必须按 τ 定义。整圈只有一个整数周向 Cell 数 N = round(τ = 0.5 环的周长 / 面内 Cell)，因此 Upper 与 HeelCounter 共用同一面内 Cell，只以 Relative Density 区分。
 - 随形 Cell 三个方向各不相同：周向宽 = τ 环周长 / N，从 Collar 端约 6 mm 变化到 Footbed Edge 端约 11 mm（名义面内 8 mm 指中间高度）；高度方向按弧长恒为面内 Cell；法向等于 Wall Thickness。Feasibility Table 以两个比值描述 Cell 形状，Resolver 在两端分别校验。
 - N 依赖 Shape Bundle 的实测周长，所以随形部分的约束求解只能在 Shape Source 运行之后进行。
-- 欧氏与随形 Zone 之间没有可插值的参数，Transition 只能在场层面做截断归一化后的交叉淡化，会产生少量 Island，由 Island 删除与 hard 校验兜底。
+- 欧氏与随形两张网络之间没有可插值的参数，场混合必然新生 Ligament 并在混合区稀释材料（ADR 0011）。两坐标系在 Footbed 高度的 Welt Surface 硬切换：其上（含 Sole Envelope 高出 Footbed 的侧壁）一律随形，其下一律欧氏，接缝藏在实体 Welt 内。重叠柱只有 4–6 mm 厚，容不下 C = 10 的鞋底网络。
 - 鞋底竖向分层之间的过渡宽度取 min(6 mm, 较薄一侧层厚)。鞋底只用一个 Cell C，过渡只插值 ρ；局部 Midsole 太薄（T < C）时 Cell 不变，只是不足一个 Cell（ADR 0010）。

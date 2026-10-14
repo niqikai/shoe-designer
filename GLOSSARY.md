@@ -202,14 +202,14 @@ _Avoid_: region、area、part（part 指零件）
 _Avoid_: 过渡、gradient
 
 **Transition**（过渡带）:
-Zone 边界两侧、相邻 Zone 的 Lattice 连续过渡的带状区域。
+Zone 边界两侧、相邻 Zone 的 Lattice 连续过渡的带状区域。欧氏与随形之间没有 Transition，以 Welt 衔接。
 _Avoid_: 接缝、seam、渐变（渐变专指 Zone 内的变化）
 
 **Outsole**（大底）:
 Shoe Body 最底部的 Zone，由紧贴 Ground Surface 的 Skin 与其上的一层 Lattice 组成。
 
 **Midsole**（中底）:
-Sole Envelope 内除 Outsole 以外的 Zone，包括 Footbed 下方的主体与高出 Footbed、与 Shell 重叠的侧壁；承担缓震。
+Sole Envelope 内除 Outsole 以外的 Zone，位于 Welt 以下，包括 Footbed 下方的主体与 Welt 以下的侧壁；承担缓震。
 
 **Footbed Layer**（脚床层）:
 Midsole 中紧贴 Footbed 的一层，Relative Density 更高、Cell 与 Midsole 相同；属于 Midsole，不是 Zone，但在约束求解中单独校验。
@@ -228,7 +228,7 @@ _Avoid_: 后跟杯、heel cup
 整只鞋的材料在空间中的组织方式。
 
 **FullLattice**（全晶格）:
-一种 StructureType：鞋体材料除 Rim 与 Skin 外全部是 Lattice。
+一种 StructureType：鞋体材料除 Rim、Skin 与 Welt 外全部是 Lattice。
 _Avoid_: 晶格鞋底
 
 **Lattice**（晶格）:
@@ -269,12 +269,16 @@ _Avoid_: 共形晶格
 沿 Collar Line、位于 Shoe Body 内的实体收边条。
 _Avoid_: 包边、border
 
+**Welt**（沿条）:
+位于 Footbed 高度、从 Footbed Edge 延伸到 Shoe Body 外表面的实体条；鞋底坐标系与 Shell 坐标系的晶格在其中面硬切换。
+_Avoid_: 接缝、seam（易与 Transition 混淆）、Skin
+
 **Skin**（皮）:
-位于 Shoe Body（或 Coupon）内、紧贴指定外表面的薄实体层，厚度有上限。
+位于 Shoe Body（或 Coupon）内、紧贴指定外表面的薄实体层，厚度有上限。Welt 不是 Skin。
 _Avoid_: 外壳、实体面、大底耐磨层
 
 **Cut Edge**（裁切残边）:
-Lattice 被 Shoe Body 边界切断处形成的薄楔形材料。
+Lattice 被 Shoe Body 边界切断处形成的薄楔形材料；颈厚读数受边界限制（最小内切球触及边界）的 Ligament 也归此类。
 
 ### 产出
 

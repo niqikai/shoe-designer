@@ -1,6 +1,6 @@
 # 最小壁厚以韧带颈厚计，而不是局部厚度
 
-ManufacturingProfile 的"最小壁厚"在 Lattice 上按 Neck Thickness 判定：每根 Ligament 最细处的内切球直径。Resolver 的可行区间、Feasibility Table 与 Printability Check 使用同一定义；薄壁占比 = 颈厚低于限值的 Ligament 所占材料体积 ÷ 总材料体积，距 Shoe Body 边界 0.5 mm 以内的 Cut Edge 不计入 hard 判据，另作 soft 报告。粉末床打印中细特征的失效方式是细颈处断裂或烧结不良，颈厚直接对应它。
+ManufacturingProfile 的"最小壁厚"在 Lattice 上按 Neck Thickness 判定：每根 Ligament 最细处的内切球直径。Resolver 的可行区间、Feasibility Table 与 Printability Check 使用同一定义；薄壁占比 = 颈厚低于限值的 Ligament 所占材料体积 ÷ 总材料体积，Cut Edge 不计入 hard 判据，另作 soft 报告：既包括距 Shoe Body 边界 0.5 mm 以内的残边，也包括最细处落在排除区边缘的 Ligament（最小内切球触及边界，或在 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，后者另列"实体接触占比"）。0.5 mm 站点排除本身挡不住这类读数（最大内切球可比站点更靠近边界，桥向实体单调变窄而最小值停在排除带边缘），因此改按"最小值落在哪里"判定；为防止豁免放过只靠细特征挂着的材料，另加 hard 的"悬挂材料"检查（1 mm 闭球开运算，ADR 0011）。粉末床打印中细特征的失效方式是细颈处断裂或烧结不良，颈厚直接对应它。
 
 ## Considered Options
 
@@ -17,4 +17,5 @@ ManufacturingProfile 的"最小壁厚"在 Lattice 上按 Neck Thickness 判定�
 - 实测依据（benchmark 241 个用例、1659 根 Ligament）：近阈值（参考 0.8–1.3 mm）298 根 100% 检出，最大误差 0.021 mm；全部 Ligament 中 98.6% 检出，漏检的 23 根参考颈厚均 ≥ 1.87 mm，59 个虚假输出读数均 ≥ 1.21 mm；1.0 mm 判定 0/52 假通过。
 - 最终合成场必须能在任意点上确定性求值（ADR 0006），不能只存在于体素栅格上：细阶段需要 Newton 投影与场梯度。
 - 参数（σ、persistence 阈值等）在单个种子上调定，自适应 σ 是已知的可能改进；分块粗阶段已实测，见规格第 13 节。
-- 扁韧带的侧缘、Cut Edge 上的薄楔不会令 Build 失败；它们只出现在 soft 报告中。
+- 扁韧带的侧缘、Cut Edge 与实体接触处的薄楔不会令 Build 失败；它们只出现在 soft 报告中。端部受限判定的阈值（1.0 mm、0.1 mm）是首次估计，且规则只在后处理中近似验证过（规格 20）。
+- 实测缺陷（ADR 0011 的 harness）：按字面的 0.5 mm 站点排除，致密 Shell（ρ 0.32 / 0.35）有 20 % / 14 % 的材料被判为薄壁，默认 HeelCounter 单项约占全鞋 1.1 %；Outsole 晶格擦着 Skin 约占 0.7 %。

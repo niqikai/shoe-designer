@@ -25,5 +25,5 @@
 - **Feasibility Table 变小**：去掉混合权重 w 维度与混合场的 c 标定，欧氏部分是 ρ 的一维表，c、最小颈厚、Pore Throat 按 C 缩放；表的大小与生成时间约缩小 5 倍。Resolver 的"放大 Cell"步骤只放大这一个 C，不再有可能低于 Outsole 颈厚限值的 C/2。
 - **检查点**：Resolver 在 Transition 与 Grading 带内只检查带的两端，因为 Neck Thickness 与 Pore Throat 对 ρ 单调。
 - **孔喉分级**：薄层改为 Shell 中各 Zone、Footbed Layer 及其 Grading 带、Outsole 及其过渡带，以及 Midsole 中 T < C 的点（ADR 0007）。Midsole 薄处不再有特殊处理。
-- **遗留风险（跨坐标系过渡）**：φ = (1 − w_x)·φ_sole + w_x·φ_shell 混合的是 C = 10 的欧氏网络与 (L_s, 8, 4) 的随形网络，是两张不同的网络，同一新生机制使它预计在宽约 Δw × `cross_frame_width_mm` 的带内产生薄 Ligament。必须在 `heel-transition` 的 Crop Build 之前，用与本 ADR 相同的均匀 w 扫描和平板测试在 harness 中验证，可能需要豁免（按 Cut Edge 处理）、Rim 式实体接缝或使两侧网络匹配（规格 20）。
+- **遗留风险（跨坐标系过渡，已由 ADR 0011 解决：改为 Footbed 高度的实体 Welt，不做混合）**：φ = (1 − w_x)·φ_sole + w_x·φ_shell 混合的是 C = 10 的欧氏网络与 (L_s, 8, 4) 的随形网络，是两张不同的网络，同一新生机制使它预计在宽约 Δw × `cross_frame_width_mm` 的带内产生薄 Ligament。必须在 `heel-transition` 的 Crop Build 之前，用与本 ADR 相同的均匀 w 扫描和平板测试在 harness 中验证，可能需要豁免（按 Cut Edge 处理）、Rim 式实体接缝或使两侧网络匹配（规格 20）。
 - Footbed 的 Cut Edge 处在 z = ZF − 0.55 的读数（C = 8、15 mm 堆高时 1.11–1.49，C = 10 时 2.58）属于另行报告的 soft"裁切残边"，不是混合问题。

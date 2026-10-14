@@ -1,6 +1,6 @@
 # 以粉末床 TPU 为目标工艺及由此而来的设计规则
 
-P0 以粉末床熔融 TPU 为目标工艺：无需支撑、任意晶格可打，但未烧结的粉末必须能从每个空隙中清出。由此得到一组在几何上看不出缘由的规则：鞋底侧壁保持开放晶格作为排粉通道；Footbed 与 Upper 不加 Skin（脚床的舒适性改由更密的 Footbed Layer 提供）；不允许封闭腔；最小 Neck Thickness 1.0 mm（ADR 0009）；最小 Pore Throat 分两级——薄层（Shell 中各 Zone、Footbed Layer、Outsole，以及 Midsole 中厚度不足一个 Cell 的区域和 Outsole、Footbed Layer 的过渡带）≥2.0 mm，其余 Midsole 芯部 ≥4.0 mm。薄层的排粉路径短，且紧邻大孔喉的芯部或自由表面；芯部的粉要穿过长路径，需要更大的孔喉。
+P0 以粉末床熔融 TPU 为目标工艺：无需支撑、任意晶格可打，但未烧结的粉末必须能从每个空隙中清出。由此得到一组在几何上看不出缘由的规则：鞋底侧壁在 Welt 以下保持开放晶格作为排粉通道（Welt 是横贯 Shell 与侧壁的实体条，两侧空隙分别经 Footbed、Last 一侧与外表面排粉，不形成封闭腔，实测困粉 0，ADR 0011）；Footbed 与 Upper 不加 Skin（Welt 不是 Skin）（脚床的舒适性改由更密的 Footbed Layer 提供）；不允许封闭腔；最小 Neck Thickness 1.0 mm（ADR 0009）；最小 Pore Throat 分两级——薄层（Shell 中各 Zone、Footbed Layer、Outsole，以及 Midsole 中厚度不足一个 Cell 的区域和 Outsole、Footbed Layer 的过渡带）≥2.0 mm，其余 Midsole 芯部 ≥4.0 mm。薄层的排粉路径短，且紧邻大孔喉的芯部或自由表面；芯部的粉要穿过长路径，需要更大的孔喉。
 
 ## Considered Options
 
