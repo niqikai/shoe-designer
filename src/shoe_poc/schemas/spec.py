@@ -77,11 +77,18 @@ class OpeningParameters(StrictModel):
     opening_start_x_fraction: Annotated[float, Field(ge=0, le=0.8)]
     opening_end_x_fraction: Annotated[float, Field(gt=0, le=1)]
     transition_mm: Annotated[float, Field(gt=0, le=60)] = 60.0
+    collar_style: Literal["quintic_roof", "sculpted_3d"] = "quintic_roof"
+    heel_lift_mm: Annotated[float, Field(ge=0, le=15)] = 0.0
+    side_dip_mm: Annotated[float, Field(ge=0, le=15)] = 0.0
 
     @model_validator(mode="after")
     def ordered_opening(self) -> Self:
         if self.opening_end_x_fraction - self.opening_start_x_fraction < 0.1:
             raise ValueError("opening end must exceed start by at least 0.1 of last length")
+        if self.collar_style == "quintic_roof" and (self.heel_lift_mm or self.side_dip_mm):
+            raise ValueError("heel_lift_mm and side_dip_mm require sculpted_3d collar_style")
+        if self.collar_height_mm-self.side_dip_mm < 10:
+            raise ValueError("collar side dip must retain at least 10 mm above the last base")
         return self
 
 
@@ -103,6 +110,8 @@ class SoleProfileParameters(StrictModel):
     toe_rise_mm: Annotated[float, Field(ge=0, le=20)] = 6.0
     heel_rise_mm: Annotated[float, Field(ge=0, le=15)] = 2.0
     edge_radius_mm: Annotated[float, Field(ge=0, le=10)] = 2.0
+    toe_start_fraction: Annotated[float, Field(ge=0.4, le=0.85)] = 0.68
+    sidewall_bulge_mm: Annotated[float, Field(ge=0, le=5)] = 0.0
 
 
 class SoleParameters(StrictModel):

@@ -205,6 +205,29 @@
           "maximum": 60,
           "title": "Transition Mm",
           "type": "number"
+        },
+        "collar_style": {
+          "default": "quintic_roof",
+          "enum": [
+            "quintic_roof",
+            "sculpted_3d"
+          ],
+          "title": "Collar Style",
+          "type": "string"
+        },
+        "heel_lift_mm": {
+          "default": 0.0,
+          "maximum": 15,
+          "minimum": 0,
+          "title": "Heel Lift Mm",
+          "type": "number"
+        },
+        "side_dip_mm": {
+          "default": 0.0,
+          "maximum": 15,
+          "minimum": 0,
+          "title": "Side Dip Mm",
+          "type": "number"
         }
       },
       "required": [
@@ -342,6 +365,20 @@
           "maximum": 10,
           "minimum": 0,
           "title": "Edge Radius Mm",
+          "type": "number"
+        },
+        "toe_start_fraction": {
+          "default": 0.68,
+          "maximum": 0.85,
+          "minimum": 0.4,
+          "title": "Toe Start Fraction",
+          "type": "number"
+        },
+        "sidewall_bulge_mm": {
+          "default": 0.0,
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Sidewall Bulge Mm",
           "type": "number"
         }
       },

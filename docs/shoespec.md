@@ -48,6 +48,9 @@ arbitrary lasts.
 | `opening_start_x_fraction` | dimensionless | 0–0.8 of last X length |
 | `opening_end_x_fraction` | dimensionless | >0–1; at least 0.1 after start |
 | `upper.opening_parameters.transition_mm` | mm | >0–60; optional, default 60; longitudinal collar transition (experimental; 15 mm retained a steep lip on the source last) |
+| `upper.opening_parameters.collar_style` | — | `quintic_roof` (legacy default) or `sculpted_3d` |
+| `upper.opening_parameters.heel_lift_mm` | mm | 0–15, default 0; sculpted collar only |
+| `upper.opening_parameters.side_dip_mm` | mm | 0–15, default 0; sculpted collar only; retain at least 10 mm base height |
 | `upper.pattern_parameters.type` | — | `none`; continuous upper in Milestone 1 |
 | `sole.height_mm` | mm | 5–60 |
 | `sole.profile_parameters.margin_mm` | mm | 1–20; at least thickness + clearance |
@@ -55,6 +58,8 @@ arbitrary lasts.
 | `sole.profile_parameters.toe_rise_mm` | mm | 0–20; optional, default 6 |
 | `sole.profile_parameters.heel_rise_mm` | mm | 0–15; optional, default 2 |
 | `sole.profile_parameters.edge_radius_mm` | mm | 0–10; optional, default 2; at most half sole height |
+| `sole.profile_parameters.toe_start_fraction` | dimensionless | 0.4–0.85, default 0.68; start of forefoot rocker |
+| `sole.profile_parameters.sidewall_bulge_mm` | mm | 0–5, default 0; outward radial control for the curved lower wall |
 | `lattice.period_mm` | mm | 5–50 |
 | `lattice.threshold` | dimensionless | 0.05–1.5; not an actual wall thickness |
 | `lattice.resolution_mm` | mm | 0.2–5; at most period / 4 |

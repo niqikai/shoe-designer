@@ -168,6 +168,41 @@ def test_legacy_v01_loads_repair_defaults(spec_data):
     assert ShoeSpec.model_validate_json(spec.model_dump_json()) == spec
 
 
+def test_legacy_shape_controls_do_not_change_silently(spec_data):
+    spec = ShoeSpec.model_validate(spec_data)
+    opening = spec.upper.opening_parameters
+    profile = spec.sole.profile_parameters
+    assert opening.collar_style == "quintic_roof"
+    assert opening.heel_lift_mm == opening.side_dip_mm == 0
+    assert profile.toe_start_fraction == .68
+    assert profile.sidewall_bulge_mm == 0
+
+
+def test_annotated_design_spec_preserves_last_and_upper_constraints():
+    original = ShoeSpec.load(SPEC_PATH)
+    refined = ShoeSpec.load(SPEC_PATH.with_name("shoe_spec_design_refine.json"))
+    assert refined.last == original.last
+    assert refined.upper.clearance_mm == original.upper.clearance_mm
+    assert refined.upper.thickness_mm == original.upper.thickness_mm
+    assert refined.upper.opening_parameters.collar_style == "sculpted_3d"
+    assert refined.sole.height_mm == original.sole.height_mm
+    assert refined.sole.profile_parameters.toe_rise_mm > original.sole.profile_parameters.toe_rise_mm
+    assert refined.sole.profile_parameters.toe_start_fraction < original.sole.profile_parameters.toe_start_fraction
+
+
+@pytest.mark.parametrize(("keys", "value"), [
+    (("upper", "opening_parameters", "collar_style"), "sculpted"),
+    (("upper", "opening_parameters", "side_dip_mm"), 5),
+    (("upper", "opening_parameters", "heel_lift_mm"), 2),
+    (("sole", "profile_parameters", "toe_start_fraction"), .2),
+    (("sole", "profile_parameters", "toe_start_fraction"), .9),
+    (("sole", "profile_parameters", "sidewall_bulge_mm"), -1),
+])
+def test_incompatible_or_unbounded_design_controls_fail(spec_data, keys, value):
+    with pytest.raises(ValidationError):
+        ShoeSpec.model_validate(change(spec_data, keys, value))
+
+
 @pytest.mark.parametrize(("keys", "value"), [
     (("upper", "opening_parameters", "transition_mm"), 0),
     (("upper", "opening_parameters", "transition_mm"), 60.1),
