@@ -1,4 +1,4 @@
-"""Summarize the bounded toe repair without approving appearance or manufacture."""
+"""Summarize bounded geometry and a separately recorded user shape decision."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,24 @@ REQUIRED_BUILD_OUTPUTS = {
     "roundtrip_report.json", "validation_report.json", "surface_report.json", "mesh_export_report.json",
 }
 PARAMETER_FILES = {"base_shoe.step", "base_shoe.stl", "last_normalized.step", "shoe_spec.json"}
+APPROVAL_FILES = {"base_shoe.step", "base_shoe.stl", "shoe_spec.json", "preview.png", "toe_comparison.png"}
+
+
+def _user_approval(output, execution):
+    path = output/"user_acceptance.json"
+    if not path.is_file():
+        return {"status": "PENDING", "reason": "No user shape decision recorded"}
+    try:
+        value = json.loads(path.read_text())
+        if (value.get("status") != "ACCEPTED" or value.get("scope") != "M1_base_shape"
+                or value.get("run_id") != execution["run_id"]
+                or value.get("source_sha256") != execution["input_sha256"]
+                or not value.get("user_message") or not value.get("accepted_at")):
+            raise ValueError("User acceptance does not identify this source/run and scope")
+        _verify_file_records(output, value.get("files", {}), APPROVAL_FILES)
+        return value
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return {"status": "PENDING", "reason": str(error)}
 
 
 def _verify_file_records(directory, records, required):
@@ -130,9 +148,15 @@ def report(output: Path, document: Path):
     if guards["status"] != "NOT_TESTED":
         levels["acceptance_report_guard_tests"] = guards["status"]
     technical = "FAIL" if "FAIL" in levels.values() else "PASS" if all(v == "PASS" for v in levels.values()) else "PARTIAL"
+    approval = _user_approval(output, execution)
+    appearance = approval["status"]
+    overall = "PASS" if technical == "PASS" and appearance == "ACCEPTED" else "PARTIAL"
     result = {"generated_at": utc_now(), "run_id": execution["run_id"],
-              "overall_status": "PARTIAL", "technical_status": technical,
-              "appearance_acceptance": "PENDING", "acceptance_levels": levels,
+              "overall_status": overall, "technical_status": technical,
+              "appearance_acceptance": appearance, "user_acceptance": approval,
+              "m2_gate": "READY" if overall == "PASS" else "NOT_READY",
+              "milestone_scope": "M1 bounded geometry and user-confirmed base shape; manufacturing, print and wear are separate",
+              "acceptance_levels": levels,
               "core_test_requirements": core,
               "tests_current": tests_current, "test_counts": counts,
               "parameter_evidence_reason": parameter_reason,
@@ -143,12 +167,12 @@ def report(output: Path, document: Path):
               "representation_repair": geometry.get("representation_repair"),
               "performance": {"elapsed_seconds": execution.get("elapsed_seconds"),
                   "process_peak_rss_bytes": execution.get("environment", {}).get("process_peak_rss_bytes")},
-              "scope": "Repair the toe shelf and lower front profile; freeze style choices pending actual-image review",
+              "scope": "Base shape frozen by user decision" if appearance == "ACCEPTED" else "Repair the toe shelf and lower front profile; freeze style choices pending actual-image review",
               "limitations": [
                   "Finite toe descriptors and material samples do not prove global wall thickness or curvature.",
                   "Native STEP geometric roundtrip is separate from native STEP remeshing: the diagnostic STEP reimport reproduced the missing offset-face triangulation. Reapply bounded native ShapeFix before remeshing STEP. Final STL is exported from corrected native CAD, with complete face coverage and no mesh hole filling.",
                   "Auxiliary cavity STL remains separately qualified; the actual closed cavity STEP and native Booleans supply fit evidence.",
-                  "Forefoot width and overall styling are not approved by this toe repair.",
+                  "User shape acceptance covers the current base silhouette; it does not qualify physical fit, comfort or manufacturing.",
                   "Manufacturing NOT_VERIFIED; physical printing NOT_TESTED; wearability NOT_VERIFIED."]}
     write_json(output/"acceptance_report.json", result)
     rows = []
@@ -158,9 +182,13 @@ def report(output: Path, document: Path):
         rows.append(f"| {lane['y_mm']:.1f} | {flat['baseline_mm']:.2f} → {flat['candidate_mm']:.2f} | {wall['baseline_mm']:.2f} → {wall['candidate_mm']:.2f} |")
     footbed = design.get("underfoot", {})
     spec = read("shoe_spec")
+    approval_text = (f"用户在 `{approval['accepted_at']}` 明确确认「{approval['user_message']}」。当前基础外形已冻结，M2 入口 **{result['m2_gate']}**。确认绑定当前运行与 STEP、STL、配置和预览文件哈希，见 `user_acceptance.json`。构建时原始报告中的 PENDING 保留为历史状态，当前用户验收以本报告为准。"
+                     if appearance == "ACCEPTED" else "基础轮廓确认后可冻结并进入后续阶段。")
     text = f"""# M1 鞋底前端修复记录
 
-本轮技术状态 **{technical}**；M1 总体 **PARTIAL**，外形确认 **PENDING**。本轮处理鞋底前端的平台与直立端头，风格、前掌比例及装饰不继续扩展。基础轮廓确认后可冻结并进入后续阶段，制造和穿着另行验证。
+本轮技术状态 **{technical}**；M1 总体 **{overall}**，外形确认 **{appearance}**。本轮处理鞋底前端的平台与直立端头，风格、前掌比例及装饰不继续扩展。制造和穿着另行验证。
+
+{approval_text}
 
 ## 实际修改
 

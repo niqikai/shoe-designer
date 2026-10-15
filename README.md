@@ -67,6 +67,8 @@ The subsequent toe repair preserves `output/m1_design_refine/` and writes to `ou
 
 Its optional `toe_roll_radius_mm` defaults to zero for legacy geometry. A positive value replaces the terminal flat rocker with a continuous quintic roll. The CLI measures actual CAD toe sections and exports STL from bounded, repaired native CAD. STEP geometric roundtrip does not qualify direct STEP remeshing: the recorded offset-face meshing issue requires reapplying the native representation repair after STEP import. See [toe repair evidence and limits](docs/milestone1_toe_refine_report.md). M1 fixes conspicuous geometry defects; styling can be frozen once the base silhouette is accepted.
 
+The user has confirmed the 16 mm base silhouette. Its frozen run and artifact hashes are recorded in [M1 shape acceptance](docs/milestone1_shape_acceptance.json). The current M1 acceptance is PASS and the M2 gate is READY; the runtime still implements M1 only. The report keeps the user's decision separate from the original build-time PENDING fields, and refuses to transfer approval to a different run or changed model. Manufacturing, printing and wear remain unqualified.
+
 ## Configuration and outputs
 
 ShoeSpec is JSON with explicit millimetre units for geometry. Manufacturing rules in [config/manufacturing_rules.json](config/manufacturing_rules.json) are experimental and informational for this milestone; they do not certify printability. Milestone 1 outputs belong under `output/m1/`, including the inspected last metadata/normalized STEP and base shoe STEP/STL where those operations succeed. Generated files are not source-controlled.

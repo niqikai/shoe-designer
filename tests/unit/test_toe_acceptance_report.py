@@ -203,3 +203,56 @@ def test_separate_guard_run_is_bound_to_current_report_source(evidence):
     result = _report(evidence)
     assert result["acceptance_levels"]["acceptance_report_guard_tests"] == "NOT_VERIFIED"
     assert result["technical_status"] == "PARTIAL"
+
+
+def _approve_shape(evidence):
+    for name in ("preview.png", "toe_comparison.png"):
+        (evidence.output/name).write_bytes(b"SYNTHETIC image provenance sentinel")
+    execution = _read(evidence.output/"execution_report.json")
+    value = {"status": "ACCEPTED", "scope": "M1_base_shape", "run_id": execution["run_id"],
+             "source_sha256": execution["input_sha256"], "accepted_at": "2026-10-15T00:00:00+00:00",
+             "user_message": "基础外型确认", "files": _records(evidence.output, MODULE.APPROVAL_FILES)}
+    _write(evidence.output/"user_acceptance.json", value)
+    return value
+
+
+def test_explicit_current_shape_acceptance_opens_m2_gate(evidence):
+    _approve_shape(evidence)
+    result = _report(evidence)
+    assert result["appearance_acceptance"] == "ACCEPTED"
+    assert result["overall_status"] == "PASS"
+    assert result["m2_gate"] == "READY"
+    assert "Manufacturing NOT_VERIFIED" in result["limitations"][-1]
+
+
+@pytest.mark.parametrize("change", ("run", "source", "file", "missing_image"))
+def test_approval_cannot_transfer_to_different_or_unbound_model(evidence, change):
+    value = _approve_shape(evidence)
+    if change == "run":
+        value["run_id"] = "previous-run"
+    elif change == "source":
+        value["source_sha256"] = "previous-source"
+    elif change == "file":
+        value["files"]["base_shoe.stl"]["sha256"] = "previous-model"
+    else:
+        del value["files"]["toe_comparison.png"]
+    _write(evidence.output/"user_acceptance.json", value)
+    result = _report(evidence)
+    assert result["appearance_acceptance"] == "PENDING"
+    assert result["overall_status"] == "PARTIAL"
+    assert result["m2_gate"] == "NOT_READY"
+
+
+def test_user_shape_acceptance_does_not_override_failed_geometry_checks(evidence):
+    _approve_shape(evidence)
+    path = evidence.output/"test_report.json"
+    tests = _read(path)
+    tests["tests"][next(iter(tests["tests"]))]["status"] = "FAIL"
+    tests["counts"].update({"PASS": 7, "FAIL": 1})
+    _write(path, tests)
+    result = _report(evidence)
+    assert result["appearance_acceptance"] == "ACCEPTED"
+    assert result["technical_status"] == "FAIL"
+    assert result["overall_status"] == "PARTIAL"
+    assert result["m2_gate"] == "NOT_READY"
+    assert "M2 入口 **NOT_READY**" in evidence.document.read_text()

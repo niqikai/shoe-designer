@@ -1,6 +1,8 @@
 # M1 鞋底前端修复记录
 
-本轮技术状态 **PASS**；M1 总体 **PARTIAL**，外形确认 **PENDING**。本轮处理鞋底前端的平台与直立端头，风格、前掌比例及装饰不继续扩展。基础轮廓确认后可冻结并进入后续阶段，制造和穿着另行验证。
+本轮技术状态 **PASS**；M1 总体 **PASS**，外形确认 **ACCEPTED**。本轮处理鞋底前端的平台与直立端头，风格、前掌比例及装饰不继续扩展。制造和穿着另行验证。
+
+用户在 `2026-10-15T08:05:02.759094+00:00` 明确确认「基础外型确认」。当前基础外形已冻结，M2 入口 **READY**。确认绑定当前运行与 STEP、STL、配置和预览文件哈希，见 `user_acceptance.json`。构建时原始报告中的 PENDING 保留为历史状态，当前用户验收以本报告为准。
 
 ## 实际修改
 
@@ -28,7 +30,7 @@
 
 本轮测试 `PASS`，实际结果 `{"PASS": 272, "FAIL": 0, "NOT_TESTED": 0}`；测试绑定当前运行 `eb48db0c-86a8-4f3f-a0b1-962033f130c6` 的状态 `True`。真实鞋楦回归 `PASS`，独立 CLI 重跑及同配置两种体积积分协议的可重复性 `PASS`；逐项结果见 `test_report.json`，原始体积数据在 `debug/pytest_final/test_T19_real_headless_cli_M1_0/volume_repeatability_measurements.json`。底高完整变体检查 `PASS`，具体生成高度和实际尺寸差见 `parameter_change_report.json`。不把旧版模型的测试计为当前算法结果。
 
-验收报告保护测试单独记录为 `PASS`，计数 `{"PASS": 21, "FAIL": 0, "NOT_TESTED": 0}`；该补充运行绑定当前报告脚本和测试源码的哈希，不并入主几何测试计数。记录见 `debug/toe_report_guard_tests.json` 与 `debug/toe_report_guard_provenance.json`。
+验收报告保护测试单独记录为 `PASS`，计数 `{"PASS": 27, "FAIL": 0, "NOT_TESTED": 0}`；该补充运行绑定当前报告脚本和测试源码的哈希，不并入主几何测试计数。记录见 `debug/toe_report_guard_tests.json` 与 `debug/toe_report_guard_provenance.json`。
 
 正式生成耗时 `592.2173212499474` 秒，进程峰值 RSS `3706880000` bytes；详见 `execution_report.json` 和资源记录。并行执行会影响耗时。
 
