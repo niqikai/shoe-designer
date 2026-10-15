@@ -149,6 +149,8 @@ def report(output: Path, document: Path) -> dict:
 
 鞋体最高点 `{design.get('shoe_peak_z_mm')}` mm。独立足底采样 `{underfoot.get('sample_count', len(underfoot.get('samples', [])))}` 点，最小观测材料区间 `{underfoot.get('minimum_measured_directional_material_mm')}` mm，检查状态 `{underfoot.get('geometry_status')}`；后跟、中足、前掌覆盖和误差逐项记录。鞋面采样排除鞋底加强区，不能替代该测量；两类有限采样都不证明全局最小厚度。
 
+足底出口分类诊断 `{len(underfoot.get('classification_diagnostics', []))}` 处；这些位置的点分类与实际边界交叉不一致，测量必须由完整包围盒长度的独立 CAD 布尔直线确认。原短线复测会被任意线端截断，失败日志和119点诊断保留在 `debug/failed_footbed_replay/`、`debug/footbed_119_diagnosis.json`。复测使用独立几何长度、逐点覆盖和原1e-4mm容差；不以丢点或放宽标准消除失败。已有CAD/网格保持不变，导出后的原生STEP测量修订见 `post_build_revalidations`。
+
 | 图中问题 | 本轮处理 | 状态界限 |
 | --- | --- | --- |
 | 1 / 4 鞋背高峰、侧面轮廓 | 前移鞋口前缘，使用三维切削曲面降低并展宽鞋背峰 | 有尺寸及同角度图证据，外形仍待确认 |
@@ -198,6 +200,8 @@ def report(output: Path, document: Path) -> dict:
 ## 5. 测试结果
 
 通过 {counts.get('PASS', '未运行')}；失败 {counts.get('FAIL', '未运行')}；未执行/跳过 {counts.get('NOT_TESTED', '未运行')}。原始结果保留在 `test_report.json`，合成几何测试不替代真实鞋楦测试。
+
+证据模式：`{tests.get('evidence_mode', 'Single pytest execution')}`。存在定向复测时，`source_runs` 保留原完整运行与后续实际结果及哈希；聚合表示各测试最后一次实际结果，不能解释为一次完整运行全部通过，原失败记录仍保留。
 
 | 要求 | 实际测试状态 |
 | --- | --- |

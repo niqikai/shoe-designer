@@ -27,7 +27,7 @@ def validate_underfoot_material(last_shape, build, spec):
     lower_bound = spec.upper.thickness_mm-THICKNESS_ERROR_MM
     report = {
         'geometry_status': 'NOT_VERIFIED', 'overall_status': 'PARTIAL',
-        'method': 'Trim-classified source CAD points and verified downward outward normals; exact cavity/final-shoe ray hits and midpoint material classification',
+        'method': 'Trim-classified source CAD points and verified downward outward normals; exact cavity/final-shoe ray hits and midpoint material classification; inconsistent exit classifications require independent full-bbox Boolean endpoint confirmation',
         'checked_at': utc_now(),
         'nominal_upper_thickness_mm': spec.upper.thickness_mm,
         'experimental_thickness_allowance_mm': THICKNESS_ERROR_MM,
@@ -39,6 +39,7 @@ def validate_underfoot_material(last_shape, build, spec):
                       'heel_end_x_fraction': .25, 'toe_start_x_fraction': .75,
                       'sole_exclusion_applied': False},
         'samples': [], 'measurement_errors': [], 'coverage': {}, 'regions': {},
+        'classification_diagnostics': [], 'boolean_crosscheck_tolerance_mm': 1e-4,
         'minimum_measured_directional_material_mm': None,
         'maximum_measured_directional_material_mm': None,
         'minimum_measured_clearance_mm': None, 'maximum_measured_clearance_mm': None,
@@ -90,6 +91,32 @@ def validate_underfoot_material(last_shape, build, spec):
                 raise ValueError('Underfoot ray has no measured cavity exit')
             cavity_exit = cavity_hits[0]
             clearance, material = float(a), float(b-a)
+            # Native point classification can disagree with an actual crossing
+            # on a periodic curved wall. Do not treat such a state as proof of
+            # material, or silently discard the site: independently confirm its
+            # interval using a line extending beyond the entire CAD bbox.
+            before_exit = final_classifier.inside(p+n*(b-.01))
+            after_exit = final_classifier.inside(p+n*(b+.01))
+            if not before_exit or after_exit:
+                from build123d import Edge
+                common = build.shape.intersect(Edge.make_line(p.tolist(), (p+n*ray_length).tolist()))
+                boolean_intervals = []
+                for edge in common.edges() if common is not None else []:
+                    limits = sorted(float(np.dot(np.asarray(tuple(vertex.center()))-p, n))
+                                    for vertex in edge.vertices())
+                    if len(limits) == 2 and limits[1]-limits[0] > 1e-5:
+                        boolean_intervals.append(limits)
+                boolean_intervals.sort()
+                if (not boolean_intervals or boolean_intervals[0][1] >= ray_length-1e-4
+                        or max(abs(boolean_intervals[0][0]-a), abs(boolean_intervals[0][1]-b)) > 1e-4):
+                    raise ValueError('Inconsistent exit classification was not resolved by the independent full-bbox Boolean line')
+                report['classification_diagnostics'].append({
+                    'source_face_index': face_index, 'point_mm': list(point), 'region': record['region'],
+                    'exit_classifier_before_inside': before_exit, 'exit_classifier_after_inside': after_exit,
+                    'ray_material_interval_mm': [a,b], 'boolean_material_interval_mm': boolean_intervals[0],
+                    'boolean_line_length_mm': ray_length, 'measurement_resolution': 'PASS',
+                    'classification_reliability': 'NOT_VERIFIED',
+                    'reason': 'Point classification near the exit disagrees with the boundary crossing; full-bbox Boolean confirms the measured interval. Internal kernel cause is unverified.'})
             valid = (material >= lower_bound
                      and abs(clearance-spec.upper.clearance_mm) <= FIT_ERROR_MM
                      and abs(clearance-cavity_exit) <= FIT_ERROR_MM)
@@ -117,6 +144,8 @@ def validate_underfoot_material(last_shape, build, spec):
                    'minimum_measured_clearance_mm': min(clearance, default=None),
                    'maximum_measured_clearance_mm': max(clearance, default=None)})
     statuses = [region['geometry_status'] for region in report['regions'].values()]
+    if report['classification_diagnostics']:
+        report['limitations'].append('Some exit point classifications are inconsistent; those samples require an independent full-bbox Boolean endpoint crosscheck. This does not certify global classifier reliability.')
     report['geometry_status'] = ('FAIL' if 'FAIL' in statuses else 'NOT_VERIFIED'
                                 if report['measurement_errors'] or 'NOT_VERIFIED' in statuses else 'PASS')
     if report['geometry_status'] == 'FAIL':

@@ -117,10 +117,13 @@ def test_design_underfoot_actual_samples_replayed_with_independent_boolean_lines
     for region in ("heel", "middle", "toe"):
         assert footbed["regions"][region]["geometry_status"] == "PASS"
         assert footbed["regions"][region]["sample_count"] > 0
-        sample = next(s for s in footbed["samples"] if s["region"] == region)
+    for sample in footbed["samples"]:
         point, normal = np.asarray(sample["point_mm"]), np.asarray(sample["outward_normal"])
         assert design_shapes["last"].distance_to(Vertex(*point)) <= 1e-4
-        length = sample["clearance_mm"]+sample["directional_material_mm"]+5.
+        # Choose the line independently of the expected thickness and make its
+        # end leave the entire CAD bbox. Short lines can retain material to an
+        # arbitrary endpoint on curved walls; that is not a thickness reading.
+        length = float(np.linalg.norm(tuple(design_shapes["shoe"].bounding_box().size)))+10.
         common = design_shapes["shoe"].intersect(Edge.make_line(point.tolist(), (point+normal*length).tolist()))
         assert common is not None and common.edges()
         intervals = []
@@ -128,6 +131,7 @@ def test_design_underfoot_actual_samples_replayed_with_independent_boolean_lines
             limits = sorted(float(np.dot(np.asarray(tuple(v.center()))-point, normal)) for v in edge.vertices())
             intervals.append((limits, edge.length))
         limits, material = min(intervals, key=lambda item: item[0][0])
+        assert limits[1] < length-1e-4, "Material interval is truncated by the Boolean line endpoint"
         assert limits[0] == pytest.approx(sample["clearance_mm"], abs=1e-4)
         assert material == pytest.approx(sample["directional_material_mm"], abs=1e-4)
 
