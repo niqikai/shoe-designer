@@ -25,7 +25,7 @@ GENERATED_NAMES = (
     "validation_report.json", "roundtrip_report.json", "surface_report.json",
     "execution_report.json", "failure_report.json", "mesh_export_report.json",
     "artifact_manifest.json", "test_report.json", "parameter_change_report.json",
-    "acceptance_report.json", "repeatability_report.json", "design_report.json",
+    "acceptance_report.json", "repeatability_report.json", "design_report.json", "component_preview_report.json",
 )
 
 
@@ -195,6 +195,13 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
     original = analyze_shape(result.shape)
     roundtrip = analyze_shape(reloaded)
     mesh = stage("reimport_validate_stl", lambda: validate_mesh(output / "base_shoe.stl"))
+    component_previews = stage("check_component_preview_meshes", lambda: {
+        name: validate_mesh(output / f"{name}.stl") for name in ("upper", "cavity", "last_normalized")})
+    write_json(output / "component_preview_report.json", {
+        "scope": "Auxiliary preview STL meshes; final deliverable STL has its own validation_report.json",
+        "overall_status": "PASS" if all(r["geometry_status"] == "PASS" for r in component_previews.values()) else "PARTIAL",
+        "components": component_previews,
+        "limitations": ["An incomplete cavity preview STL cannot establish cavity topology. The cavity STEP and native CAD Booleans supply cavity evidence."]})
     cad_bounds = np.asarray([original["bbox_mm"]["min"], original["bbox_mm"]["max"]])
     step_bbox_delta = float(np.max(np.abs(cad_bounds - np.asarray(
         [roundtrip["bbox_mm"]["min"], roundtrip["bbox_mm"]["max"]]))))
@@ -243,6 +250,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
               and result.metadata.get("sole", {}).get("bottom_round_validation", {}).get("geometry_status")
               in {"PASS", "NOT_REQUIRED"})
     passed = passed and (design is None or design["geometry_status"] == "PASS")
+    passed = passed and exports["base_shoe"]["native_face_coverage_status"] == "PASS"
     execution = {"task": "Milestone 1 build-base", "status": "PASS" if passed else "FAIL",
                  "run_id": run_id, "stale_generated_files_removed": cleared,
                  "milestone_status": "PARTIAL",
@@ -250,7 +258,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                  "junction_sampling_status": result.metadata["junction"]["geometry_status"],
                  "bottom_round_sampling_status": result.metadata["sole"]["bottom_round_validation"]["geometry_status"],
                  "design_geometry_status": design["geometry_status"] if design else "NOT_TESTED",
-                 "scope": "CAD and exported geometry only; full POC/manufacturing/print NOT_VERIFIED",
+                 "scope": "Final shoe CAD/STL and bounded native CAD checks; auxiliary component preview qualification is recorded separately; manufacturing/print NOT_VERIFIED",
                  "generated_at": utc_now(), "input_file": str(Path(spec.last.file)),
                  "input_sha256": loaded.source["sha256"], "spec_source": str(spec_path.resolve()),
                  "comparison_input": str(compare_with.resolve()) if compare_with else None,
@@ -264,7 +272,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                                          "roundtrip_report.json", "validation_report.json", "surface_report.json",
                                          "preview.png", "comparison.png", "last_normalized.stl",
                                          "upper.stl", "cavity.stl", "upper_cavity_overlay.png",
-                                         "mesh_export_report.json", "design_report.json", "cavity.step", "outer.step", "opening.step"}}}
+                                         "mesh_export_report.json", "design_report.json", "component_preview_report.json", "cavity.step", "outer.step", "opening.step"}}}
     write_json(output / "execution_report.json", execution)
     if passed:
         (output / "failure_report.json").unlink(missing_ok=True)

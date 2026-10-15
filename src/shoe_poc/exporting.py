@@ -39,16 +39,26 @@ def export_mesh(shape, path: Path, tolerance=.15, angular_tolerance=.1) -> dict:
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepTools import BRepTools
     from OCP.StlAPI import StlAPI_Writer
+    from OCP.BRep import BRep_Tool
+    from OCP.TopLoc import TopLoc_Location
     # build123d 0.10 export_stl uses relative deflection. Explicitly use absolute
     # millimetres, and clear only cached triangulations before native remeshing.
     BRepTools.Clean_s(shape.wrapped)
     mesh = BRepMesh_IncrementalMesh(shape.wrapped, tolerance, False, angular_tolerance, True)
     mesh.Perform()
+    missing_faces = []
+    faces = list(shape.faces())
+    for index, face in enumerate(faces):
+        triangulation = BRep_Tool.Triangulation_s(face.wrapped, TopLoc_Location())
+        if triangulation is None or triangulation.NbTriangles() == 0:
+            missing_faces.append(index)
     writer = StlAPI_Writer()
     writer.ASCIIMode = False
     if not writer.Write(shape.wrapped, str(path)):
         raise ValueError(f"Native STL export failed: {path}")
     report = remove_exact_zero_area_records(path)
     report.update({"linear_deflection_mm": tolerance, "angular_deflection_radians": angular_tolerance,
-                   "relative_deflection": False, "cached_triangulations_cleared": True})
+                   "relative_deflection": False, "cached_triangulations_cleared": True,
+                   "native_face_count": len(faces), "native_faces_without_triangulation": missing_faces,
+                   "native_face_coverage_status": "PARTIAL" if missing_faces else "PASS"})
     return report

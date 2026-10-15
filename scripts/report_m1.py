@@ -19,6 +19,7 @@ def report(output: Path, document: Path) -> dict:
         "execution_report", "parameter_change_report", "roundtrip_report", "surface_report")]
     repeatability = read("repeatability_report")
     design = read("design_report")
+    component_previews = read("component_preview_report")
     test_path = output / "test_report.json"
     if (repeatability.get("run_id") != execution.get("run_id") or not test_path.is_file()
             or repeatability.get("test_report_sha256") != sha256(test_path)):
@@ -99,6 +100,8 @@ def report(output: Path, document: Path) -> dict:
             "5": "IMPROVED_PENDING_REVIEW", "6": "IMPROVED_PENDING_REVIEW",
             "7": "CONSTRAINED_UNRESOLVED", "8": "CONSTRAINED_UNRESOLVED",
         } if design else {},
+        "component_preview_meshes": {name: value.get("geometry_status")
+            for name, value in component_previews.get("components", {}).items()},
         "actual_source": last.get("source", {}),
         "limitations": geometry.get("limitations", []) + [
             "Appearance requires actual-image review and user acceptance; topology alone cannot qualify the shoe template.",
@@ -211,6 +214,8 @@ def report(output: Path, document: Path) -> dict:
 {json_block(measurement)}
 
 完整位置、排除区域、无法测量区域和偏差见 `surface_report.json`。壁厚与间隙只对实际采样位置负责，不证明全局最小值。鞋口边缘、鞋底加强区和其他排除位置不能被统计结果掩盖。
+
+辅助 STL 预览网格状态 `{result['component_preview_meshes']}`，原生面三角化覆盖见 `mesh_export_report.json`。鞋腔预览发生缺面时，不能把该 STL 用作鞋腔水密性证明或打印实体；使用 `cavity.step` 和真实 CAD 包含/对称差检查。最终整鞋 STL 由独立 `validation_report.json` 验证。失败的鞋腔三角化尝试保留在 `debug/cavity_export_diagnostics/`。
 
 连接检查来自最终 CAD 的实际相邻面外向法向；完整记录见 `geometry_report.json` 的 `junction.validation`。2° 法向角度上限和 0.02 mm 底边半径误差上限均为本轮实验性数值目标，有限检查不证明全局 G1 连续或制造合格。
 
