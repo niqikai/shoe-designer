@@ -132,13 +132,38 @@ class SoleParameters(StrictModel):
         return self
 
 
+class LatticeDomainParameters(StrictModel):
+    """Conservative underfoot computational region inside the accepted CAD."""
+
+    max_z_offset_mm: Annotated[float, Field(ge=-20, le=0)] = 0.0
+    clearance_mm: Annotated[float, Field(ge=0.5, le=10)] = 2.0
+    bounds_mm: Annotated[list[RotationRow], Field(min_length=2, max_length=2)] | None = None
+
+    @field_validator("bounds_mm")
+    @classmethod
+    def ordered_bounds(cls, value):
+        if value is not None and (any(abs(x) > 10000 for row in value for x in row)
+                                  or any(value[0][i] >= value[1][i] for i in range(3))):
+            raise ValueError("lattice bounds_mm must be ordered finite millimetre limits within ±10000")
+        return value
+
+
 class LatticeParameters(StrictModel):
-    """Reserved protocol values. Milestone 1 does not generate lattice geometry."""
+    """M2 implicit controls; threshold is dimensionless, not wall thickness."""
 
     type: Literal["gyroid"]
     period_mm: Annotated[float, Field(ge=5, le=50)]
     threshold: Annotated[float, Field(ge=0.05, le=1.5)]
     resolution_mm: Annotated[float, Field(ge=0.2, le=5)]
+    phase_origin_mm: Annotated[list[float], Field(min_length=3, max_length=3)] = Field(default_factory=lambda: [0., 0., 0.])
+    domain: LatticeDomainParameters = Field(default_factory=LatticeDomainParameters)
+
+    @field_validator("phase_origin_mm")
+    @classmethod
+    def bounded_phase_origin(cls, value):
+        if any(abs(x) > 10000 for x in value):
+            raise ValueError("lattice phase origin must lie within ±10000 mm")
+        return value
 
     @model_validator(mode="after")
     def useful_resolution(self) -> Self:

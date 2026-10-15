@@ -90,9 +90,53 @@
       "title": "LastSpec",
       "type": "object"
     },
+    "LatticeDomainParameters": {
+      "additionalProperties": false,
+      "description": "Conservative underfoot computational region inside the accepted CAD.",
+      "properties": {
+        "max_z_offset_mm": {
+          "default": 0.0,
+          "maximum": 0,
+          "minimum": -20,
+          "title": "Max Z Offset Mm",
+          "type": "number"
+        },
+        "clearance_mm": {
+          "default": 2.0,
+          "maximum": 10,
+          "minimum": 0.5,
+          "title": "Clearance Mm",
+          "type": "number"
+        },
+        "bounds_mm": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bounds Mm"
+        }
+      },
+      "title": "LatticeDomainParameters",
+      "type": "object"
+    },
     "LatticeParameters": {
       "additionalProperties": false,
-      "description": "Reserved protocol values. Milestone 1 does not generate lattice geometry.",
+      "description": "M2 implicit controls; threshold is dimensionless, not wall thickness.",
       "properties": {
         "type": {
           "const": "gyroid",
@@ -116,6 +160,18 @@
           "minimum": 0.2,
           "title": "Resolution Mm",
           "type": "number"
+        },
+        "phase_origin_mm": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Phase Origin Mm",
+          "type": "array"
+        },
+        "domain": {
+          "$ref": "#/$defs/LatticeDomainParameters"
         }
       },
       "required": [
