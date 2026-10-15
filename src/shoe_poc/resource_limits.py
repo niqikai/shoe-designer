@@ -35,7 +35,7 @@ class MemoryBudget:
                           "maximum_bytes": self.maximum_bytes, "command": self.command,
                           "sampling_interval_seconds": 0.1}
                 write_json(self.output / "failure_report.json", report)
-                if self.command in {"run", "build-base"}:
+                if self.command in {"run", "build-base", "build-lattice"}:
                     write_json(self.output / "execution_report.json", report)
                 elif self.command == "verify-parameters":
                     write_json(self.output.parent / "parameter_change_report.json", report)

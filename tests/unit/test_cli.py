@@ -17,7 +17,7 @@ def test_cli_help():
     result = cli("--help")
     assert result.returncode == 0
     assert "Milestone 1" in result.stdout
-    assert "build-lattice" not in result.stdout
+    assert "build-lattice" in result.stdout
 
 
 def test_missing_last_has_input_error(tmp_path):

@@ -27,7 +27,7 @@ def utc_now() -> str:
 
 def environment() -> dict:
     packages = {}
-    for name in ("shoe-poc", "build123d", "cadquery-ocp", "numpy", "scipy", "trimesh", "pydantic", "pytest"):
+    for name in ("shoe-poc", "build123d", "cadquery-ocp", "numpy", "scipy", "scikit-image", "trimesh", "pydantic", "pytest"):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:

@@ -1,0 +1,28 @@
+{
+  "scope": "M2_immutable_CAD_inputs",
+  "accepted_run_id": "eb48db0c-86a8-4f3f-a0b1-962033f130c6",
+  "acceptance_sha256": "eb6fab105d121cee122ad01337eb65d27911b249e92452a8ffc0a7edb31f1e01",
+  "files": {
+    "execution_report.json": {
+      "sha256": "6efed70b290d9bed36bdd9f05821c597261a43dc66c503e951c0d09eb3844d08",
+      "bytes": 6815
+    },
+    "cavity.step": {
+      "sha256": "f8546fa53ae1bbac60c81318786cbe6b9b3a62f64eb62a5f7503a5b4ed5602be",
+      "bytes": 2273831
+    },
+    "last_normalized.step": {
+      "sha256": "a90048ca51812c9977ab4847a6645cd95fac91571a573239eabcb52042130369",
+      "bytes": 1762603
+    },
+    "last_metadata.json": {
+      "sha256": "950b1039662ba290a950f5f8310951c886ce6dee36a0d1714f6af47ea09172ba",
+      "bytes": 4610
+    },
+    "geometry_report.json": {
+      "sha256": "b85a4df04ea515507af3cdd8019c2a87ac03cb2456588840e83abf913ce374d8",
+      "bytes": 1122507
+    }
+  },
+  "note": "M2 input provenance lock; preserves the historical shape approval and all M1 output files. Not manufacturing or fit acceptance."
+}

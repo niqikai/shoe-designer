@@ -306,7 +306,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="AI footwear Phase 0 — Milestone 1 headless CAD")
+    root = argparse.ArgumentParser(description="AI footwear Phase 0 — Milestone 1 CAD and Milestone 2 lattice")
     commands = root.add_subparsers(dest="command", required=True)
     inspect = commands.add_parser("inspect-last", help="Measure actual input STEP without normalization")
     inspect.add_argument("--input", required=True, type=Path)
@@ -320,6 +320,13 @@ def parser() -> argparse.ArgumentParser:
     validate = commands.add_parser("validate", help="Mesh integrity only; not print qualification")
     validate.add_argument("--model", required=True, type=Path)
     validate.add_argument("--output", type=Path, default=Path("output/mesh-validation"))
+    lattice = commands.add_parser("build-lattice", help="M2 Gyroid in the accepted M1 sole; no M3 shell fusion")
+    lattice.add_argument("--spec", type=Path, required=True)
+    lattice.add_argument("--base-dir", type=Path, default=Path("output/m1_toe_refine"))
+    lattice.add_argument("--acceptance", type=Path, default=Path("docs/milestone1_shape_acceptance.json"))
+    lattice.add_argument("--output", type=Path, default=Path("output/m2"))
+    lattice.add_argument("--max-voxels", type=int, default=10_000_000)
+    lattice.add_argument("--max-field-memory-mb", type=float, default=4096.)
     for subcommand in commands.choices.values():
         subcommand.add_argument("--max-rss-mb", type=float, default=8192,
                                 help="Sampled process RSS budget in MiB (default 8192); exit 3 when observed exceeded")
@@ -333,6 +340,15 @@ def main(argv: list[str] | None = None) -> int:
     if (args.command in {"run", "build-base"} and args.design_baseline is not None
             and args.design_baseline.resolve() == args.output.resolve()):
         parser().error("--design-baseline must differ from --output")
+    if args.command == "build-lattice":
+        from shoe_poc.lattice.pipeline import validate_output_paths
+        try:
+            validate_output_paths(args.output, args.base_dir)
+        except ValueError as error:
+            parser().error(str(error))
+        if (args.max_voxels <= 0 or not np.isfinite(args.max_field_memory_mb)
+                or args.max_field_memory_mb <= 0):
+            parser().error("M2 voxel and allocation budgets must be positive and finite")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     # Native OCCT allocations are not visible to Python tracemalloc.
     from shoe_poc.resource_limits import MemoryBudget
@@ -345,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
             inspect_last(args.input, args.output)
         elif args.command in {"build-base", "run"}:
             build_base(args.spec, args.output, args.compare_with, run_id=run_id, design_baseline=args.design_baseline)
+        elif args.command == "build-lattice":
+            from shoe_poc.lattice.pipeline import build_lattice
+            build_lattice(args.spec, args.output, base_directory=args.base_dir,
+                acceptance_path=args.acceptance, max_voxels=args.max_voxels,
+                max_field_memory_mb=args.max_field_memory_mb, run_id=run_id)
         elif args.command == "validate":
             from shoe_poc.validation import validate_mesh
             report = validate_mesh(args.model)
@@ -355,16 +376,18 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("Input error: %s", error)
         if args.command in {"build-base", "run"}:
             _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
-        write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
-                   "type": type(error).__name__, "elapsed_seconds": time.perf_counter() - before})
+        if args.command != "build-lattice" or not (args.output / "failure_report.json").is_file():
+            write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
+                       "type": type(error).__name__, "elapsed_seconds": time.perf_counter() - before})
         return 2
     except Exception as error:
         LOG.error("Geometry/runtime error: %s", error)
         if args.command in {"build-base", "run"}:
             _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
-        write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
-                   "type": type(error).__name__, "traceback": traceback.format_exc(),
-                   "elapsed_seconds": time.perf_counter() - before})
+        if args.command != "build-lattice" or not (args.output / "failure_report.json").is_file():
+            write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
+                       "type": type(error).__name__, "traceback": traceback.format_exc(),
+                       "elapsed_seconds": time.perf_counter() - before})
         return 3
     finally:
         budget.__exit__()
