@@ -35,7 +35,29 @@ def _offset_guide(hit, theta, z, offset, rate):
     normal_derivative = (hit(theta, z + delta)[1] - hit(theta, z - delta)[1]) / (2 * delta)
     return (point + normal * offset, tangent + normal * rate + normal_derivative * offset)
 
-def _periodic_body(parameters, sections, guide_normals=None):
+def _waisted_wall_controls(cubic, theta, waist_mm):
+    """Exact cubic elevation, then an endpoint/tangent-preserving inward bump.
+
+    The middle quintic controls produce radial displacement
+    -16*A*t^2*(1-t)^2, exactly -A at t=1/2. Z and both endpoint
+    positions/first derivatives stay unchanged. Zero keeps the original cubic.
+    """
+    if waist_mm == 0:
+        return cubic
+    controls = np.asarray(cubic, dtype=float)
+    for degree in (3, 4):
+        elevated = [controls[0]]
+        for index in range(1, degree+1):
+            weight = index/(degree+1)
+            elevated.append(weight*controls[index-1]+(1-weight)*controls[index])
+        elevated.append(controls[-1])
+        controls = np.asarray(elevated)
+    radial = np.array((np.cos(theta), np.sin(theta), 0.))
+    controls[2:4] -= 1.6*waist_mm*radial
+    return controls
+
+
+def _periodic_body(parameters, sections, guide_normals=None, waist_mm=0.):
     from build123d import Face, Wire, Shell, Solid
     from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
     from OCP.Geom import Geom_BSplineSurface
@@ -55,6 +77,19 @@ def _periodic_body(parameters, sections, guide_normals=None):
     for (i, h) in enumerate(np.diff(parameters)):
         poles.extend((sections[i] + derivative[i] * h / 3, sections[i + 1] - derivative[i + 1] * h / 3, sections[i + 1]))
     poles = np.asarray(poles)
+    wall_poles = None
+    if waist_mm:
+        # Only the lower side changes degree. The cubic band/roof arrays and
+        # their Q-handle indices above stay exactly as before.
+        walls = np.asarray([_waisted_wall_controls(section[0], theta, waist_mm)
+                            for section, theta in zip(sections, parameters)])
+        walls[-1] = walls[0].copy()
+        wall_derivative = CubicSpline(parameters, walls, axis=0, bc_type='periodic')(parameters, 1)
+        wall_poles = [walls[0]]
+        for i, h in enumerate(np.diff(parameters)):
+            wall_poles.extend((walls[i]+wall_derivative[i]*h/3,
+                               walls[i+1]-wall_derivative[i+1]*h/3, walls[i+1]))
+        wall_poles = np.asarray(wall_poles)
 
     def real(values):
         a = TColStd_Array1OfReal(1, len(values))
@@ -69,11 +104,13 @@ def _periodic_body(parameters, sections, guide_normals=None):
         return a
     faces = []
     for side in range(sections.shape[1]):
-        a = TColgp_Array2OfPnt(1, 4, 1, len(poles))
-        for u in range(4):
-            for v in range(len(poles)):
-                a.SetValue(u + 1, v + 1, gp_Pnt(*poles[v, side, u]))
-        surface = Geom_BSplineSurface(a, real([0, 1]), real(parameters), integer([4, 4]), integer([4] + [3] * (len(parameters) - 2) + [4]), 3, 3)
+        surface_poles = wall_poles if side == 0 and wall_poles is not None else poles[:, side]
+        count = surface_poles.shape[1]
+        a = TColgp_Array2OfPnt(1, count, 1, len(surface_poles))
+        for u in range(count):
+            for v in range(len(surface_poles)):
+                a.SetValue(u + 1, v + 1, gp_Pnt(*surface_poles[v, u]))
+        surface = Geom_BSplineSurface(a, real([0, 1]), real(parameters), integer([count, count]), integer([4] + [3] * (len(parameters) - 2) + [4]), count-1, 3)
         surface.SetVPeriodic()
         # Reduce only redundant knots within 1e-8 mm; the constrained guide
         # rows retain C1, and the natural cubic rows can retain C2.
@@ -233,7 +270,8 @@ def periodic_transition(last, outer, bottom, metadata, spec):
         sections.append(np.array([lower, band0, band1, roof]))
     sections.append(sections[0].copy())
     guide_normals.append(guide_normals[0].copy())
-    body = _periodic_body(parameters, np.asarray(sections), guide_normals)
+    waist = getattr(spec.sole.profile_parameters, 'sidewall_waist_mm', 0.)
+    body = _periodic_body(parameters, np.asarray(sections), guide_normals, waist_mm=waist)
     cutter = _rocker_cutter(box, bottom, spec.sole.profile_parameters)
     (result, round_edge_count) = _round_bottom(body, cutter, spec.sole.profile_parameters.edge_radius_mm)
-    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'sidewall_bulge_mm': spec.sole.profile_parameters.sidewall_bulge_mm, 'sidewall_control_method': 'Positive radial lower-wall Bezier control displacement, at 35% of vertical span; zero preserves the original control', 'toe_start_fraction': spec.sole.profile_parameters.toe_start_fraction, 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})
+    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'sidewall_bulge_mm': spec.sole.profile_parameters.sidewall_bulge_mm, 'sidewall_waist_mm': waist, 'lower_wall_degree': 5 if waist else 3, 'waist_method': 'Exact cubic degree elevation plus inward -16*A*t^2*(1-t)^2 radial displacement; original endpoint positions and first derivatives retained', 'sidewall_control_method': 'Positive radial lower-wall Bezier control displacement, at 35% of vertical span; zero preserves the original control', 'toe_start_fraction': spec.sole.profile_parameters.toe_start_fraction, 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})

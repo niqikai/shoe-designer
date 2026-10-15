@@ -380,6 +380,13 @@
           "minimum": 0,
           "title": "Sidewall Bulge Mm",
           "type": "number"
+        },
+        "sidewall_waist_mm": {
+          "default": 0.0,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Sidewall Waist Mm",
+          "type": "number"
         }
       },
       "required": [

@@ -70,9 +70,11 @@ class ShoeAssembler:
                                                maximum_z_mm=sole_stock.bounding_box().max.Z+1.)
         refined = (spec.upper.opening_parameters.collar_style == 'sculpted_3d'
                    or spec.sole.profile_parameters.sidewall_bulge_mm > 0)
+        waisted = getattr(spec.sole.profile_parameters, 'sidewall_waist_mm', 0.) > 0
         build = ShoeBuild(shoe, {
             'template': spec.shoe.template, 'upper': upper_metadata, 'sole': sole_metadata,
-            'algorithm_version': ('exact-upper-sculpted-collar-periodic-rocker-sole-assembly-v8'
+            'algorithm_version': ('exact-upper-sculpted-collar-waisted-periodic-rocker-sole-assembly-v9' if waisted
+                                  else 'exact-upper-sculpted-collar-periodic-rocker-sole-assembly-v8'
                                   if refined else 'exact-upper-periodic-rocker-sole-assembly-v7'),
             'junction': {
                 'geometry_status': junction_validation['geometry_status'],

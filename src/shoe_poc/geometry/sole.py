@@ -61,7 +61,8 @@ class SoleGenerator:
         if round_validation['geometry_status'] == 'FAIL':
             raise ValueError(f"Actual bottom round failed: {round_validation['maximum_radius_deviation_mm']} mm radius deviation")
         metadata.update({
-            "algorithm_version": ("cad-lower-foot-periodic-rocker-sole-v8" if profile.sidewall_bulge_mm else ALGORITHM_VERSION),
+            "algorithm_version": ("cad-lower-foot-periodic-rocker-sole-v9" if getattr(profile, 'sidewall_waist_mm', 0.)
+                                  else "cad-lower-foot-periodic-rocker-sole-v8" if profile.sidewall_bulge_mm else ALGORITHM_VERSION),
             "method": "Closed periodic lower-foot CAD skin, actual exterior normal-constrained junction, exact quintic rocker floor and native bottom fillet",
             "transition": transition, "actual_profile_parameters": profile.model_dump(),
             "bottom_round_validation": round_validation,

@@ -112,6 +112,7 @@ class SoleProfileParameters(StrictModel):
     edge_radius_mm: Annotated[float, Field(ge=0, le=10)] = 2.0
     toe_start_fraction: Annotated[float, Field(ge=0.4, le=0.85)] = 0.68
     sidewall_bulge_mm: Annotated[float, Field(ge=0, le=5)] = 0.0
+    sidewall_waist_mm: Annotated[float, Field(ge=0, le=3)] = 0.0
 
 
 class SoleParameters(StrictModel):
