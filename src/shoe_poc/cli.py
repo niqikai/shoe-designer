@@ -26,6 +26,7 @@ GENERATED_NAMES = (
     "execution_report.json", "failure_report.json", "mesh_export_report.json",
     "artifact_manifest.json", "test_report.json", "parameter_change_report.json",
     "acceptance_report.json", "repeatability_report.json", "design_report.json", "component_preview_report.json",
+    "toe_report.json",
 )
 
 
@@ -177,6 +178,10 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
     write_json(output / "shoe_spec.json", spec.model_dump(mode="json"))
     result = stage("build_base", lambda: ShoeAssembler().build(last, spec))
     write_json(output / "geometry_report.json", result.metadata)
+    if getattr(result, "_before_representation_repair", None) is not None:
+        (output / "debug").mkdir(exist_ok=True)
+        stage("export_before_representation_repair", lambda: export_step(
+            result._before_representation_repair, output / "debug" / "before_representation_repair.step"))
     if spec.upper.opening_parameters.collar_style == "sculpted_3d":
         for name, shape in (("cavity", result.cavity), ("outer", result._outer), ("opening", result.opening)):
             stage(f"export_{name}_step", lambda name=name, shape=shape: export_step(shape, output / f"{name}.step"))
@@ -237,12 +242,27 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
         design["baseline_directory"] = str(design_baseline.resolve()) if design_baseline else None
         design["baseline_files"] = artifact_manifest(design_baseline) if design_baseline else {}
         write_json(output / "design_report.json", design)
+    toe = None
+    if spec.sole.profile_parameters.toe_roll_radius_mm > 0:
+        from shoe_poc.validation.toe import validate_toe_profile
+        toe_baseline = None
+        if design_baseline is not None:
+            toe_baseline = stage("import_toe_baseline", lambda: import_step(design_baseline / "base_shoe.step"))
+        toe = stage("measure_toe_profile", lambda: validate_toe_profile(
+            result.shape, last.bounding_box(),
+            toe_band_top_z_mm=last.bounding_box().min.Z+15., baseline=toe_baseline))
+        toe.update({"run_id": run_id, "source_sha256": loaded.source["sha256"],
+                    "baseline_directory": str(design_baseline.resolve()) if design_baseline else None,
+                    "baseline_step_sha256": sha256(design_baseline / "base_shoe.step") if design_baseline else None})
+        write_json(output / "toe_report.json", toe)
     stage("render_preview", lambda: render_preview(output / "base_shoe.stl", output / "preview.png"))
     if compare_with is not None:
         stage("render_comparison", lambda: render_comparison(compare_with, output / "base_shoe.stl",
                                                               output / "last_normalized.stl",
                                                               output / "comparison.png",
-                                                              **({"previous_label": "Previous M1 repair", "current_label": "Annotated refinement"}
+                                                              **({"previous_label": "Previous M1 refinement", "current_label": "Toe roll refinement"}
+                                                                 if toe is not None else
+                                                                 {"previous_label": "Previous M1 repair", "current_label": "Annotated refinement"}
                                                                  if spec.upper.opening_parameters.collar_style == "sculpted_3d" else {})))
     passed = (mesh["geometry_status"] == "PASS" and roundtrip_checks["status"] == "PASS"
               and surface["geometry_status"] == "PASS"
@@ -250,6 +270,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
               and result.metadata.get("sole", {}).get("bottom_round_validation", {}).get("geometry_status")
               in {"PASS", "NOT_REQUIRED"})
     passed = passed and (design is None or design["geometry_status"] == "PASS")
+    passed = passed and (toe is None or toe["geometry_status"] == "PASS")
     passed = passed and exports["base_shoe"]["native_face_coverage_status"] == "PASS"
     execution = {"task": "Milestone 1 build-base", "status": "PASS" if passed else "FAIL",
                  "run_id": run_id, "stale_generated_files_removed": cleared,
@@ -258,6 +279,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                  "junction_sampling_status": result.metadata["junction"]["geometry_status"],
                  "bottom_round_sampling_status": result.metadata["sole"]["bottom_round_validation"]["geometry_status"],
                  "design_geometry_status": design["geometry_status"] if design else "NOT_TESTED",
+                 "toe_profile_status": toe["geometry_status"] if toe else "NOT_REQUIRED",
                  "scope": "Final shoe CAD/STL and bounded native CAD checks; auxiliary component preview qualification is recorded separately; manufacturing/print NOT_VERIFIED",
                  "generated_at": utc_now(), "input_file": str(Path(spec.last.file)),
                  "input_sha256": loaded.source["sha256"], "spec_source": str(spec_path.resolve()),
@@ -272,7 +294,7 @@ def _build_base(spec_path: Path, output: Path, compare_with: Path | None = None,
                                          "roundtrip_report.json", "validation_report.json", "surface_report.json",
                                          "preview.png", "comparison.png", "last_normalized.stl",
                                          "upper.stl", "cavity.stl", "upper_cavity_overlay.png",
-                                         "mesh_export_report.json", "design_report.json", "component_preview_report.json", "cavity.step", "outer.step", "opening.step"}}}
+                                         "mesh_export_report.json", "design_report.json", "toe_report.json", "component_preview_report.json", "cavity.step", "outer.step", "opening.step"}}}
     write_json(output / "execution_report.json", execution)
     if passed:
         (output / "failure_report.json").unlink(missing_ok=True)

@@ -6,11 +6,12 @@ cannot tessellate. Repair native CAD before export; never patch the mesh.
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 def repair_parameterization(shape):
-    from build123d import Compound
-    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from build123d import Compound, export_step, import_step
     from OCP.ShapeFix import ShapeFix_Shape
     from shoe_poc.validation.volume import measure_cad_volume
 
@@ -23,9 +24,16 @@ def repair_parameterization(shape):
 
     if not shape.is_valid or len(shape.solids()) != 1:
         raise ValueError("Representation repair requires one valid input solid")
-    # Isolate any native edge/surface changes from the preserved input.
-    copied = BRepBuilderAPI_Copy(shape.wrapped, True, False).Shape()
-    fixer = ShapeFix_Shape(copied)
+    # Canonicalize native curve representations and isolate the input. Fixing
+    # the fresh Boolean result directly left a three-edge native mesh gap on
+    # an outer offset face; a STEP roundtrip before the same repair removes
+    # that discrepancy. All geometry bounds below include this roundtrip.
+    with TemporaryDirectory(prefix="shoe-native-representation-") as folder:
+        path = Path(folder)/"canonical.step"
+        if not export_step(shape, path):
+            raise ValueError("Native representation canonical STEP export failed")
+        canonical = import_step(path)
+    fixer = ShapeFix_Shape(canonical.wrapped)
     fixer.SetPrecision(1e-7)
     fixer.SetMaxTolerance(1e-5)
     performed = fixer.Perform()
@@ -37,7 +45,8 @@ def repair_parameterization(shape):
     difference = material_volume(shape.cut(result))+material_volume(result.cut(shape))
     if delta > 1e-5 or difference > .01:
         raise ValueError(f"Native representation repair changed bounded geometry: bbox {delta} mm, symmetric difference {difference} mm3")
-    return result, {"method": "OCCT ShapeFix_Shape on an isolated native CAD copy before export and final validation",
+    return result, {"method": "Temporary STEP canonicalization then OCCT ShapeFix_Shape on isolated native CAD before export and final validation",
+                    "canonicalization": "STEP roundtrip; its geometric effect is included in the bounds below",
                     "performed": bool(performed), "geometry_status": "PASS",
                     "precision_mm": 1e-7, "maximum_repair_tolerance_mm": 1e-5,
                     "bbox_max_delta_mm": delta, "bbox_delta_limit_mm": 1e-5,

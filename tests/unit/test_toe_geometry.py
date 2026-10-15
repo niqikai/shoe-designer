@@ -43,6 +43,15 @@ def test_disabled_roll_keeps_legacy_terminal_plateau():
     assert _rocker(box.max.X+4., box, profile) == 12.
 
 
+def test_cutter_closure_stays_outside_large_margin_roll():
+    box, profile = geometry(15.)
+    profile.margin_mm = 20.
+    profile.sidewall_bulge_mm = 5.
+    cutter = _rocker_cutter(box, -16., profile)
+    assert cutter.is_valid
+    assert cutter.bounding_box().max.X > box.max.X+25.
+
+
 def test_roll_rejects_short_ramp_with_reversed_control_order():
     box, profile = geometry(15.)
     profile.toe_start_fraction = .99

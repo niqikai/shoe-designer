@@ -186,6 +186,7 @@ def _rocker_cutter(box, bottom, profile):
         from .sole import _toe_roll_controls
         controls = _toe_roll_controls(box, profile)
         nose_x, nose_z = controls[-1]
+        x1 = max(x1, nose_x+5.)
         x1 = max(x1, nose_x+20.)
         edges = [Edge.make_line(p(x0, low), p(x1, low)),
                  Edge.make_line(p(x1, low), p(x1, bottom+nose_z)),
