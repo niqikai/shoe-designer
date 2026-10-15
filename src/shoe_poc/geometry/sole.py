@@ -6,13 +6,49 @@ import numpy as np
 ALGORITHM_VERSION = "cad-lower-foot-periodic-rocker-sole-v7"
 
 
+def _toe_roll_controls(box, profile):
+    """Monotone quintic floor with a C2 flat start and a vertical R nose.
+
+    The endpoint handles satisfy k = (4/5)*dx/dz**2 = 1/R.
+    Radius is exact at the untrimmed vertical endpoint; the intersecting wall
+    is separately treated with the configured native bottom edge round.
+    """
+    radius = profile.toe_roll_radius_mm
+    start = box.min.X+profile.toe_start_fraction*box.size.X
+    # Keep the vertical endpoint and cutter closure outside the asymmetric
+    # lower stock; an internal closure creates an unwanted horizontal shelf.
+    nose = box.max.X+profile.margin_mm+profile.sidewall_bulge_mm
+    span = nose-start
+    top = profile.toe_rise_mm+radius
+    controls = np.array([(start, 0.), (start+span*.30, 0.),
+                         (start+span*.68, 0.), (nose-radius*.3125, top-radius*.9),
+                         (nose, top-radius*.5), (nose, top)])
+    if span <= 0 or np.any(np.diff(controls, axis=0) < 0):
+        raise ValueError('Toe roll requires monotone X/Z controls and a positive ramp span')
+    return controls
+
+
 def _rocker(x, box, profile):
     t = np.clip((x-box.min.X)/box.size.X, 0, 1)
     toe_start = getattr(profile, 'toe_start_fraction', .68)
     def smooth(q):
         return q*q*q*(10+q*(-15+6*q))
-    return (profile.heel_rise_mm*smooth(np.clip((.22-t)/.22, 0, 1))
-            + profile.toe_rise_mm*smooth(np.clip((t-toe_start)/(1-toe_start), 0, 1)))
+    heel = profile.heel_rise_mm*smooth(np.clip((.22-t)/.22, 0, 1))
+    if getattr(profile, 'toe_roll_radius_mm', 0.):
+        from scipy.optimize import brentq
+        from math import comb
+        controls = _toe_roll_controls(box, profile)
+        def bezier(q, axis):
+            return sum(comb(5, i)*(1-q)**(5-i)*q**i*controls[i, axis]
+                       for i in range(6))
+        if x <= controls[0, 0]:
+            return heel
+        if x >= controls[-1, 0]:
+            return heel+controls[-1, 1]
+        q = brentq(lambda q: bezier(q, 0)-x, 0., 1., xtol=1e-14)
+        return heel+bezier(q, 1)
+    return heel+profile.toe_rise_mm*smooth(np.clip((t-toe_start)/(1-toe_start), 0, 1))
+
 
 
 def _lower_foot_sections(last_shape, spec):
@@ -61,13 +97,19 @@ class SoleGenerator:
         if round_validation['geometry_status'] == 'FAIL':
             raise ValueError(f"Actual bottom round failed: {round_validation['maximum_radius_deviation_mm']} mm radius deviation")
         metadata.update({
-            "algorithm_version": ("cad-lower-foot-periodic-rocker-sole-v9" if getattr(profile, 'sidewall_waist_mm', 0.)
+            "algorithm_version": ("cad-lower-foot-periodic-rolled-toe-sole-v10" if getattr(profile, 'toe_roll_radius_mm', 0.)
+                                  else "cad-lower-foot-periodic-rocker-sole-v9" if getattr(profile, 'sidewall_waist_mm', 0.)
                                   else "cad-lower-foot-periodic-rocker-sole-v8" if profile.sidewall_bulge_mm else ALGORITHM_VERSION),
             "method": "Closed periodic lower-foot CAD skin, actual exterior normal-constrained junction, exact quintic rocker floor and native bottom fillet",
             "transition": transition, "actual_profile_parameters": profile.model_dump(),
             "bottom_round_validation": round_validation,
             "margin_mm": profile.margin_mm, "sidewall_inset_mm": profile.sidewall_inset_mm,
             "toe_rise_mm": profile.toe_rise_mm, "heel_rise_mm": profile.heel_rise_mm,
+            "toe_roll_radius_mm": getattr(profile, 'toe_roll_radius_mm', 0.),
+            "toe_roll_control_points_xz_mm": (
+                (_toe_roll_controls(box, profile)+np.array([0., bottom])).tolist()
+                if profile.toe_roll_radius_mm else None),
+            "toe_roll_radius_scope": "Curvature radius at the untrimmed quintic endpoint; actual wall intersection and native edge round are measured separately",
             "edge_radius_mm": profile.edge_radius_mm, "height_parameter_mm": spec.sole.height_mm,
             "bottom_z_mm": bottom, "measured_bottom_z_mm": measured.min.Z,
             "last_min_z_to_lowest_sole_z_mm": box.min.Z-measured.min.Z,

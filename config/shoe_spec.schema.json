@@ -387,6 +387,13 @@
           "minimum": 0,
           "title": "Sidewall Waist Mm",
           "type": "number"
+        },
+        "toe_roll_radius_mm": {
+          "default": 0.0,
+          "maximum": 15,
+          "minimum": 0,
+          "title": "Toe Roll Radius Mm",
+          "type": "number"
         }
       },
       "required": [

@@ -176,6 +176,7 @@ def test_legacy_shape_controls_do_not_change_silently(spec_data):
     assert opening.heel_lift_mm == opening.side_dip_mm == 0
     assert profile.toe_start_fraction == .68
     assert profile.sidewall_bulge_mm == 0
+    assert profile.toe_roll_radius_mm == 0
 
 
 def test_annotated_design_spec_preserves_last_and_upper_constraints():
@@ -188,6 +189,13 @@ def test_annotated_design_spec_preserves_last_and_upper_constraints():
     assert 0 < refined.sole.height_mm <= original.sole.height_mm
     assert refined.sole.profile_parameters.toe_rise_mm > original.sole.profile_parameters.toe_rise_mm
     assert refined.sole.profile_parameters.toe_start_fraction < original.sole.profile_parameters.toe_start_fraction
+
+
+@pytest.mark.parametrize("radius", [-0.1, 15.1, "8", True, float("nan")])
+def test_invalid_toe_roll_radius_rejected(spec_data, radius):
+    spec_data["sole"]["profile_parameters"]["toe_roll_radius_mm"] = radius
+    with pytest.raises(ValidationError):
+        ShoeSpec.model_validate(spec_data)
 
 
 @pytest.mark.parametrize(("keys", "value"), [

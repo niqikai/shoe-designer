@@ -113,6 +113,9 @@ class SoleProfileParameters(StrictModel):
     toe_start_fraction: Annotated[float, Field(ge=0.4, le=0.85)] = 0.68
     sidewall_bulge_mm: Annotated[float, Field(ge=0, le=5)] = 0.0
     sidewall_waist_mm: Annotated[float, Field(ge=0, le=3)] = 0.0
+    # Zero preserves the former rocker. Positive values join its terminal
+    # floor to a smooth quintic toe roll; this is a design control.
+    toe_roll_radius_mm: Annotated[float, Field(ge=0, le=15)] = 0.0
 
 
 class SoleParameters(StrictModel):

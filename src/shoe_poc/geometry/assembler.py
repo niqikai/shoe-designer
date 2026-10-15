@@ -39,6 +39,12 @@ class ShoeAssembler:
         # Fuse enclosing bodies before cavity subtraction to avoid coincident
         # seams between separately trimmed upper and sole.
         shoe = outer.fuse(sole_stock).cut(cavity, last_shape, opening).clean()
+        representation = None
+        before_repair = None
+        if spec.sole.profile_parameters.toe_roll_radius_mm > 0:
+            from .representation import repair_parameterization
+            before_repair = shoe
+            shoe, representation = repair_parameterization(shoe)
         if not shoe.is_valid or len(shoe.solids()) != 1 or shoe.volume <= 0:
             raise ValueError(f'Assembly is not a valid single solid (valid={shoe.is_valid}, solids={len(shoe.solids())})')
         last_overlap = volume_of(shoe.intersect(last_shape))
@@ -71,9 +77,11 @@ class ShoeAssembler:
         refined = (spec.upper.opening_parameters.collar_style == 'sculpted_3d'
                    or spec.sole.profile_parameters.sidewall_bulge_mm > 0)
         waisted = getattr(spec.sole.profile_parameters, 'sidewall_waist_mm', 0.) > 0
+        rolled_toe = spec.sole.profile_parameters.toe_roll_radius_mm > 0
         build = ShoeBuild(shoe, {
             'template': spec.shoe.template, 'upper': upper_metadata, 'sole': sole_metadata,
-            'algorithm_version': ('exact-upper-sculpted-collar-waisted-periodic-rocker-sole-assembly-v9' if waisted
+            'algorithm_version': ('exact-upper-periodic-rolled-toe-sole-assembly-v10' if rolled_toe
+                                  else 'exact-upper-sculpted-collar-waisted-periodic-rocker-sole-assembly-v9' if waisted
                                   else 'exact-upper-sculpted-collar-periodic-rocker-sole-assembly-v8'
                                   if refined else 'exact-upper-periodic-rocker-sole-assembly-v7'),
             'junction': {
@@ -96,6 +104,7 @@ class ShoeAssembler:
             'cavity_intersection_volume_mm3': cavity_overlap,
             'opening_intersection_volume_mm3': opening_overlap,
             'original_upper_omitted_volume_mm3': omitted_upper,
+            'representation_repair': representation,
             'opening_removed_envelope_volume_mm3': removed_at_opening,
             'cavity_entry_intersection_volume_mm3': cavity_entry_volume,
             'intersection_tolerance_mm3': tolerance_mm3,
@@ -106,4 +115,6 @@ class ShoeAssembler:
         # Private native guide for independent design validation. Keep the six
         # public fields and JSON metadata free of a unserializable CAD object.
         build._outer = outer
+        if before_repair is not None:
+            build._before_representation_repair = before_repair
         return build

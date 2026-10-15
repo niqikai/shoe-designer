@@ -61,6 +61,7 @@ arbitrary lasts.
 | `sole.profile_parameters.toe_start_fraction` | dimensionless | 0.4–0.85, default 0.68; start of forefoot rocker |
 | `sole.profile_parameters.sidewall_bulge_mm` | mm | 0–5, default 0; outward radial control for the curved lower wall |
 | `sole.profile_parameters.sidewall_waist_mm` | mm | 0–3, default 0; independent inward middle-wall displacement, with unchanged endpoint positions and first derivatives |
+| `sole.profile_parameters.toe_roll_radius_mm` | mm | 0–15, default 0 (legacy rocker); positive values control the vertical endpoint curvature of a smooth quintic toe roll. The actual nose is its trimmed intersection with the curved wall, followed by the configured edge round; it is not a constant-radius arc. Experimental design value, not a manufacturing or footwear standard. |
 | `lattice.period_mm` | mm | 5–50 |
 | `lattice.threshold` | dimensionless | 0.05–1.5; not an actual wall thickness |
 | `lattice.resolution_mm` | mm | 0.2–5; at most period / 4 |

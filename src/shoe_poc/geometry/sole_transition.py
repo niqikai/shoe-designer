@@ -171,7 +171,7 @@ def _lower_outline_reference(metadata, box, profile):
     return reference
 
 def _rocker_cutter(box, bottom, profile):
-    """Exact quintic smoothstep floor: constant datum between heel and toe."""
+    """Native quintic rocker cutter, with optional continuous upward toe roll."""
     from build123d import Edge, Wire, Face, Solid
     (x0, x1) = (box.min.X - 20, box.max.X + 20)
     heel = box.min.X + 0.22 * box.size.X
@@ -181,8 +181,19 @@ def _rocker_cutter(box, bottom, profile):
 
     def p(x, z):
         return (x, y, z)
-    edges = [Edge.make_line(p(x0, low), p(x1, low)), Edge.make_line(p(x1, low), p(x1, bottom + profile.toe_rise_mm)), Edge.make_line(p(x1, bottom + profile.toe_rise_mm), p(box.max.X, bottom + profile.toe_rise_mm))]
-    edges.append(Edge.make_bezier(*[p(x, z) for (x, z) in zip([box.max.X - (box.max.X - toe) * i / 5 for i in range(6)], [bottom + profile.toe_rise_mm] * 3 + [bottom] * 3)]))
+    roll = getattr(profile, 'toe_roll_radius_mm', 0.)
+    if roll:
+        from .sole import _toe_roll_controls
+        controls = _toe_roll_controls(box, profile)
+        nose_x, nose_z = controls[-1]
+        x1 = max(x1, nose_x+20.)
+        edges = [Edge.make_line(p(x0, low), p(x1, low)),
+                 Edge.make_line(p(x1, low), p(x1, bottom+nose_z)),
+                 Edge.make_line(p(x1, bottom+nose_z), p(nose_x, bottom+nose_z)),
+                 Edge.make_bezier(*[p(x, bottom+z) for x, z in controls[::-1]])]
+    else:
+        edges = [Edge.make_line(p(x0, low), p(x1, low)), Edge.make_line(p(x1, low), p(x1, bottom + profile.toe_rise_mm)), Edge.make_line(p(x1, bottom + profile.toe_rise_mm), p(box.max.X, bottom + profile.toe_rise_mm))]
+        edges.append(Edge.make_bezier(*[p(x, z) for (x, z) in zip([box.max.X - (box.max.X - toe) * i / 5 for i in range(6)], [bottom + profile.toe_rise_mm] * 3 + [bottom] * 3)]))
     edges.append(Edge.make_line(p(toe, bottom), p(heel, bottom)))
     edges.append(Edge.make_bezier(*[p(x, z) for (x, z) in zip([heel - (heel - box.min.X) * i / 5 for i in range(6)], [bottom] * 3 + [bottom + profile.heel_rise_mm] * 3)]))
     edges.extend([Edge.make_line(p(box.min.X, bottom + profile.heel_rise_mm), p(x0, bottom + profile.heel_rise_mm)), Edge.make_line(p(x0, bottom + profile.heel_rise_mm), p(x0, low))])
@@ -274,4 +285,4 @@ def periodic_transition(last, outer, bottom, metadata, spec):
     body = _periodic_body(parameters, np.asarray(sections), guide_normals, waist_mm=waist)
     cutter = _rocker_cutter(box, bottom, spec.sole.profile_parameters)
     (result, round_edge_count) = _round_bottom(body, cutter, spec.sole.profile_parameters.edge_radius_mm)
-    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'sidewall_bulge_mm': spec.sole.profile_parameters.sidewall_bulge_mm, 'sidewall_waist_mm': waist, 'lower_wall_degree': 5 if waist else 3, 'waist_method': 'Exact cubic degree elevation plus inward -16*A*t^2*(1-t)^2 radial displacement; original endpoint positions and first derivatives retained', 'sidewall_control_method': 'Positive radial lower-wall Bezier control displacement, at 35% of vertical span; zero preserves the original control', 'toe_start_fraction': spec.sole.profile_parameters.toe_start_fraction, 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})
+    return (result, {'method': 'One closed periodic lower-foot contour stock; actual CAD exterior band, exact quintic rocker cut and native bottom round', 'angular_station_count': len(parameters) - 1, 'band_half_height_mm': 2.0, 'join_inset_mm': 0.001, 'upper_guide_inset_mm': 0.251, 'edge_radius_target_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_radius_mm': spec.sole.profile_parameters.edge_radius_mm, 'native_bottom_fillet_edge_count': round_edge_count, 'guide_z_method': 'Actual radial exterior seed at 20 mm and blended source-floor guide; three true CAD exterior rings', 'end_height_guide_blend_mm': 12.0, 'lower_outline_method': 'Measured lower-foot widths, cubic side contours and heel/toe caps with matched endpoint tangents; margin minus sidewall inset', 'sidewall_bulge_mm': spec.sole.profile_parameters.sidewall_bulge_mm, 'sidewall_waist_mm': waist, 'toe_roll_radius_mm': getattr(spec.sole.profile_parameters, 'toe_roll_radius_mm', 0.), 'toe_roll_method': ('One monotone quintic, C2 at datum and vertical endpoint with configured radius; endpoint outside lower stock; actual wall intersection receives native bottom fillet' if getattr(spec.sole.profile_parameters, 'toe_roll_radius_mm', 0.) else 'Disabled; legacy smoothstep rocker'), 'lower_wall_degree': 5 if waist else 3, 'waist_method': 'Exact cubic degree elevation plus inward -16*A*t^2*(1-t)^2 radial displacement; original endpoint positions and first derivatives retained', 'sidewall_control_method': 'Positive radial lower-wall Bezier control displacement, at 35% of vertical span; zero preserves the original control', 'toe_start_fraction': spec.sole.profile_parameters.toe_start_fraction, 'representation_knot_reduction_tolerance_mm': 1e-08, 'normal_method': 'Actual oriented CAD normals, radial dR/dZ, finite CAD normal derivatives at plus/minus 0.001 mm; common Q and Q plus/minus D/3 longitudinal handles preserve shared G1 while constraining the guide tangent plane'})
