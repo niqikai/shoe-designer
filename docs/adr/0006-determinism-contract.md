@@ -8,6 +8,7 @@
 - 体素原点（相对引擎坐标系原点偏移半个体素，避免场值恰好为零产生退化面）与分块尺寸是 BuildPlan 中显式、固定的参数；分块尺寸不得随可用内存或线程数自适应。
 - 并行只能发生在分块之间，且合并顺序固定。
 - 网格简化等第三方步骤必须选用确定性的实现。
-- BuildPlan 之外影响几何的量（Feasibility Table 给出的阈值、光滑半径、Island 阈值等）属于引擎版本的一部分，通过 Build Manifest 中数据表的版本与哈希追溯。
+- BuildPlan 之外影响几何的量（`gyroid_c.v1` 的阈值与 `cellprops.seed.v1`、光滑半径、Island 阈值等）属于引擎版本的一部分，通过 Build Manifest 中数据表的版本与哈希追溯。
 - 补打以存档的 BuildPlan 为准；重新解析 DesignSpec 视为用新版引擎重新设计。
+- Cell Properties 的本地缓存在同一环境下与重算逐位一致；种子之外的冷查询跨平台只保证 ≤ τ（ADR 0012）。
 - Blender 主次版本不符即拒绝构建；patch 版本不同只警告并记录，此时只保证指标等价。

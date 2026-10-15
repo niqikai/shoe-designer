@@ -22,7 +22,7 @@
 
 - **可行域**：单一 C 下所有档位可行的范围约为 C ≈ 7.4–12 mm（颈厚下限：soft 下沿 ρ 0.125 给出 ≈ 1.85·C/10 ≥ 1.05，要求 C ≥ 5.7；孔喉上限：firm 上沿 ρ 0.305 给出 5.44·C/10 ≥ 4.0，要求 C ≥ 7.4；Outsole 在 ρ 0.35 时颈厚 3.45·C/10、Pore Throat 5.15·C/10，远在薄层限值之内）。Override 范围 8–12 mm 整体可行，默认 C = 10 无需 Adjustment；C ≥ 10 时 Outsole 还满足部分 SLS 供应商要求的 ≥ 5 mm 晶格间隙（9.2）。
 - **代价**：Footbed Layer 只是更密（ρ + `rho_delta`），不再更细；Outsole 也不再有更细的孔。若脚感或抓地确实需要更细的脚床或外底，作为 P1 研究，必须先通过本 harness：候选是层内有界的仅 z 向仿射压缩（同一网络，不产生新 Ligament，需要给 ADR 0002 开例外），或显式设计的杆件晶格。
-- **Feasibility Table 变小**：去掉混合权重 w 维度与混合场的 c 标定，欧氏部分是 ρ 的一维表，c、最小颈厚、Pore Throat 按 C 缩放；表的大小与生成时间约缩小 5 倍。Resolver 的"放大 Cell"步骤只放大这一个 C，不再有可能低于 Outsole 颈厚限值的 C/2。
+- **Feasibility Table 变小**：去掉混合权重 w 维度与混合场的 c 标定，欧氏部分是 ρ 的一维表，c、最小颈厚、Pore Throat 按 C 缩放；表的大小与生成时间约缩小 5 倍。Resolver 的"放大 Cell"步骤只放大这一个 C，不再有可能低于 Outsole 颈厚限值的 C/2（其后由 ADR 0012 改为按需求值，c 改为一维表 `gyroid_c.v1`）。
 - **检查点**：Resolver 在 Transition 与 Grading 带内只检查带的两端，因为 Neck Thickness 与 Pore Throat 对 ρ 单调。
 - **孔喉分级**：薄层改为 Shell 中各 Zone、Footbed Layer 及其 Grading 带、Outsole 及其过渡带，以及 Midsole 中 T < C 的点（ADR 0007）。Midsole 薄处不再有特殊处理。
 - **遗留风险（跨坐标系过渡，已由 ADR 0011 解决：改为 Footbed 高度的实体 Welt，不做混合）**：φ = (1 − w_x)·φ_sole + w_x·φ_shell 混合的是 C = 10 的欧氏网络与 (L_s, 8, 4) 的随形网络，是两张不同的网络，同一新生机制使它预计在宽约 Δw × `cross_frame_width_mm` 的带内产生薄 Ligament。必须在 `heel-transition` 的 Crop Build 之前，用与本 ADR 相同的均匀 w 扫描和平板测试在 harness 中验证，可能需要豁免（按 Cut Edge 处理）、Rim 式实体接缝或使两侧网络匹配（规格 20）。

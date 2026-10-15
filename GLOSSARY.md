@@ -83,8 +83,9 @@ _Avoid_: 局部厚度、壁厚（作度量时）、骨架半径
 Lattice 空隙中粉末能够通过的最大球径。
 _Avoid_: 孔径（含义模糊）、晶格间隙
 
-**Feasibility Table**（可行性表）:
-按 Lattice Family、Variant、Cell 形状与 Relative Density 给出等值面阈值、Neck Thickness 与 Pore Throat 的带版本数据表。
+**Cell Properties**（胞元性质）:
+在无切面的周期 Cell 上，按 Lattice Family、Variant、Cell 形状与 Relative Density 求得的等值面阈值、各类 Ligament 的 Neck Thickness 与 Pore Throat；由引擎按需求值并缓存，随引擎发布的种子是带版本的数据表。
+_Avoid_: Feasibility Table、可行性表（已废止的离线全表）、查表
 
 ### 形状
 
@@ -317,6 +318,10 @@ _Avoid_: 漂浮物
 
 **Printability Check**（可打印性校验）:
 针对每个将被打印的网格（Print Mesh、Crop Build 与 Coupon 的产出）的可打印性几何检查，分 hard 与 soft 两级。
+
+**Local Probe**（局部探测）:
+Resolver 阶段 B 中，在真实合成场上按 Landmark、Zone 与 Shell 参数选出的若干探测窗口里，以 0.25 mm 执行体素类 Printability Check 的闸门；不产出网格，不修改 BuildPlan。
+_Avoid_: 抽检、采样构建、用 Crop Build 或 Crop Region 指代（探测窗口不是裁切）、probe build
 
 **Donning Check**（穿脱检查）:
 比较 Collar 开口周长与 Long Heel Girth 估值、判断脚能否穿入的几何检查。
