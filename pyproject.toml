@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shoe-poc"
+version = "0.1.0"
+description = "Headless, real-last parametric footwear geometry POC"
+requires-python = ">=3.11"
+dependencies = [
+  "build123d==0.10.0",
+  "ocp-gordon==0.1.17",
+  "pydantic>=2.10,<3",
+  "trimesh>=4.6,<5",
+  "matplotlib>=3.9,<4",
+  "networkx>=3.4,<4",
+  "psutil>=7,<8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+shoe-poc = "shoe_poc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["real_last: integration test requiring the locally licensed STEP asset"]

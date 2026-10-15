@@ -1,0 +1,39 @@
+{
+  "status": "ACCEPTED",
+  "scope": "M1_base_shape",
+  "user_message": "基础外型确认",
+  "accepted_at": "2026-10-15T08:05:02.759094+00:00",
+  "run_id": "eb48db0c-86a8-4f3f-a0b1-962033f130c6",
+  "source_sha256": "6dd8e7b44a97b675769280b74566b039806d9f4049ad0a5adb90bca156930247",
+  "output_directory": "output/m1_toe_refine",
+  "baseline_sole_height_mm": 16.0,
+  "files": {
+    "base_shoe.step": {
+      "sha256": "9895f8ba1e4b9b9cb8415e581a574221735a5690e57af6ab88feb35c6ac84bc4",
+      "bytes": 5574423
+    },
+    "base_shoe.stl": {
+      "sha256": "a8520183558a15942e689132714e08d5d377665104803fef41a6895211bd39c5",
+      "bytes": 3294084
+    },
+    "shoe_spec.json": {
+      "sha256": "4f375774e578cb99569b0c0ab2d02297f852376f83987d8de468a585fd6642d9",
+      "bytes": 2069
+    },
+    "preview.png": {
+      "sha256": "cf09790517e6b270c271c98982cc5ca209d51680792df16fa86ce69b2b503f9d",
+      "bytes": 405604
+    },
+    "toe_comparison.png": {
+      "sha256": "e691489359fd2e7583b808106668bcb7b42f739d02dd7a2c41ee43263e16e6b9",
+      "bytes": 313374
+    }
+  },
+  "freeze_policy": "Keep this base silhouette and fit constraints fixed for M2; record any necessary geometry change separately.",
+  "excluded_acceptance": [
+    "manufacturing qualification",
+    "physical printing",
+    "physical insertion, fit and wearability",
+    "global minimum-wall proof"
+  ]
+}
