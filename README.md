@@ -57,6 +57,16 @@ The selected repair retains the imported CAD foot surfaces through local normal 
 
 Each generation clears only known pipeline files from its output directory, preserving diagnostics and unrelated files. Tests and sole-height comparison evidence are associated with the current run; rerun them after rebuilding the model. The parameter comparison also accepts `--max-rss-mb` with the same 8192 MiB default.
 
+The subsequent toe repair preserves `output/m1_design_refine/` and writes to `output/m1_toe_refine/`:
+
+```sh
+.venv/bin/python -m shoe_poc run --spec input/specs/shoe_spec_toe_refine.json --output output/m1_toe_refine --compare-with output/m1_design_refine/base_shoe.stl --design-baseline output/m1_design_refine
+.venv/bin/python scripts/inspect_toe.py
+.venv/bin/python scripts/report_toe.py
+```
+
+Its optional `toe_roll_radius_mm` defaults to zero for legacy geometry. A positive value replaces the terminal flat rocker with a continuous quintic roll. The CLI measures actual CAD toe sections and exports STL from bounded, repaired native CAD. STEP geometric roundtrip does not qualify direct STEP remeshing: the recorded offset-face meshing issue requires reapplying the native representation repair after STEP import. See [toe repair evidence and limits](docs/milestone1_toe_refine_report.md). M1 fixes conspicuous geometry defects; styling can be frozen once the base silhouette is accepted.
+
 ## Configuration and outputs
 
 ShoeSpec is JSON with explicit millimetre units for geometry. Manufacturing rules in [config/manufacturing_rules.json](config/manufacturing_rules.json) are experimental and informational for this milestone; they do not certify printability. Milestone 1 outputs belong under `output/m1/`, including the inspected last metadata/normalized STEP and base shoe STEP/STL where those operations succeed. Generated files are not source-controlled.
