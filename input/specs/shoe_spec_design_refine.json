@@ -55,11 +55,12 @@
     }
   },
   "sole": {
-    "height_mm": 20.0,
+    "height_mm": 16.0,
     "profile_parameters": {
       "margin_mm": 4.5,
       "sidewall_inset_mm": 2.0,
       "sidewall_bulge_mm": 2.0,
+      "sidewall_waist_mm": 1.0,
       "toe_rise_mm": 12.0,
       "toe_start_fraction": 0.6,
       "heel_rise_mm": 2.0,

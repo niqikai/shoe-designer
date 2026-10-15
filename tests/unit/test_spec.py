@@ -185,7 +185,7 @@ def test_annotated_design_spec_preserves_last_and_upper_constraints():
     assert refined.upper.clearance_mm == original.upper.clearance_mm
     assert refined.upper.thickness_mm == original.upper.thickness_mm
     assert refined.upper.opening_parameters.collar_style == "sculpted_3d"
-    assert refined.sole.height_mm == original.sole.height_mm
+    assert 0 < refined.sole.height_mm <= original.sole.height_mm
     assert refined.sole.profile_parameters.toe_rise_mm > original.sole.profile_parameters.toe_rise_mm
     assert refined.sole.profile_parameters.toe_start_fraction < original.sole.profile_parameters.toe_start_fraction
 
