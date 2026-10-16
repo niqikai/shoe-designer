@@ -62,7 +62,8 @@ def _check_archive(path, expected_shape):
 def load_certified_domain(directory: Path, *, baseline: dict, shape,
                           z_min_mm: float, z_max_mm: float,
                           settings: LatticeDomainParameters, spacing_mm: float,
-                          max_voxels: int, max_memory_mb: float, envelope=None) -> SoleDomain:
+                          max_voxels: int, max_memory_mb: float, envelope=None,
+                          allow_refinement_seed: bool = False) -> SoleDomain:
     """Validate provenance, exact saved evidence and grid before replaying a field.
 
     No missing or stale evidence falls back to an unvalidated cache. No field is
@@ -106,6 +107,22 @@ def load_certified_domain(directory: Path, *, baseline: dict, shape,
         if sha256(path) != provenance.get(key):
             raise ValueError(f"Cached domain hash changed: {path.name}")
     metadata = json.loads(metadata_path.read_text())
+    saved_refinement = parameters.get('refinement')
+    refinement_evidence = metadata.get('refinement')
+    if saved_refinement is None:
+        if refinement_evidence is not None:
+            raise ValueError('Cached adaptive refinement has no bound provenance policy')
+    else:
+        from .refinement import REFINEMENT_VERSION
+        if (not isinstance(refinement_evidence, dict)
+                or refinement_evidence.get('policy') != saved_refinement
+                or refinement_evidence.get('version') != REFINEMENT_VERSION
+                or refinement_evidence.get('status') != 'COMPLETE'
+                or refinement_evidence.get('query_budget_reached') is not False):
+            raise ValueError('Cached adaptive refinement policy/evidence is incomplete or inconsistent')
+    requested_refinement = None if settings.refinement is None else settings.refinement.model_dump(mode='json')
+    if not allow_refinement_seed and saved_refinement != requested_refinement:
+        raise ValueError('Cached domain refinement policy differs from requested policy')
     if metadata.get('envelope') != expected_envelope:
         raise ValueError('Cached domain metadata envelope differs')
     if metadata.get("axis_order") != "XYZ" or metadata.get("shape_xyz") != list(plan.shape):

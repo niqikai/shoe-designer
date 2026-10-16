@@ -132,6 +132,14 @@ class SoleParameters(StrictModel):
         return self
 
 
+class DomainRefinementParameters(StrictModel):
+    """Bounded adaptive completion of the certified toe grid."""
+
+    toe_start_fraction: Annotated[float, Field(ge=0, lt=1)] = 0.925
+    coverage_tolerance_mm: Annotated[float, Field(gt=0, le=0.4)] = 0.1
+    max_queries: Annotated[int, Field(ge=1, le=100000)] = 16000
+
+
 class LatticeDomainParameters(StrictModel):
     """Conservative underfoot computational region inside the accepted CAD."""
 
@@ -139,6 +147,13 @@ class LatticeDomainParameters(StrictModel):
     max_z_offset_mm: Annotated[float, Field(ge=-20, le=0)] = 0.0
     clearance_mm: Annotated[float, Field(ge=0.5, le=10)] = 2.0
     bounds_mm: Annotated[list[RotationRow], Field(min_length=2, max_length=2)] | None = None
+    refinement: DomainRefinementParameters | None = None
+
+    @model_validator(mode='after')
+    def refinement_uses_curved_sole(self) -> Self:
+        if self.refinement is not None and self.mode != 'curved_lower_foot':
+            raise ValueError('Toe refinement requires the curved_lower_foot domain')
+        return self
 
     @field_validator("bounds_mm")
     @classmethod

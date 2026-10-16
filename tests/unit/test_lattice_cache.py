@@ -187,3 +187,50 @@ def test_incomplete_or_failed_cad_evidence_never_qualifies_cache(cache, change):
     save_cache(directory, field, metadata, provenance)
     with pytest.raises(ValueError):
         load_certified_domain(directory, **kwargs)
+
+
+def _curved_refinement_cache(cache):
+    from shoe_poc.lattice.envelope import SoleEnvelope
+    directory, field, metadata, provenance, kwargs = cache
+    identity = {'version': 'lower-foot-roof-polyline-v1', 'lower_datum_z_mm': -4.,
+                'upper_points_xz_mm': [[0., 0.], [8., 0.]]}
+    metadata['envelope'] = copy.deepcopy(identity)
+    provenance['parameters']['envelope'] = copy.deepcopy(identity)
+    kwargs['envelope'] = SoleEnvelope(identity)
+    kwargs['settings'] = LatticeDomainParameters(mode='curved_lower_foot', refinement={})
+    save_cache(directory, field, metadata, provenance)
+    return directory, field, metadata, provenance, kwargs
+
+
+def test_unrefined_cache_is_seed_only_when_refinement_requested(cache):
+    directory, field, _, _, kwargs = _curved_refinement_cache(cache)
+    with pytest.raises(ValueError, match='refinement policy differs'):
+        load_certified_domain(directory, **kwargs)
+    result = load_certified_domain(directory, allow_refinement_seed=True, **kwargs)
+    assert np.array_equal(result.field_mm, field)
+    assert result.metadata.get('refinement') is None
+
+
+@pytest.mark.parametrize('change', ['missing_policy', 'policy_mismatch', 'incomplete', 'budget', 'version'])
+def test_refined_cache_requires_bound_completed_policy_even_as_seed(cache, change):
+    from shoe_poc.lattice.refinement import REFINEMENT_VERSION
+    directory, field, metadata, provenance, kwargs = _curved_refinement_cache(cache)
+    policy = kwargs['settings'].refinement.model_dump(mode='json')
+    provenance['parameters']['refinement'] = policy.copy()
+    metadata['refinement'] = {'policy': policy.copy(), 'version': REFINEMENT_VERSION,
+                              'status': 'COMPLETE', 'query_budget_reached': False}
+    save_cache(directory, field, metadata, provenance)
+    assert np.array_equal(load_certified_domain(directory, **kwargs).field_mm, field)
+    if change == 'missing_policy':
+        del provenance['parameters']['refinement']
+    elif change == 'policy_mismatch':
+        metadata['refinement']['policy']['coverage_tolerance_mm'] = .2
+    elif change == 'incomplete':
+        metadata['refinement']['status'] = 'RUNNING'
+    elif change == 'budget':
+        metadata['refinement']['query_budget_reached'] = True
+    else:
+        metadata['refinement']['version'] = 'unknown'
+    save_cache(directory, field, metadata, provenance)
+    with pytest.raises(ValueError, match='refinement'):
+        load_certified_domain(directory, allow_refinement_seed=True, **kwargs)

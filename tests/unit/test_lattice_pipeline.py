@@ -204,7 +204,7 @@ def test_legacy_lattice_loads_optional_domain_and_phase_defaults():
     data["lattice"].pop("phase_origin_mm")
     spec = ShoeSpec.model_validate(data)
     assert spec.lattice.phase_origin_mm == [0., 0., 0.]
-    assert spec.lattice.domain.model_dump() == {"mode": "planar", "max_z_offset_mm": 0., "clearance_mm": 2., "bounds_mm": None}
+    assert spec.lattice.domain.model_dump() == {"mode": "planar", "max_z_offset_mm": 0., "clearance_mm": 2., "bounds_mm": None, "refinement": None}
 
 
 @pytest.mark.parametrize(("path", "value"), [

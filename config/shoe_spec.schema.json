@@ -46,6 +46,35 @@
       "title": "CoordinateSystem",
       "type": "object"
     },
+    "DomainRefinementParameters": {
+      "additionalProperties": false,
+      "description": "Bounded adaptive completion of the certified toe grid.",
+      "properties": {
+        "toe_start_fraction": {
+          "default": 0.925,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Toe Start Fraction",
+          "type": "number"
+        },
+        "coverage_tolerance_mm": {
+          "default": 0.1,
+          "exclusiveMinimum": 0,
+          "maximum": 0.4,
+          "title": "Coverage Tolerance Mm",
+          "type": "number"
+        },
+        "max_queries": {
+          "default": 16000,
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Max Queries",
+          "type": "integer"
+        }
+      },
+      "title": "DomainRefinementParameters",
+      "type": "object"
+    },
     "LastSpec": {
       "additionalProperties": false,
       "properties": {
@@ -138,6 +167,17 @@
           ],
           "default": null,
           "title": "Bounds Mm"
+        },
+        "refinement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainRefinementParameters"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "LatticeDomainParameters",

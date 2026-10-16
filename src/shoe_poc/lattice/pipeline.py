@@ -17,7 +17,9 @@ GENERATED = ("lattice.stl", "lattice_metadata.json", "gyroid_field.npz", "domain
              "domain_metadata.json", "domain_provenance.json", "shoe_spec.json", "execution_report.json", "failure_report.json",
              "validation_report.json", "preview.png", "artifact_manifest.json", "test_report.json",
              "acceptance_report.json", "parameter_change_report.json", "parameter_sections.png",
-             "m1_preservation_report.json", "performance_report.json")
+             "m1_preservation_report.json", "performance_report.json",
+             "terminal_coverage_report.json", "terminal_comparison.png", "terminal_preview_report.json",
+             "repeatability_report.json", "completion_report.json")
 
 
 def validate_output_paths(output: Path, base_directory: Path) -> None:
@@ -156,11 +158,22 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
             domain = stage("load_bound_certified_domain", lambda: load_certified_domain(domain_cache,
                 baseline=baseline, shape=shoe, z_min_mm=z_min,
                 z_max_mm=z_max, settings=settings.domain, envelope=envelope,
-                spacing_mm=settings.resolution_mm, max_voxels=max_voxels, max_memory_mb=max_field_memory_mb))
+                spacing_mm=settings.resolution_mm, max_voxels=max_voxels, max_memory_mb=max_field_memory_mb,
+                allow_refinement_seed=settings.domain.refinement is not None))
             domain_source = {"mode": "validated_cached_CAD_certificates", "directory": str(domain_cache.resolve()),
                 "provenance_sha256": sha256(domain_cache/"domain_provenance.json"),
                 "provenance": json.loads((domain_cache/"domain_provenance.json").read_text()),
                 "note": "Original CAD sampling reused; this run independently rechecks the extracted STL against CAD."}
+        if settings.domain.refinement is not None:
+            from .refinement import refine_sole_domain
+            seed_source = domain_source
+            domain = stage('adaptive_toe_certification', lambda: refine_sole_domain(
+                domain, shoe, cavity, settings=settings.domain.refinement, envelope=envelope,
+                checkpoint_path=output/'debug/refinement_query_seed.json',
+                source_identity=baseline))
+            domain_source = {'mode': 'seed_plus_adaptive_CAD_certificates',
+                'seed_source': seed_source, 'run_id': run_id,
+                'refinement': domain.metadata['refinement']}
         write_json(output/"domain_metadata.json", domain.metadata)
         stage("save_domain_field", lambda: np.savez_compressed(output/"domain_field.npz",
             field_mm=domain.field_mm, origin_mm=domain.plan.origin_mm,
@@ -168,7 +181,8 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         write_json(output/'domain_provenance.json', {'run_id': run_id, 'baseline': baseline,
             'parameters': {'spacing_mm': settings.resolution_mm, 'clearance_mm': settings.domain.clearance_mm,
                 'sole_z_bounds_mm': [z_min, z_max], 'bounds_mm': settings.domain.bounds_mm,
-                'envelope': None if envelope is None else envelope.metadata},
+                'envelope': None if envelope is None else envelope.metadata,
+                'refinement': None if settings.domain.refinement is None else settings.domain.refinement.model_dump(mode='json')},
             'domain_field_sha256': sha256(output/'domain_field.npz'),
             'domain_metadata_sha256': sha256(output/'domain_metadata.json'),
             'domain_source': domain_source})
@@ -203,12 +217,30 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
                 clearance_mm=settings.domain.clearance_mm, domain_field=interpolator,
                 reference_datum_mm=source_base))
         geometry_reports = [mesh_report, containment, residual]+([] if coverage is None else [coverage])
+        terminal = None
+        if settings.domain.refinement is not None:
+            from shoe_poc.validation.lattice_terminal import sample_native_terminal_nodes, validate_terminal_coverage
+            guides = json.loads((base_directory/'geometry_report.json').read_text())['sole']['lower_foot_station_profiles']
+            expected = stage('independent_terminal_CAD_nodes', lambda: sample_native_terminal_nodes(
+                shoe, cavity, envelope=envelope, axes=domain.plan.axes, guide=guides,
+                period_mm=settings.period_mm, computation_bounds_mm=domain.metadata['computation_bounds_mm']))
+            terminal = stage('principal_terminal_coverage', lambda: validate_terminal_coverage(
+                output/'lattice.stl', field_mm=domain.field_mm, gyroid_values=field.values,
+                origin_mm=domain.plan.origin_mm, spacing_mm=settings.resolution_mm,
+                expected_nodes=expected, clearance_mm=settings.domain.clearance_mm,
+                approximation_tolerance_mm=settings.domain.refinement.coverage_tolerance_mm,
+                analytic_parameters={'period_mm': settings.period_mm, 'threshold': settings.threshold,
+                    'phase_origin_mm': settings.phase_origin_mm, 'cap_inset_mm': field.metadata['cap_inset_mm']},
+                actual_level=result.metadata['level']))
+            geometry_reports.append(terminal)
         validation = {"run_id": run_id, "mesh": mesh_report, "native_domain_samples": containment,
                       "gyroid_residual": residual, "geometry_status": "PASS" if all(
                           r["geometry_status"] == "PASS" for r in geometry_reports) else "FAIL",
                       "manufacturing_status": "NOT_VERIFIED", "M3_shell_fusion": "NOT_IMPLEMENTED"}
         if coverage is not None:
             validation['sole_coverage'] = coverage
+        if terminal is not None:
+            validation['principal_terminal_coverage'] = terminal
         write_json(output/"validation_report.json", validation)
         stage("render_actual_stl", lambda: render_lattice_preview(output/"lattice.stl", base_directory/"base_shoe.stl", output/"preview.png"))
         # Recheck inputs after all computation; the accepted base is immutable.
