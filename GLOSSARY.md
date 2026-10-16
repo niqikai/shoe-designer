@@ -279,7 +279,7 @@ _Avoid_: 接缝、seam（易与 Transition 混淆）、Skin
 _Avoid_: 外壳、实体面、大底耐磨层
 
 **Cut Edge**（裁切残边）:
-Lattice 被 Shoe Body 边界切断处形成的薄楔形材料；颈厚读数受边界限制（最小内切球触及边界）的 Ligament 也归此类。
+Lattice 被 Shoe Body 边界切断处形成的薄楔形材料；Ligament 端部朝边界单调变窄、内切球触及边界的那一段（端部受限段）也归此类，该 Ligament 的颈厚改取其余内部站点。
 
 ### 产出
 

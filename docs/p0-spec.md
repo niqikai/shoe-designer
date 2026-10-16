@@ -188,11 +188,9 @@ DesignSpec ─► Resolver 阶段 A ─► 草稿 BuildPlan ─► Shape Source�
 UK、US_M、US_W 与 Mondopoint 的支持范围，都是由 EU 35–48 对应的 Last Length 区间 [233.33, 320.00] mm 推出来的；Mondopoint 再按 Toe Allowance 12 mm 换算成 Foot Length。`sizes.v1` 修订 US 偏移时，这些范围随之重算，不算设计变更。
 
 - **偏移出处**：US 与 UK 之间的偏移各品牌不统一，`sizes.v1` 中需注明所采用的约定和出处。
-- **范围检查**：只针对各体系自身的数值，在应用 Toe Allowance 的 Override 之前进行。超出范围报 `E_SPEC_SIZE_OUT_OF_RANGE`。
-- **Toe Allowance**：默认 12 mm。用 Override 修改时：
-  - EU/UK/US：同一尺码的 Last Length 不变，Foot Length 随之改变；
-  - Mondopoint：Foot Length 不变，Last Length 随之改变。
-- **比例表定义域**：考虑到 Toe Allowance 的覆盖范围，比例表的 Foot Length 定义域取 213–312 mm。
+- **范围检查**：只针对各体系自身的数值。超出范围报 `E_SPEC_SIZE_OUT_OF_RANGE`。
+- **Toe Allowance**：12 mm **[初值]**，写在 `sizes.v1`。P0 不开放它的 Override：改它会改变 Last 的形状，属于 1.3 排除的形状参数 Override。
+- **比例表定义域**：Foot Length 取 221–308 mm（EU 35–48 的 Last Length 减去 12 mm；其他体系的支持范围都落在其中）。
 
 ### 4.2 Last 比例模型
 
@@ -379,10 +377,10 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
   "buildplan_version": "0.1",
   "profile": "pbf-tpu-generic@1",
   "geometry": {
-    "fit": { "foot_length_mm": 268.0, "last_length_mm": 280.0, "toe_allowance_mm": 12.0 },
+    "fit": { "foot_length_mm": 268.0, "toe_allowance_mm": 12.0 },   // 只作记录；Last Length 在 shape.last 中
     "shape": {                                   // 交给 Shape Source；其哈希即 shape_hash
       "archetype": "low_top_slip_on@1",
-      "last": { "ball_width_mm": …, "ball_girth_mm": …, "instep_height_mm": …,
+      "last": { "last_length_mm": 280.0, "ball_width_mm": …, "ball_girth_mm": …, "instep_height_mm": …,
                 "heel_width_mm": …, "long_heel_girth_mm": …, "toe_spring_mm": 15.0 },
       "sole": { "heel_stack_mm": 30.0, "forefoot_stack_mm": 22.0, "wall_overlap_mm": 6.0 },
       "collar": { "heel_height_mm": 50.0, "throat_ratio": 0.55, "ankle_dip_mm": 8.0 }
@@ -428,6 +426,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 - **鞋底 Cell**：鞋底只存一个 Cell C（`midsole.fill.cell_mm`），Outsole 晶格层、Midsole 与 Footbed Layer 共用，层间只以 ρ 区分（ADR 0010）。C 与 C/2 一类的混合会在过渡带内产生颈厚从 0 起的新生 Ligament，不可打印（实测见 ADR 0010）。
 - **Welt**：`features.welt` 是 Footbed 高度的实体条，鞋底（欧氏）与 Shell（随形）两个坐标系的晶格在其中硬切换（8.1、8.3、ADR 0011）。两个坐标系之间没有场混合，因此没有 `cross_frame_width_mm`。
 - **Shell 级参数**：`shell.cell_inplane_mm` 和 `circumferential_cells` 放在 Shell 级，Upper 与 HeelCounter 共用；两者只以 ρ 区分。
+- **Last Length**：只存于 `geometry.shape.last.last_length_mm`，随 `geometry.shape` 交给 Shape Source 并计入 `shape_hash`。`geometry.fit` 只记录 Foot Length 与 Toe Allowance，满足 Foot Length = Last Length − Toe Allowance。本规格中按 Last Length 比例给出的位置都用这个值。
 - **Zone 集合**：由 Archetype 数据文件（`archetypes/low_top_slip_on.v1`）声明，包括有哪些 Zone、各用什么坐标系、`heel_counter` 的切分方式与比例。HeelCounter 按平面 x − x_heel ≤ ratio × Last Length 切分 **[初值]**，其中 x_heel 是 `heel_point` 的 x 坐标。所有按 Last Length 比例给出的位置都从 `heel_point` 量起。
 - **P0 的 Fill**：`fill.kind` 只有 `lattice`，`family` 只有 `gyroid`，`variant` 只有 `network`。
 
@@ -484,7 +483,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 **`--plan` 路径**（按存档的 BuildPlan 重建）：
 
-- 先校验存档本身：按 `buildplan` schema 严格校验（未知字段、类型、白名单叶子的取值范围）；`buildplan_version` 按 3.3 的区间规则迁移或拒绝。违反时报 class 为 spec 的错误（退出码 3）。
+- 先校验存档本身：按 `buildplan` schema 严格校验（未知字段、类型、白名单叶子的取值范围，以及 `geometry.fit` 与 `geometry.shape.last.last_length_mm` 满足 6.2 的关系）；`buildplan_version` 按 3.3 的区间规则迁移或拒绝。违反时报 class 为 spec 的错误（退出码 3）。
 - 跳过步骤 1–5 与 7，`geometry.shape` 直接取自存档。
 - 第 6 步（欧氏部分）同样以下文的"只校验"模式执行，规则与阶段 B 相同。
 - 照常运行 Shape Source。
@@ -545,25 +544,25 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 **求解顺序**：
 
-1. **钉住的值不可行**：被钉住的值在任一检查点落在区间外，或超出 Cell Properties 的定义域（ρ ∈ [0.12, 0.46]，a_s、a_t ∈ [0.5, 6]） → 报 `E_INFEASIBLE_OVERRIDE`。
+1. **钉住的值超出定义域**：被钉住的值超出 Cell Properties 的定义域（ρ ∈ [0.12, 0.46]，a_s、a_t ∈ [0.5, 6]） → 报 `E_INFEASIBLE_OVERRIDE`。钉住的值落在区间外不在这一步判定：先由第 3 步尝试放大未被钉住的 Cell，仍不可行再按第 5 步报错。
    - Footbed Layer 的 ρ 是 Midsole ρ 的派生量：`rho_heel` 或 `rho_forefoot` 被钉住时，对应一端的 Footbed Layer ρ 也视为被钉住。
    - `rho_delta` 只有在 Midsole ρ 未被钉住时，才可以通过 Adjustment 修改。
-2. **名义值可行**：名义 ρ 在所有检查点都落在区间内 → 完成。
-3. **放大 Cell**：仅当 Cell Properties 表明"在不超过 Cell 上限的范围内放大 Cell，能让名义 ρ 在所有检查点都落入区间"时，才放大 Cell：
+2. **名义值可行**：名义 ρ（被钉住的取钉住值，下同）在所有检查点都落在区间内 → 完成。
+3. **放大 Cell**：仅当 Cell Properties 表明"在不超过 Cell 上限的范围内放大 Cell，能让名义 ρ 在所有检查点都落入区间"时，才放大 Cell（Cell 本身被 Override 钉住时跳过本步）：
    - 欧氏部分放大 C，各向同性。颈厚与孔喉都按 C 线性缩放，所需 C = max（各检查点上 (最小壁厚 + `neck_margin_mm`) / neck(ρ)，孔喉限值 / pore(ρ)），两个限值都取自 Profile（9.1），向上取到 0.05 mm 取值格 **[实现]**，再与 Cell 上限比较。这是闭式计算，不发生新的求值。
    - 随形部分放大 `cell_inplane`，Wall Thickness 不变。候选从名义值起按 0.25 mm **[实现]** 递增，直到上限 10 mm，共 ≤ 8 个，按顺序线性扫描。每个候选要重算 N 与两端的 a_s、a_t。不能用二分：N 取整使 a_s 阶梯变化，颈厚对 a_t 的单调性没有保证。
 
    观察：实测（L_s 取 6、8、11）Shell 的最小颈厚几乎与 L_s 无关，放大 `cell_inplane` 主要改善孔喉。求值器在实际形状上判定，不依赖这一点；颈厚与孔喉分别求值。
 
    取满足条件的最小 Cell，记一条 Adjustment。
-4. **在 Tier Band 内移动 ρ**：否则 Cell 保持名义值，按以下顺序调整：
+4. **在 Tier Band 内移动 ρ**：否则 Cell 保持名义值，按以下顺序调整（被钉住的 ρ 不移动）：
    - 用 x ≤ `heel_stack_point` 的检查点确定 `rho_heel`，用 x ≥ `forefoot_stack_point` 的检查点确定 `rho_forefoot`。两者各自在本档位的 Tier Band 内，取离名义值最近的可行值。Adjustment 产生的 ρ 落在 0.005 取值格上（Tier Band 的端点都在取值格上）；随形部分在取值格上二分（≤ 15 点，≤ 4 步），每步求两端。Override 与派生值（Midsole ρ + `rho_delta`）等取值格外的 ρ，在原值上直接求值。
    - Footbed Layer 不可行时，只调整 `rho_delta`，其 Tier Band 随 Midsole 档位平移。
    - 其他 Zone 各自在本档位的 Tier Band 内取离名义值最近的可行值。
    - 最后检查两测点之间的检查点。颈厚与孔喉对 ρ 单调，所以带内与两测点之间的检查点用区间端点夹逼：颈厚取区间最小 ρ，孔喉取区间最大 ρ，中间点不另行求值。
    
    每处改动记一条 Adjustment。
-5. **不可行**：仍不可行 → 报 `E_INFEASIBLE`。错误信息附上可行的替代方案，例如"该 Zone 当前可行的 ρ 区间是 …；可改用 … 档"。
+5. **不可行**：仍不可行时，不可行的检查点涉及被钉住的值则报 `E_INFEASIBLE_OVERRIDE`，否则报 `E_INFEASIBLE`。错误信息附上可行的替代方案，例如"该 Zone 当前可行的 ρ 区间是 …；可改用 … 档"。
 
 每条 Adjustment 都写进 Build Manifest，包含路径、原值、新值和原因（`neck`、`pore` 或 `cell`）。Infeasible 的退出码为 3。
 
@@ -591,13 +590,12 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 | `/geometry/parts/0/features/collar_rim/height_mm` | 1–6 |
 | `/geometry/parts/0/features/welt/height_mm` | 1.5–3.0 |
 | `/geometry/parts/0/features/ground_skin/thickness_mm` | 1.0–1.5 |
-| `/geometry/fit/toe_allowance_mm` | 8–20 |
 | `/resolution/voxel_mm` | 0.15–1.0 |
-| `/resolution/simplify_tolerance_mm` | 0.01–0.2 |
+| `/resolution/simplify_tolerance_mm` | 0.01–0.05 |
 
 **规则**：
 - **非法键或值**：键不在白名单、类型错误或超出范围 → 报 `E_SPEC_OVERRIDE`（退出码 3）。
-- **钉住的值不可行**：在 7.3 中报 `E_INFEASIBLE_OVERRIDE`，不提供绕过。派生的 Footbed Layer ρ（Midsole ρ + `rho_delta`）落在 Cell Properties 的定义域（ρ ≤ 0.46）之外，同样报 `E_INFEASIBLE_OVERRIDE`，无需另设规则。
+- **钉住的值不可行**：7.3 先尝试放大未被钉住的 Cell（第 3 步），仍不可行才报 `E_INFEASIBLE_OVERRIDE`，不提供绕过。派生的 Footbed Layer ρ（Midsole ρ + `rho_delta`）落在 Cell Properties 的定义域（ρ ≤ 0.46）之外，同样报 `E_INFEASIBLE_OVERRIDE`，无需另设规则。
 - **白名单收窄**：五个 ρ 字段的范围按定义域取 0.12–0.45（ADR 0012）。收窄需升 BuildPlan 的 minor 版本；P0 尚未发布，直接写进 0.1。
 - **优先级**：Override 总是优先于语义字段；Build Manifest 记录被覆盖的语义（`overridden_semantics`）。
 - **LLM 投影**：Override 不出现在 `llm` 投影中。
@@ -759,15 +757,15 @@ CLI 的 `--probes gate`、`warn`、`off` 三种模式（12.1）。`warn` 把探�
 
 覆盖 t_skin 时 t_out 不变，Outsole 晶格层整体上移。
 
-**坐标系分界（Welt Surface，ADR 0011）**：z_W(p) 为 `footbed_edge` 上离 p 最近点的 z。Shoe Body 中 z > z_W(p) 且最近点不在 Footbed 面上的点（含 Sole Envelope 高出 Footbed 的侧壁）属于 Shell 坐标系，按 x 判为 HeelCounter 或 Upper，用随形晶格；其余点属于鞋底坐标系，按下表前三行判定。表中"在 Sole Envelope 内"三行只适用于 z ≤ z_W(p) 的点。随形坐标在 d_Last > Wall Thickness 处照常延续（法向 Cell 仍为 Wall Thickness），不产生新生 Ligament。Welt 是实体特征，不是 Zone（同 Rim）；其内的点仍按所在坐标系判 Zone。
+**坐标系分界（Welt Surface，ADR 0011）**：z_W(p) 为 `footbed_edge` 上离 p 最近点的 z。**坐标系判据**：Shoe Body 中 z > z_W(p)、且 p 在 `last.ply` 上的最近点不在 Footbed 面（`face_sets.footbed`）上的点属于 Shell 坐标系（含 Sole Envelope 高出 Footbed 的侧壁），按 x 判为 HeelCounter 或 Upper，用随形晶格；其余点一律属于鞋底坐标系，按下表前三行判定，其中包括 Footbed 正下方、z 高于 z_W(p) 的点（足弓处会出现）。8.3 的场切换与 Welt 用同一判据。随形坐标在 d_Last > Wall Thickness 处照常延续（法向 Cell 仍为 Wall Thickness），不产生新生 Ligament。Welt 是实体特征，不是 Zone（同 Rim）；其内的点仍按所在坐标系判 Zone。
 
 **每一点恰属一个 Zone**，按下表从上到下判定，取第一个满足的：
 
 | 条件 | 所属 |
 |---|---|
-| 在 Sole Envelope 内，且 d_G ≤ t_skin | Outsole 的 Skin |
-| 在 Sole Envelope 内，且 t_skin < d_G ≤ t_skin + t_out | Outsole 的晶格层 |
-| 在 Sole Envelope 内，其余 | Midsole（其中 d_F ≤ t_fbl 的部分是 Footbed Layer） |
+| 属于鞋底坐标系，且 d_G ≤ t_skin | Outsole 的 Skin |
+| 属于鞋底坐标系，且 t_skin < d_G ≤ t_skin + t_out | Outsole 的晶格层 |
+| 属于鞋底坐标系，其余 | Midsole（其中 d_F ≤ t_fbl 的部分是 Footbed Layer） |
 | 属于 Shell 坐标系，且 x − x_heel ≤ `extent_x_ratio` × Last Length | HeelCounter |
 | 属于 Shell 坐标系，其余 | Upper |
 
@@ -823,7 +821,7 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 鞋底内部没有 Cell 混合，因此不产生新生 Ligament（ADR 0010）。
 
 **坐标系切换与 Welt**（ADR 0011）：
-- φ_lattice = φ_shell（z > z_W(p)）或 φ_sole（z ≤ z_W(p)）。两侧参数按该点所属坐标系与 Zone 取值（8.1）。切换面上不做混合，φ 在此不连续，由其中的实体 Welt 覆盖。
+- φ_lattice = φ_shell（p 属于 Shell 坐标系）或 φ_sole（其余），判据同 8.1：z > z_W(p) 且最近的 Last 点不在 Footbed 面上。两侧参数按该点所属坐标系与 Zone 取值（8.1）。切换面上不做混合，φ 在此不连续，由其中的实体 Welt 覆盖。Footbed 正下方的点一律用 φ_sole，鞋底内部没有切换面。
 - Welt = {|z − z_W(p)| ≤ `welt.height_mm`/2，且 p 不在 Footbed 正下方（最近的 Last 点不在 Footbed 面上）} ∩ Shoe Body，为实体；自 Footbed Edge 一直延伸到 Shoe Body 外表面。
 - 点求值：z_W(p) 与最近点判定用 5.5 的最近点查询，对任意点确定性可求。
 
@@ -856,6 +854,7 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 - 容差 `simplify_tolerance_mm`（默认 0.05 mm），使用确定性实现。
 - 简化后做双向采样，把实测最大偏差写进 Build Manifest。
 - 偏差超出容差，或简化后的网格有效性检查（10.2）失败时，退回更保守的简化比例重做；最保守的比例仍失败才判 hard 失败。
+- **简化后复测**：薄壁检查（10.2）结束后，对场上颈厚 < 最小壁厚 + `neck_margin_mm` + 2·`simplify_tolerance_mm` 的 Ligament，在 Print Mesh 上复测其最细站点处网格截面的最大内切圆直径。低于最小壁厚的，其材料计入薄壁占比（hard 判据同 10.2），简化与 MC 弦切造成的颈厚损失写入 Build Manifest。9.1 的余量账不含这项损失，由这一步兜住。
 
 **Preview Mesh**：
 1. 以 `preview_voxel_mm` 单独提取；
@@ -882,7 +881,7 @@ Midsole 厚度 T < C 的区域不做特殊处理：它只是不足一个 Cell �
 |---|---|
 | 工艺 | 粉末床熔融 TPU（取 MJF 级约束） |
 | 最小壁厚 | Neck Thickness 1.0 mm（ADR 0009） |
-| Resolver 颈厚余量 `neck_margin_mm` | 0.05 mm **[初值]**，与 10.2 的测量精度一致；Resolver 放行的设计，不会因测量误差在校验中失败。依据：近阈值实测最大误差 0.021 mm（Printability Check），加上 Cell Properties 求值误差 ≤ 0.021 mm（同核同法，期望 ≤ 0.01 mm）；Resolver 在查询点上直接求值，不再有插值误差，端部受限 Ligament 与校验同约定；合计 ≤ 0.042 mm，余量至少剩 0.008 mm。余量其余部分留给真实合成场相对周期 Cell 的偏差，由局部探测抽查。求值器误差若实测 > 0.025 mm，回到设计讨论，不擅自加大余量。不要调大：余量每加 0.1 mm，大约失去一个 Openness 档位 |
+| Resolver 颈厚余量 `neck_margin_mm` | 0.05 mm **[初值]**，与 10.2 的测量精度一致；Resolver 放行的设计，不会因测量误差在校验中失败。依据：近阈值的校验精度要求 ≤ 0.021 mm（10.2，与原型实测的最大误差一致），加上 Cell Properties 求值误差 ≤ 0.021 mm（同核同法，期望 ≤ 0.01 mm）；Resolver 在查询点上直接求值，不再有插值误差，端部受限 Ligament 与校验同约定；合计 ≤ 0.042 mm，余量至少剩 0.008 mm。余量其余部分留给真实合成场相对周期 Cell 的偏差，由局部探测抽查；Print Mesh 简化与 MC 造成的颈厚损失不在这笔账内，由 8.5 的简化后复测兜住。求值器误差若实测 > 0.021 mm（与 7.5、15.1 的测试阈值相同），回到设计讨论，不擅自加大余量。不要调大：余量每加 0.1 mm，大约失去一个 Openness 档位 |
 | 最小 Pore Throat | 薄层 ≥ 2.0 mm；芯部 ≥ 4.0 mm（级别划分见 7.3，ADR 0007） |
 | hard 阈值 | 薄壁：占 Lattice 材料体积（不含 Skin、Rim、Welt）的 1%；困粉：占 Shoe Body 内空隙体积的 1%（均可配置） |
 | 局部探测阈值 | `probe_thin_fraction` 1 %；`probe_trapped_fraction` 1 %；`probe_hanging_mm3` 1 mm³ **[初值]**（7.6），存放在 Profile 中 |
@@ -930,14 +929,14 @@ Print Build（含 `--plan`）在阶段 B 执行局部探测（7.6）；Preview �
 - 栅格从最终合成场分块重采样，带 halo。
 - 在释放场与网格之后执行。
 - 连通性用跨块并查集，做全局 26 连通标记。
-- **粗体素时的处理**：Neck Thickness 的精度要求（≤ 0.05 mm）只在 h_check ≤ 0.25 mm 时适用。`voxel_mm` > 0.25 mm 的 Print Build 与 Crop Build 照常执行网格类检查；体素类检查的结果一律降为 soft，Build Manifest 标记 `authoritative: false`，产出照常写出。15.3 的 0.5 mm 整鞋回归就按这种方式运行。
+- **粗体素时的处理**：Neck Thickness 的精度要求（近阈值 ≤ 0.021 mm，见下文）只在 h_check ≤ 0.25 mm 时适用。`voxel_mm` > 0.25 mm 的 Print Build 与 Crop Build 照常执行网格类检查；体素类检查的结果一律降为 soft，Build Manifest 标记 `authoritative: false`，产出照常写出。15.3 的 0.5 mm 整鞋回归就按这种方式运行。
 
 | 检查 | 级别 | 定义 |
 |---|---|---|
 | 薄壁占比 | > 1% 为 hard 失败；> 0 为 soft 警告 | 见下文"薄壁占比的计算" |
-| 实体接触占比 | soft | 与"裁切残边占比"同样定义，但端部受限的 Ligament 其最小内切球位于 Skin、Rim 或 Welt 表面 1.0 mm **[初值]** 以内，而不是触及 Shoe Body 边界；只报告，不判失败 |
+| 实体接触占比 | soft | 与"裁切残边占比"同样定义，但针对位于 Skin、Rim 或 Welt 表面 1.0 mm **[初值]** 以内（而不是触及 Shoe Body 边界）的端部受限段；只报告，不判失败 |
 | 悬挂材料 | hard | 用直径 1.0 mm（= 最小壁厚）的闭球对材料做开运算，开运算结果中与最大实体分量不连通的材料体积 > 1 mm³ **[初值]** 即失败。它保证端部受限豁免不会放过"只靠细特征挂着"的材料。两侧在别处仍相连的局部脱开接缝（ADR 0011 的接缝脱开）它看不到，目前只由 Welt 补丁测试与 `heel-transition` Crop Build 覆盖（实现计划缺口 G20） |
-| 裁切残边占比 | soft | 距 Shoe Body 边界 ≤ 0.5 mm 的 Ligament 站点中，所在 Ligament 的局部颈厚（该站点的 2R）< 最小壁厚的站点所对应的材料体积占比，另含按步骤 4 的端部受限判定归入边界的 Ligament；只报告，不判失败 |
+| 裁切残边占比 | soft | 距 Shoe Body 边界 ≤ 0.5 mm 的 Ligament 站点中，所在 Ligament 的局部颈厚（该站点的 2R）< 最小壁厚的站点所对应的材料体积占比，另含按步骤 4 判为触及边界的端部受限段（以及因此整根剔除的 Ligament）；只报告，不判失败 |
 | 困粉占比 | > 1% 为 hard 失败；> 0 为 soft 警告 | 见下文"困粉占比的计算" |
 
 **薄壁占比的计算**（ADR 0009）。不做曲线骨架化；颈厚的定义见 ADR 0009。
@@ -945,26 +944,26 @@ Print Build（含 `--plan`）在阶段 B 执行局部探测（7.6）；Preview �
 1. **粗阶段**：在检查栅格（h_check = `voxel_mm`）上，由 φ 的过零点取粗表面点；d = 各 Lattice 材料体素（不含 Skin、Rim 与 Welt）到表面点的距离；u = G_σ * d，σ = 0.5 mm **[初值]**（自适应 σ，如局部最大 d 的 0.5–0.7 倍，是可能的改进）。
 2. 在材料体素上对 u 做 26 邻域最陡上升分水岭，并用持续性（ToMATo）简化，阈值 **[实现]**。相邻且截面检验通过的每一对簇是一根 Ligament：两个节点是两个 u 极大值，路径是从 u 鞍点出发、到两端极大值的最陡上升折线（节点到节点）。
 3. **细阶段**：对每根 Ligament，在路径周围的管状区域内用 φ 构造表面点云（间距 hs 约 0.07–0.16 mm **[实现]**，Newton 投影到 φ = 0），r = 到点云的距离；沿路径逐站点（节点到节点全程）在垂直于路径切线的平面内取最大 r，记为 R(s)，在最小值附近细化。Neck Thickness = 2 · min R(s)。没有内部山口时，最小值落在节点处。
-4. 站点有效性：距 Shoe Body 边界 ≤ 0.5 mm、或在 Lattice 区域（不含 Skin、Rim、Welt）之外的站点不参与；一根 Ligament 若没有任何可用站点，不参与薄壁判据，其材料只计入"裁切残边占比"。**端部受限判定**：若一根 Ligament 的 min R(s) 落在与排除区相邻的端部站点，且该处内切球触及 Shoe Body 边界（r ≥ 到边界距离 − 0.1 mm）或位于 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，即 R(s) 朝边界或实体单调减小，则该 Ligament 不参与薄壁判据，其材料计入"裁切残边占比"（边界）或"实体接触占比"（实体），均为 soft。依据：此类读数是被边界切断的楔或擦碰实体的桥，不是两节点间的山口；Ligament 自身的山口在内部站点另有读数。不能只靠距离排除站点：桥向实体单调变窄，最小值总落在排除带边缘；悬挂材料检查（hard）兜住这条豁免，防止它放过只靠细特征挂着的材料。这些阈值（1.0 mm、0.1 mm、1 mm³）都是首次估计，见 20。
+4. 站点有效性：距 Shoe Body 边界 ≤ 0.5 mm、或在 Lattice 区域（不含 Skin、Rim、Welt）之外的站点不参与；一根 Ligament 若没有任何可用站点，不参与薄壁判据，其材料只计入"裁切残边占比"。**端部受限判定**：在与排除区相邻的端部站点上，若内切球触及 Shoe Body 边界（r ≥ 到边界距离 − 0.1 mm）或位于 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，则从该站点起向内、R(s) 单调增大的那一段（到第一个局部极大为止）是端部受限段。端部受限段不参与该 Ligament 的颈厚：Neck Thickness 取其余内部站点上的 2 · min R(s)，照常参与薄壁判据。端部受限段的读数计入"裁切残边占比"（边界）或"实体接触占比"（实体），均为 soft。剔除后没有内部站点的 Ligament 才整根不参与薄壁判据，其材料计入上述 soft 占比。依据：端部受限的读数是被边界切断的楔或擦碰实体的桥，不是两节点间的山口；Ligament 自身的山口在内部站点上，仍要判。不能只靠距离排除站点：桥向实体单调变窄，最小值总落在排除带边缘；悬挂材料检查（hard）兜住这条豁免，防止它放过只靠细特征挂着的材料。这些阈值（1.0 mm、0.1 mm、1 mm³）都是首次估计，见 20。
 5. 每个 Lattice 材料体素归属于最近的 Ligament 路径；节点处并列时，归属于 Neck Thickness 较大者，再并列取索引最小者。
 6. 分块：核心区固定为 128³ 体素、按固定顺序遍历；默认 halo 10 mm（40 体素）**[实现]**。场按块生成，不保留全局浮点栅格。每个块对每个体素做精确性检查：经上升到达的盆地极大值必须可证明与不分块时相同。检查失败的块改用 16 mm halo 重算；重算后仍有违例则为内部错误。块不输出成品 Ligament，而是按盆地对输出记录：计数、最佳穿越点（鞍点，平局规则与不分块相同）、上升路径与最大 d。父进程按全局盆地对编号精确合并，再在全局盆地图上做持久性简化与截面检验。每个被选中的鞍点恰好归属一个块。结果必须与不分块逐位一致。细阶段对各 Ligament 相互独立，可并行。
-7. 薄壁占比 = 颈厚 < 最小壁厚的 Ligament 所占材料体积 ÷ Lattice 材料总体积（不含 Skin、Rim 与 Welt）；已按步骤 4 归入裁切残边或实体接触的 Ligament 不计入分子。
+7. 薄壁占比 = 颈厚 < 最小壁厚的 Ligament 所占材料体积 ÷ Lattice 材料总体积（不含 Skin、Rim 与 Welt）；按步骤 4 整根归入裁切残边或实体接触的 Ligament 不计入分子，只剔除了端部受限段的 Ligament 按内部站点的颈厚计入。
 8. 警告中附带前 20 个 **[实现]** 聚集区的位置与体积。
 
 **困粉占比的计算**：
 
 1. 按 7.3 的孔喉级别，把 Shoe Body 内的空隙 V 分成薄层区 V_2 与芯部区 V_4；每个空隙体素按其所在位置的 Zone 与权重判定级别。
-2. 取 V 再并上 Shoe Body 外部一圈厚 d 的外壳 E。Crop Build 与 Coupon Build 的裁切面外侧也计入 E。
+2. 取 V 再并上 Shoe Body 外部一圈厚 d + 2·h_check 的外壳 E（d 球的球心能整个落在 E 内）。Crop Build 与 Coupon Build 的裁切面外侧也计入 E。
 3. 对每个 d ∈ {薄层孔喉下限, 芯部孔喉下限}（Profile，9.1；`pbf-tpu-generic` 为 2.0 与 4.0 mm）：
-   - 在整个 V ∪ E 上，用直径 d 的闭球做开运算，得到 O_d。闭球的判定是：体素中心到球心的距离 ≤ d/2。
-   - 从 E 出发，对 O_d 做全局 26 连通重建，得到 R_d。
+   - 在整个 V ∪ E 上用直径 d 的闭球做腐蚀，得到能放下 d 球的球心位置 C_d；再用同一闭球膨胀 C_d，得到 O_d（即开运算：d 球放得进的空隙）。闭球的判定是：体素中心到球心的距离 ≤ d/2。
+   - 可达性在球心空间里判定：在 C_d 内，从位于 E 中的球心出发做全局 26 连通重建，得到球心能移到外部的位置；用同一闭球膨胀它，得到 R_d（d 球放得进、也出得去的空隙）。
 4. 困粉体积 = |(O_2 − R_2) ∩ V_2| + |(O_4 − R_4) ∩ V_4|（下标 2、4 是两级的记号，d 取 Profile 的值）。
 5. 困粉占比 = 困粉体积 ÷ |V|。
 
-困粉只计"d 球放得进、但出不去"的空隙；任何 d 球都覆盖不到的角隅空隙不计入。粉末可以跨越级别边界排出，例如薄层的粉经由芯部排出。
+困粉只计"d 球放得进、但出不去"的空隙；任何 d 球都覆盖不到的角隅空隙不计入。粉末可以跨越级别边界排出，例如薄层的粉经由芯部排出。喉口比 d 窄时，即使两侧的 d 球隔着薄壁彼此接触，球心也连不通，喉口后的空隙计为困粉；这与 Resolver 的 Pore Throat（最宽路径瓶颈，7.5）是同一口径。
 
 **精度与检出要求**：
-- 参考颈厚 ≤ 1.5 mm 的 Ligament，测量误差 ≤ 0.05 mm；其余（含受节点限制的 Ligament，其节点约定带来约 0.04 mm 差异）≤ 0.2 mm。
+- 近阈值（参考颈厚 0.8–1.3 mm）的 Ligament，测量误差 ≤ 0.021 mm；参考颈厚 ≤ 1.5 mm 的其余 Ligament ≤ 0.05 mm；更粗的，以及受节点限制的 Ligament（其节点约定带来约 0.04 mm 差异），≤ 0.2 mm。
 - 检出：参考颈厚 ≤ 1.5 mm 的 Ligament 100% 检出，且不出现读数低于最小壁厚 + `neck_margin_mm`（即 1.05 mm）的虚假输出。
 - 对照基准是：对 G1 各 Zone 的单个周期 Cell，按同一定义（山口定义）用解析梯度加 Newton 求出的参考值（不依赖细栅格，估计误差 ≤ 0.01 mm）。h_check = 0.25 mm 的结果与之比较。
 - 验证必须覆盖每个 Zone 的 Cell 形状，含随形部分两端的 Cell 形状；鞋底 ρ 过渡带（Outsole↔Midsole 与 Footbed Layer 的 Grading）以带两端 ρ 的周期 Cell 真值，加缓变 ρ 平板（以局部 ρ 的周期真值作近似参考，容差 0.05 mm）验证。
@@ -1144,7 +1143,7 @@ Crop Region 与局部探测窗口（7.6）共用"由 Landmark 与 BuildPlan 参�
 ### 15.1 单元测试（不依赖 Blender）
 
 **解析与规则**：
-- 尺码换算、各体系端点值、Mondopoint 与 Toe Allowance 的例外规则
+- 尺码换算与各体系端点值；Toe Allowance 不在 Override 白名单中
 - 比例表
 - Tuning Table 自检：范围见 7.2
 - Cell Properties：重算与缓存逐位一致、冷热缓存的 BuildPlan 相同、种子 sha 与方法 id 校验、定义域边界与拓扑断言、ρ 取值格上的单调性、`neck-cell-dirc@1` 对 17 组真值加扩展真值误差 ≤ 0.021 mm（pass 类）、`gyroid_c.v1` 复现 harness 的 c
@@ -1154,6 +1153,7 @@ Crop Region 与局部探测窗口（7.6）共用"由 Landmark 与 BuildPlan 参�
   - Tier Band 边界
   - 随形 Zone 放大 Cell 无效时不放大
   - Midsole ρ 的 Override 使 Footbed Layer 不可行 → `E_INFEASIBLE_OVERRIDE`
+  - 钉住的 ρ 在名义 Cell 下不可行、放大未被钉住的 Cell 后可行 → 放大 Cell 并记 Adjustment；Cell 也被钉住时 → `E_INFEASIBLE_OVERRIDE`
 - Override 白名单与钉住语义
 - 版本迁移与拒绝
 - 四种 schema 导出，其中 `llm` 投影的所有对象都不允许额外字段
@@ -1172,14 +1172,16 @@ Crop Region 与局部探测窗口（7.6）共用"由 Landmark 与 BuildPlan 参�
 **几何**：
 - 场函数
 - Grading 与位置无关：同一 Grading 放在 x = 0 与 x = 280 处，连通分量数与 ρ 一致
-- Zone 推导，含 Welt Surface 两侧的坐标系归属（Sole Envelope 高出 Footbed 的侧壁归 Shell 坐标系）
+- Zone 推导，含 Welt Surface 两侧的坐标系归属（Sole Envelope 高出 Footbed 的侧壁归 Shell 坐标系；足弓下 Footbed 正下方、z 高于 z_W(p) 的点归鞋底坐标系，Zone 判定与场切换结果一致）
 - Welt 补丁：平壁 Shell 加鞋底的补丁，扫描 `welt.height_mm`（1.5 与 3.0）、悬挑 e（4 与 6 mm）、ρ 组合、方位与相位；断言内部最小颈厚不低于 Shell 自身的值，悬挂材料为 0，接缝不脱开（上下端材料路径瓶颈不低于纯 Shell），困粉为 0（harness：`.scratch/neck-acc/crossframe/`）
-- 端部受限判定：纯 Shell 平板（ρ 0.32 与 0.35）与 Skin 上的 Outsole 晶格，被边界或实体限制的读数归入裁切残边或实体接触，薄壁占比为 0；人工构造的悬挂材料被悬挂材料检查检出
+- 端部受限判定：纯 Shell 平板（ρ 0.32 与 0.35）与 Skin 上的 Outsole 晶格，被边界或实体限制的读数归入裁切残边或实体接触，薄壁占比为 0；内部有 0.9 mm 细颈、端部又擦着实体的 Ligament 仍按内部颈厚判为薄壁；人工构造的悬挂材料被悬挂材料检查检出
+- 困粉：喉口比 d 略窄的薄壁腔（例如 d = 2.0 mm 时，1 mm 厚壁上的 1.8 mm 孔）判为困粉；任何 d 球都进不去的角隅不计入
+- 简化后复测（8.5）：把一根近阈值 Ligament 在网格上的颈部削到最小壁厚以下，复测检出并计入薄壁占比
 - 鞋底侧壁上，距 ground 面集边界超过 t_skin 加 1 个体素的部分，Skin 面积为 0
 - 坐标变换与 GLB 变换、镜像
 - Island 清理不删除空腔壳：外盒内含反向腔时，腔被保留，"无封闭腔"检查失败
 - Neck Thickness 精度与检出：参考为基准式（benchmark）解析山口真值（解析梯度加 Newton，误差 ≤ 0.01 mm）
-  - 参考颈厚 ≤ 1.5 mm 的 Ligament 误差 ≤ 0.05 mm，其余 ≤ 0.2 mm
+  - 近阈值（参考颈厚 0.8–1.3 mm）误差 ≤ 0.021 mm，参考颈厚 ≤ 1.5 mm 的其余 Ligament ≤ 0.05 mm，更粗的 ≤ 0.2 mm
   - 参考颈厚 ≤ 1.5 mm 的 Ligament 100% 检出；无读数低于 1.05 mm 的虚假输出
   - 覆盖每个 Zone 的 Cell 形状，含随形部分两端的 Cell 形状；鞋底 ρ 过渡带（Outsole↔Midsole 与 Footbed Layer 的 Grading）以带两端 ρ 的周期 Cell 真值加缓变 ρ 平板验证
   - 分块与不分块的结果逐位一致（Ligament 集合与颈厚），含跨块边界，并含强制小块的情形
@@ -1316,7 +1318,7 @@ examples/specs/                 # G1–G5 的 DesignSpec
 | Welt 的力学与外观 | 1.5 mm 实体条位于前掌中性轴上方约 11 mm，弯折时约 20 % 压应变，可能起皱并提高弯折刚度 | 第 16 节的实物试穿与前掌弯折观察；P1 候选：分段或波纹 Welt（须先过 harness） |
 | 分块精确性依赖点求值的逐位确定性 | 接缝精确要求合成场在同一点返回逐位相同的浮点数，与分块方式无关（NumPy 已验证）。GPU、并行或基于栅格差分求梯度模的实现必须保证这一点；上升路径超过 16 mm 回退 halo 时报内部错误。参数（σ、persistence 等）只在一个种子上调定，未做留出验证；自适应 σ 是可能的改进（可回收胖薄向 Cell 中的 23 次漏检与 59 个虚假输出，参考值均 ≥ 1.2 mm） | 在实际合成场实现上重跑分块与不分块的逐位对比（含强制小块）；做留出验证 |
 | Openness 定稿值是否落在可行区间 | 审查期间的颈厚实测用过不同算法，数值有差异；按 ADR 0009 的山口定义，benchmark 给出 airy 0.20 在 Collar 端 (·, 8, 4) 的颈厚为 1.106 mm，高于 1.0 + 0.05 的门槛，余量约 0.055 mm。Shell 的该值与 L_s 无关 | 用 Cell Properties 在 G1–G4 的 Collar 端实际形状上求值后定 `tuning.v1`；复核 airy 在 Collar 端的值，若不足再微调 ρ |
-| Cell Properties 的精度与成本 | 求值器 `neck-cell-dirc@1` 的误差（期望 ≤ 0.01 mm，上限 0.021 mm）与冷查询耗时（≤ 3 s）尚未实测；`neck_margin_mm` 的余量账建立在这一误差上（9.1） | M3.3 的 spike：在 17 组真值上实测误差与耗时；误差 > 0.025 mm 或耗时 > 3 s 则回到设计讨论 |
+| Cell Properties 的精度与成本 | 求值器 `neck-cell-dirc@1` 的误差（期望 ≤ 0.01 mm，上限 0.021 mm）与冷查询耗时（≤ 3 s）尚未实测；`neck_margin_mm` 的余量账建立在这一误差上（9.1） | M3.3 的 spike：在 17 组真值上实测误差与耗时；误差 > 0.021 mm 或耗时 > 3 s 则回到设计讨论 |
 | 局部探测的覆盖与等价性 | 覆盖率（按核心计约 5–8 % 的 Lattice 材料）、相位采样、连通类检查的乐观性、场吞吐 ≤ 1 µs/体素的假设；窗口读数与整鞋读数在核心内的一致只是预期，局部 ToMATo 的簇身份可能与全局不同 | M6.11：在 G1–G4 上比较窗口与整鞋同位置的逐 Ligament 读数，在窗口内外注入缺陷，记录耗时与误报 |
 | Welt 处的实体接触、Island 与悬挂材料 | 只在平壁补丁上实测过（336 个窗口），整鞋曲率下的 z_W 与最近点判定未验证 | `heel-transition` 的 0.25 mm Crop Build |
 | 程序化控制笼生成的 Last 的形状质量 | 决定了能否穿、好不好看，P0 无法试穿校准 | 先单独做 Shape Source，用 G1–G4 的形状目视检查，并比对比例表 |

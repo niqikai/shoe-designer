@@ -170,7 +170,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
   - `src/shoegen/shape/blender/build_bundle.py`。
   - `scripts/regen_fixtures.py`；`examples/specs/g1.json … g5.json`、`eu35-default.json`、`eu48-default.json`；6 份 `tests/fixtures/shape-*`；`tests/fixtures/synthetic/` 生成器。
 - **验收标准**：
-  1. §15.1：尺码换算各体系端点值、Mondopoint 与 Toe Allowance 的例外规则（§4.1）、比例表（§4.2，含 Width 档位只平移截距）全部有测试并通过；超出范围报 `E_SPEC_SIZE_OUT_OF_RANGE`。
+  1. §15.1：尺码换算各体系端点值（§4.1；Toe Allowance 固定 12 mm，不开放 Override）、比例表（§4.2，含 Width 档位只平移截距）全部有测试并通过；超出范围报 `E_SPEC_SIZE_OUT_OF_RANGE`。
   2. 6 份 fixture 全部由 `scripts/regen_fixtures.py` 在 memguard 4 GB 下生成；每份都通过不变量 1–5（§5.3）：两份 PLY 不焊接即水密 2-流形；Footbed 在 Sole Envelope 内；Footbed Edge 处侧壁高出 Footbed ≥ `wall_overlap_mm`（6 mm）；`ground` 面法向 n_z < 0；`shape_hash` 一致。
   3. `landmarks.json` 符合 §5.4：闭合环不重复首点、起点在后跟中线、从 +Z 俯视逆时针；`footbed` 面集的边界等于 `footbed_edge`。
   4. `last_param.npz` 符合 §5.5：每行是一条 τ 等值环；`footbed_edge` 行 τ = 0 且 t_mm = 0，`collar_line` 行 τ = 1，与 `landmarks.json` 共用顶点索引；向 Footbed 一侧延伸的测地距离 ≥ 6 mm 且 τ < 0；接缝顶点对的 s 分别为 0 与 1；任意 Last 表面点的参数查询结果在参数面上连续（接缝处取 mod 1）。
@@ -212,8 +212,8 @@ M0 ─┬─► M1（Shape Source）──────────────�
   1. 严格 schema：任何对象出现未知字段都报错；只有 `schema_version` 与 `fit.size` 必填；非 `OnePiece3DPrint × FullLattice` 报 `E_SPEC_UNSUPPORTED_COMBINATION`；Forefoot Stack < 15 mm 报 `E_SPEC_FOREFOOT_STACK`，错误对象带 `json_pointer`、`expected`、`suggestion`（§3.5 示例可原样复现）。
   2. 版本：`[0.1, 0.1]` 区间；更新的版本报 `E_SPEC_VERSION_TOO_NEW`，更旧的报 `E_SPEC_VERSION_UNSUPPORTED`；迁移框架用一个测试专用的假 v0.0 → v0.1 迁移验证"逐级纯函数迁移"。
   3. 四种 schema 导出：`llm` 投影中所有对象 `additionalProperties: false`、去掉 `overrides`/`fit`/`schema_version`、枚举为 `anyOf[{const, description}]`、数值范围写进 `description`；`buildplan` 中白名单叶子带 `x-overridable: true` 与范围；`full` 中 `overrides` 的键用白名单枚举。
-  4. Override：白名单 16 条路径逐条测试范围与类型（五个 ρ 字段为 0.12–0.45）；非法键或值报 `E_SPEC_OVERRIDE`；被覆盖的值被钉住；Build Manifest 的 `overridden_semantics` 记录被覆盖的语义。
-  5. 约束求解（桩求值器上）：Adjustment、Infeasible（附可行替代方案）、Tier Band 边界（半开区间、最外侧对称半宽、单档 ±0.03）、随形 Zone 放大 Cell 无效时不放大、Midsole ρ 的 Override 使 Footbed Layer 不可行 → `E_INFEASIBLE_OVERRIDE`、`rho_delta` 只在 Midsole ρ 未被钉住时可调、放大 `cell_inplane` 后重算 N；求值次数与查询记录符合 §7.3。
+  4. Override：白名单 15 条路径逐条测试范围与类型（五个 ρ 字段为 0.12–0.45）；非法键或值报 `E_SPEC_OVERRIDE`；被覆盖的值被钉住；Build Manifest 的 `overridden_semantics` 记录被覆盖的语义。
+  5. 约束求解（桩求值器上）：Adjustment、Infeasible（附可行替代方案）、Tier Band 边界（半开区间、最外侧对称半宽、单档 ±0.03）、随形 Zone 放大 Cell 无效时不放大、Midsole ρ 的 Override 使 Footbed Layer 不可行 → `E_INFEASIBLE_OVERRIDE`、钉住的 ρ 借放大未被钉住的 Cell 变为可行（Cell 也被钉住时报 `E_INFEASIBLE_OVERRIDE`）、`rho_delta` 只在 Midsole ρ 未被钉住时可调、放大 `cell_inplane` 后重算 N；求值次数与查询记录符合 §7.3。
   6. 阶段 B：N = max(1, round(P(0.5)/cell_inplane))（舍入方式见 [缺口 G14]）并记 Resolution Note；构建体积预检 6 种朝向，失败报 `E_BUILD_VOLUME`、退出码 5；`--plan` 路径中 N 不一致报 `E_PLAN_SHAPE_MISMATCH`、约束不满足报 `E_INFEASIBLE`、不产生 Adjustment。用 M1 fixture（或合成 Bundle）提供 P(τ)。
   7. 每条 Adjustment 带路径、原值、新值、原因（`neck`、`pore`、`cell`）。
 - **依赖**：M0；M2.8 需要 M1.3 的 Bundle 读取与合成 Bundle。
@@ -263,7 +263,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 |---|---|---|---|---|
 | M3.1 | 移植 gyroid、c(ρ) 与参考方法 | `lattice/gyroid.py`、`lattice/reference_neck.py`（测试基准）、`scripts/gen_gyroid_c.py` 与 `gyroid_c.v1`、`tests/fixtures/neck_truth/`；复现 17 组真值（≤ 1e-6 mm） | S·high | 移植已验证原型 |
 | M3.2 | 周期 Cell 孔喉 | `pore-perc@1`：h_p = L_n/100，≤ 1500 万体素的确定放粗规则，复现 ADR 0010 的孔喉 | O·high | 周期拓扑与内存（自 `blend/blendlib.py` 的 `periodic_components`、`pore_throat`） |
-| M3.3 | 求值器方法 spike | 在 17 组真值上实测 `neck-cell-dirc@1` 的误差与耗时（解析路径 + 放宽平面搜索）；junction 类读数与 Direction C 是否一致；L_s 敏感性抽样（只作信息）；冷查询的成本分解；若误差 > 0.025 mm 或耗时 > 3 s，带数据交 H2 | **O·high** | 决定求值器方法与余量论证是否成立 |
+| M3.3 | 求值器方法 spike | 在 17 组真值上实测 `neck-cell-dirc@1` 的误差与耗时（解析路径 + 放宽平面搜索）；junction 类读数与 Direction C 是否一致；L_s 敏感性抽样（只作信息）；冷查询的成本分解；若误差 > 0.021 mm 或耗时 > 3 s，带数据交 H2 | **O·high** | 决定求值器方法与余量论证是否成立 |
 | M3.4 | 扩展真值与 ρ 定义域 [缺口 G7] | 补充真值（后台，memguard 6 GB，约 1–2 核·小时）：欧氏 (1, 1) 的 ρ ∈ {0.12, 0.125, 0.38, 0.42, 0.46}；随形取 G1 两端形状与白名单角点形状（Wall 3/6 × `cell_inplane` 6/10）的 ρ ∈ {0.12, 0.175, 0.38, 0.46}；ρ = 0.12 与 0.46 两端的拓扑断言；评分 | O·high | 判断端点的拓扑与真值约定 |
 | M3.5 | 求值器与缓存 | `lattice/cellprops.py`：键、种子 → 本地 → 计算、namespace、原子写、损坏重算、`get_many` 的确定并行；逐位一致、冷热 BuildPlan 相同、跨 worker 数一致的测试 | **O·high** | 确定性契约（ADR 0006）是这里的主要风险 |
 | M3.6 | 接入约束求解 | 替换桩；Build Manifest 的 `cell_properties`；定义域覆盖测试（fixture 与白名单角点） | S·high | 接口已在 M2.6 定好 |
@@ -283,7 +283,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
   1. 场函数（§15.1）：欧氏 Gyroid 与解析式一致；随形 Gyroid 的 |∇f| 用链式法则逐点求值，与有限差分一致到 1e-6；φ 的归一化与截断（g_min、δ = 1.0 mm）符合 §8.3。
   2. **点求值确定性**：在合成 Bundle 与 G1 fixture 上随机取 10⁵ 个点，按 3 种不同分块（含强制小块）求合成场，结果逐位一致（§15.1 最后一条、§20"分块精确性"）。
   3. Grading 与位置无关：同一 Grading 放在 x = 0 与 x = 280 处，连通分量数与 ρ 一致。
-  4. Zone 推导：每点恰属一个 Zone，按 §8.1 表的顺序判定；Welt Surface 两侧的坐标系归属正确（Sole Envelope 高出 Footbed 的侧壁归 Shell 坐标系）；随形坐标在 d_Last > Wall Thickness 处照常延续。
+  4. Zone 推导：每点恰属一个 Zone，按 §8.1 表的顺序判定；Welt Surface 两侧的坐标系归属正确（Sole Envelope 高出 Footbed 的侧壁归 Shell 坐标系；足弓下 Footbed 正下方、z 高于 z_W(p) 的点归鞋底坐标系）；`zones/derive.py` 与 `fuse/compose.py` 调用同一个坐标系判据函数（§8.1）；随形坐标在 d_Last > Wall Thickness 处照常延续。
   5. 鞋底侧壁上，距 `ground` 面集边界超过 t_skin 加 1 个体素的部分，Skin 面积为 0。
   6. Island 清理不删除空腔壳：外盒内含反向腔时腔被保留（"无封闭腔"检查在 M5.6 中失败）；只删除最大实体壳之外、V < 10 mm³ 的实体壳，按 Zone 汇总。
   7. 简化后双向采样的实测最大偏差 ≤ `simplify_tolerance_mm`（0.05 mm），超差时自动退回更保守的比例。
@@ -320,11 +320,11 @@ M0 ─┬─► M1（Shape Source）──────────────�
 - **范围**：§10.2、§10.3、§15.1"几何"中 Neck 精度与检出、分块逐位一致、端部受限、Welt 补丁、Island 空腔各项；§20 第 3、5、9 行。
 - **交付物**：`validate/neck/{coarse,tiled,fine,attribution,classify}.py`、`validate/hanging.py`、`validate/trapped_powder.py`、`validate/mesh_checks.py`、`validate/donning.py`、`validate/check_grid.py`（分块重采样、跨块并查集）、`validate/window.py`（探测窗口运行器）；`tests/neck/{cases,scoring}.py`（自 harness）、`tests/geometry/test_welt_patch.py`、`tests/geometry/test_end_limited.py`。
 - **验收标准**：
-  1. **Neck 精度与检出**（§10.2、§15.1）：在 harness 241 例上复现 `dirC_v2` 的逐 Ligament 结果（近阈值 298 根 100% 检出、最大误差 ≤ 0.021 mm、1.0 mm 判定 0/52 假通过）；参考颈厚 ≤ 1.5 mm 的 Ligament 误差 ≤ 0.05 mm、其余 ≤ 0.2 mm；无读数低于 1.05 mm 的虚假输出。覆盖 G1 每个 Zone 的 Cell 形状、两种随形端部形状与鞋底 ρ Grading 带（真值取法：带两端 ρ 的周期 Cell 真值加缓变 ρ 平板，容差 0.05 mm，[缺口 G8] 已解决）。
+  1. **Neck 精度与检出**（§10.2、§15.1）：在 harness 241 例上复现 `dirC_v2` 的逐 Ligament 结果（近阈值 298 根 100% 检出、最大误差 ≤ 0.021 mm、1.0 mm 判定 0/52 假通过）；近阈值（参考 0.8–1.3 mm）误差 ≤ 0.021 mm、参考颈厚 ≤ 1.5 mm 的其余 Ligament ≤ 0.05 mm、更粗的 ≤ 0.2 mm；无读数低于 1.05 mm 的虚假输出。覆盖 G1 每个 Zone 的 Cell 形状、两种随形端部形状与鞋底 ρ Grading 带（真值取法：带两端 ρ 的周期 Cell 真值加缓变 ρ 平板，容差 0.05 mm，[缺口 G8] 已解决）。
   2. **分块逐位一致**：分块与不分块的 Ligament 集合与颈厚逐位一致，含跨块边界与强制 40³ 小块；并在 `shoegen` 自己的合成场（G1 的 `heel-transition` 区域）上重做一次（§20"分块精确性"）。
-  3. **端部受限判定**：纯 Shell 平板（ρ 0.32 与 0.35）与 Skin 上的 Outsole 晶格，被边界或实体限制的读数归入裁切残边或实体接触，薄壁占比为 0；人工构造的悬挂材料被悬挂材料检查检出（§15.1）。
+  3. **端部受限判定**：纯 Shell 平板（ρ 0.32 与 0.35）与 Skin 上的 Outsole 晶格，被边界或实体限制的读数归入裁切残边或实体接触，薄壁占比为 0；内部有 0.9 mm 细颈、端部又擦着实体的 Ligament 仍按内部颈厚判为薄壁；人工构造的悬挂材料被悬挂材料检查检出（§15.1）。
   4. **Welt 补丁**（§15.1）：平壁 Shell 加鞋底的补丁，扫描 `welt.height_mm` 1.5 与 3.0、悬挑 e 4 与 6 mm、ρ 组合、方位与相位：内部最小颈厚不低于 Shell 自身的值，悬挂材料为 0，上下端材料路径瓶颈不低于纯 Shell，困粉为 0。单元层跑代表子集，slow 层跑全量；场必须是 `shoegen` 的实现。
-  5. 困粉：在已知困粉体积的构造体（含"球放得进出不去"的腔与"任何球都进不去"的角隅）上，计算值与解析值一致；Crop 与 Coupon 的裁切面外侧计入外部带 E。
+  5. 困粉：在已知困粉体积的构造体（含"球放得进出不去"的腔、喉口比 d 略窄的薄壁腔与"任何球都进不去"的角隅）上，计算值与解析值一致；Crop 与 Coupon 的裁切面外侧计入外部带 E。
   6. 网格类检查：边流形与方向一致、无退化面、BVH 自相交、实体壳数、空腔壳数、构建体积 6 种朝向；Island 空腔用例中"无封闭腔"失败。
   7. 粗体素降级：`voxel_mm` > 0.25 时体素类检查一律降为 soft、`authoritative: false`（§10.2）。
   8. 性能：在 harness 的合成鞋底平板上，4 worker 时 Neck 全流程 ≤ 1.5 分钟、memguard 峰值 ≤ 2.5 GB（复现 tiling.md 的 1.3 分钟 / 1.95 GB 量级）。
@@ -342,9 +342,9 @@ M0 ─┬─► M1（Shape Source）──────────────�
 |---|---|---|---|---|
 | M5.1 | 移植 Direction C（不分块）与基准 | `validate/neck/{coarse,fine}.py`（自 `dirC_saddle.py`，含只用有效站点的修正）；`tests/neck/` 基准与评分；复现 `dirC_v2` 结果 | S·high | 移植已验证原型，以逐 Ligament 复现为准 |
 | M5.2 | 移植分块粗阶段 | `validate/neck/tiled.py`（自 `dirC_tiled.py`）：固定核心、halo 40 / 回退 64、逐体素精确性证书、按全局盆地对合并、ToMATo、截面检验、细阶段进程池；逐位一致测试 | **O·high** | 分块精确性属"tiling exactness"，必须 Opus |
-| M5.3 | 薄壁占比与分类 | `validate/neck/{attribution,classify}.py`：§10.2 第 4、5、7、8 步——站点有效性、端部受限判定（0.1 mm、1.0 mm 两个 [初值] 作为 Profile 或数据表参数，位置见 [缺口 G9]）、裁切残边与实体接触占比、体素归属、前 20 个聚集区 | O·high | 规则新且只近似验证过，判定错误会开出假通过通道 |
+| M5.3 | 薄壁占比与分类 | `validate/neck/{attribution,classify}.py`：§10.2 第 4、5、7、8 步——站点有效性、端部受限段的剔除与按内部站点取颈厚（0.1 mm、1.0 mm 两个 [初值] 作为 Profile 或数据表参数，位置见 [缺口 G9]）、裁切残边与实体接触占比、体素归属、前 20 个聚集区；§8.5 的简化后颈厚复测 | O·high | 规则新且只近似验证过，判定错误会开出假通过通道 |
 | M5.4 | 悬挂材料 | `validate/hanging.py`：直径 = 最小壁厚（默认 1.0 mm）的闭球开运算的分块实现、跨块并查集、与最大实体分量不连通的体积（自 `cfrun.topo`） | O·high | 分块形态学与全局连通的精确性 |
-| M5.5 | 困粉 | `validate/trapped_powder.py`：V_2 / V_4 分级、外部带 E、两级孔喉下限 d（取自 Profile，默认 2、4 mm）的开运算与自 E 的 26 连通重建、分块（自 `cfrun.trapped_powder`） | O·high | 同上，且分级依赖 Zone 与权重 |
+| M5.5 | 困粉 | `validate/trapped_powder.py`：V_2 / V_4 分级、外部带 E、两级孔喉下限 d（取自 Profile，默认 2、4 mm）的腐蚀、球心空间里自 E 的 26 连通重建与膨胀、分块（自 `cfrun.trapped_powder`；原型在开运算结果上做连通，移植时按 §10.2 改到球心空间，并重跑 Welt 补丁的困粉数值） | O·high | 同上，且分级依赖 Zone 与权重 |
 | M5.6 | 网格类检查 | `validate/mesh_checks.py`：流形、方向、退化面、BVH 自相交（数百万面）、实体壳与空腔壳计数（manifold3d `decompose()`）、构建体积 | S·high | 定义明确，性能需留意 |
 | M5.7 | Donning Check | `validate/donning.py`：开口周长 ÷ Long Heel Girth 估值 < 1.00 时 soft 警告（量的取法见 [缺口 G4]） | S·low | 简单比值 |
 | M5.8 | 端部受限与 Welt 补丁测试 | `tests/geometry/test_end_limited.py`、`test_welt_patch.py`：用 `cflib.Wall` 的解析几何构造补丁 Bundle，驱动 `shoegen` 的场与校验 | S·high | 移植 harness 的用例设计，断言来自规格 |
@@ -367,7 +367,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
   5. **Crop Build**：`heel-transition` 与 `heel-collar` 在 0.25 mm 下执行完整 hard 校验并通过（§15.3），栅格使用整鞋全局栅格（[缺口 G16] 采纳）；`heel-transition` 中 Welt 处的实体接触与悬挂材料逐项复核（§20 第 9 行）。
   6. **G1 整鞋 Print Build（0.25 mm，右脚）**：
      - 网格类 hard 全过：网格有效、实体壳数 1、空腔壳数 0、构建体积有可行朝向；
-     - 体素类 hard 全过：薄壁占比 ≤ 1%、困粉占比 ≤ 1%、悬挂材料 ≤ 阈值；
+     - 体素类 hard 全过：薄壁占比 ≤ 1%（含 §8.5 的简化后复测）、困粉占比 ≤ 1%、悬挂材料 ≤ 阈值；
      - 单只鞋 ≤ 10 分钟、memguard 峰值 ≤ 8 GB（§13）；
      - 裁切残边、实体接触与悬挂材料三项的分布在 PR 中逐项列出（§20 第 3 行"在 G1 整鞋上核对"）。
   7. **阈值定稿**：用 G1 与两个 Crop Build 的实测数据，定稿实体接触距离（1.0 mm）、端部触及边界容差（0.1 mm）、悬挂材料（1 mm³）三个 [初值]，所在数据表升版本 [缺口 G9]。定稿时，把探测窗口内的裁切残边与实体接触读数一并纳入样本；定稿必须同时满足：(a) 在 G1 上不误报；(b) 人工注入的缺陷仍被检出——在 G1 的若干位置把 Ligament 削细到 0.8 mm、制造只靠细特征挂着的材料：削细的 Ligament 必须出现在薄壁 soft 警告的聚集区位置中，削细总量超过 Lattice 材料的 1 % 时判 hard 失败；挂着的材料必须判悬挂材料 hard 失败。若 G1 的失败无法靠调整 [初值] 消除（例如真实缺陷，或规则本身不成立），停下回到设计讨论。**H3**。
