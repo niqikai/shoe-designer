@@ -98,6 +98,19 @@ in domain metadata and must match exactly when reusing CAD certificates. This
 design subset follows raised toe material without changing any accepted M1
 parameter or asserting a globally uniform shell thickness.
 
+The optional `lattice.domain.refinement` object is valid only in
+`curved_lower_foot` mode. Its defaults are `toe_start_fraction: 0.925`,
+`coverage_tolerance_mm: 0.1`, and `max_queries: 16000`; the completion example
+explicitly budgets 30000 queries. Old specs default to `refinement: null`.
+The tolerance concerns completeness depth at grid nodes, not allowed intrusion:
+every allowed node in the declared toe corridor deeper than physical clearance
+plus a full voxel diagonal, numerical guard and this tolerance must acquire a
+negative certificate. Clearance is never reduced to fill a thin tip. Exhausted
+query budgets fail the build. The explicit query journal under `debug/` is a
+hash-bound incomplete seed for mandatory resumed traversal, never an accepted
+completed-domain cache. Independent validation additionally requires expected
+terminal material to reach the principal connected exported STL component.
+
 ## Experimental manufacturing profiles
 
 `manufacturing.process` is `SLS`. `material_profile` declares a profile ID,

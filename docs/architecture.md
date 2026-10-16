@@ -45,6 +45,25 @@ For the curved mode, certificate radii also use exact Euclidean distance to ever
 
 A sparse three-station measurement can alias a gyroid phase in a narrow toe bin. A coverage-only failure therefore gets at most one deterministic seven-by-seven X/Y refinement. Support thresholds do not change, the initial failing measurement is retained, and the new lines must intersect actual CAD and STL material. Intrusion failures and unresolved native CAD measurements do not qualify for this retry. A genuinely absent toe or absent certified domain still fails the refined check.
 
+The later terminal-completion gate addresses a different failure of that sparse
+coverage test: a small fraction of surviving toe material can satisfy a bin
+while the main body ends early. In the explicit refinement corridor, adaptive
+blocks may be skipped only with a valid boundary-distance upper bound, an
+outside-region proof, or complete existing negative-node coverage. Actual
+trimmed-CAD nearest points, global box faces and the explicit roof supply safe
+upper bounds; supporting planes of trimmed faces do not. Separate exact-query
+journals bind the accepted inputs, original field and refinement policy, and
+are resumed only through a mandatory complete traversal. They never satisfy
+the completed-domain cache contract on their own.
+
+Independent native CAD nodes determine the expected toe sites. Six-neighbor
+domain connectivity and the exported STL's largest positive-volume connected
+surface are checked separately. Every terminal grid plane with independently
+recomputed analytic material must have actual crossing triangles in that
+principal surface. Tangent caps and distant isolated fragments cannot establish
+connected reach. The checks remain finite sampled evidence and make no global
+manufacturing or continuous coverage claim.
+
 Native CAD scanlines select candidate material. Exact CAD boundary distances and a full cell-diagonal reserve certify interior balls. Ambiguous classifier membership is resolved with independent three-axis full-bounding-box CAD Boolean lines; unresolved disagreement stops generation. Their union provides a conservative field; unproved regions are explicitly omitted and counted. Candidate raster EDT is not a containment certificate. Numerical assertions remain conditional on CAD kernel tolerances.
 
 The gyroid field is `abs(G)-threshold`; `threshold` is dimensionless. NumPy samples XYZ slabs in millimetres with an explicit origin and phase. The field is intersected with the certified domain before [scikit-image Lewiner Marching Cubes](https://scikit-image.org/docs/stable/api/skimage.measure.html#skimage.measure.marching_cubes), including positive boundary padding and a documented inward cap inset. No mesh smoothing, hole filling or component deletion is performed. All components are retained and measured.

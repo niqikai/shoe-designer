@@ -38,9 +38,12 @@ def pytest_sessionfinish(session, exitstatus):
     # Report placement alone cannot prove which generated shoe was tested.
     provenance = getattr(session.config, "_shoe_repair_provenance", {})
     write_json(Path(target), {"generated_at": utc_now(), "pytest_exit_code": int(exitstatus),
+                             "invocation_args": list(session.config.invocation_params.args),
+                             "collected_nodeids": [item.nodeid for item in session.items],
                              "collected": session.testscollected, "counts": counts,
                              "tests": results, "environment": environment(),
                              "build_provenance": provenance,
                              "design_build_provenance": getattr(session.config, "_shoe_design_provenance", {}),
                              "lattice_build_provenance": getattr(session.config, "_shoe_lattice_provenance", {}),
-                             "toe_repair_provenance": getattr(session.config, "_shoe_toe_repair_provenance", {})})
+                             "toe_repair_provenance": getattr(session.config, "_shoe_toe_repair_provenance", {}),
+                             "terminal_build_provenance": getattr(session.config, "_shoe_terminal_provenance", {})})

@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 
 
-def rasterize(mesh, elevation, azimuth, width=900, height=520, frame_bounds=None):
+def rasterize(mesh, elevation, azimuth, width=900, height=520, frame_bounds=None, face_colors=None):
     """Orthographic depth buffer avoids matplotlib's triangle-sort artifacts."""
     elev, azim = np.radians([elevation, azimuth])
     view = np.array([np.cos(elev)*np.cos(azim), np.cos(elev)*np.sin(azim), np.sin(elev)])
@@ -34,7 +34,10 @@ def rasterize(mesh, elevation, azimuth, width=900, height=520, frame_bounds=None
     pixels = np.full((height, width, 3), 0.97)
     light = view + np.array([0, 0, 1.2]); light /= np.linalg.norm(light)
     diffuse = np.clip(mesh.face_normals @ light, 0, 1)
-    colors = (0.4 + 0.6*diffuse[:, None]) * np.array([0.15, 0.64, 0.73])
+    base_colors = np.array([0.15, 0.64, 0.73]) if face_colors is None else np.asarray(face_colors, float)
+    if base_colors.shape not in ((3,), (len(mesh.faces), 3)) or not np.isfinite(base_colors).all() or np.any((base_colors < 0) | (base_colors > 1)):
+        raise ValueError('Raster face colors must be finite RGB values in [0,1]')
+    colors = (0.4 + 0.6*diffuse[:, None]) * base_colors
     for triangle, color in zip(screen[mesh.faces], colors):
         x0, y0 = np.maximum(np.floor(triangle[:, :2].min(axis=0)), [0, 0]).astype(int)
         x1, y1 = np.minimum(np.ceil(triangle[:, :2].max(axis=0)), [width-1, height-1]).astype(int)

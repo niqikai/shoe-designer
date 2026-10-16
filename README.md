@@ -99,6 +99,19 @@ The original `output/m2` is retained for comparison. Curved-domain validation ad
 
 See [toe repair evidence](docs/milestone2_toe_repair_report.md) for the actual new/old comparison and remaining limits. The repaired domain's 0.45 threshold case fails strict non-area manifold checks and is retained as a failure, with no topology repair or tolerance relaxation. `verify_lattice.py --threshold-variant 0.5` explicitly selects a separate parameter comparison; it never relabels that model as 0.45. Overall M2 acceptance and parameter robustness remain partial.
 
+Further preview review found that coarse certificates still missed narrow toe
+material and that detached fragments inflated the previous front-bound metric.
+The independent completion run uses `shoe_spec_m2_toe_complete.json` and writes
+only to `output/m2_toe_complete/`. It adds adaptive exact-CAD certificates while
+preserving clearance and the accepted M1, and checks premeasured eligible nodes,
+every terminal grid plane, and the largest positive-volume connected STL
+surface. A fragment's bounding box or a sparse bin-coverage PASS cannot satisfy
+this check. The old outputs and first query-budget failure remain preserved.
+`scripts/verify_terminal_lattice.py`, `scripts/preview_terminal_lattice.py` and
+`scripts/report_terminal_lattice.py` bind the actual fields, STL, same-frame
+component-colored preview, tests and frozen-input hashes. Manufacturing and
+M3 fusion remain separate.
+
 
 M2 can reuse completed CAD domain certificates with `build-lattice --domain-cache <directory>` only when the separate `domain_provenance.json`, source hashes, frozen baseline, actual parameters, grid headers and saved CAD evidence all agree. The loader checks array budgets before decompression. Such execution records identify cache reuse and retain the original sampling run and time; they do not claim new CAD sampling. Independent checks still run on the newly exported STL.
 
