@@ -1,6 +1,6 @@
 # BuildPlan 从 P0 起按 Part × Zone × Fill 组织
 
-BuildPlan 的几何段在 P0 就组织为 `parts[]`：每个 Part 含 `shell`（Wall Thickness、面内 Cell 等 Shell 级参数）、`zones{名称: {frame, fill{kind, …}}}` 与按 id 键控的 `features{}`（Rim、Skin）。尽管 OnePiece3DPrint 下永远只有一个 Part `body`，FullLattice 下 `fill.kind` 永远是 `lattice`，也不简化。原因是 Override 以 BuildPlan 的 JSON Pointer 为键，Build Manifest 与输出文件名（`{side}.{part}.stl`）也都引用这一结构，它一旦对外就很难再改；而未来的多零件 ManufacturingMode 与 HybridLattice（`fill.kind = solid`）在这一结构下只是新增数据。Zone 集合与各 Zone 的坐标系由 Archetype 数据文件声明，不写死在代码里。
+BuildPlan 的几何段在 P0 就组织为 `parts[]`：每个 Part 含 `shell`（Wall Thickness、面内 Cell 等 Shell 级参数）、`zones{名称: {frame, fill{kind, …}}}` 与按 id 键控的 `features{}`（Rim、Skin、Welt）。尽管 OnePiece3DPrint 下永远只有一个 Part `body`，FullLattice 下 `fill.kind` 永远是 `lattice`，也不简化。原因是 Override 以 BuildPlan 的 JSON Pointer 为键，Build Manifest 与输出文件名（`{side}.{part}.stl`）也都引用这一结构，它一旦对外就很难再改；而未来的多零件 ManufacturingMode 与 HybridLattice（`fill.kind = solid`）在这一结构下只是新增数据。Zone 集合与各 Zone 的坐标系由 Archetype 数据文件声明，不写死在代码里。
 
 ## Considered Options
 

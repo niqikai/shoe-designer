@@ -20,8 +20,8 @@ Resolver 不再查离线生成的 Feasibility Table，而是调用 Cell Properti
 ## Consequences
 
 - `neck_margin_mm` 保持 0.05 mm，论证改写：近阈值实测最大误差 0.021 mm，加求值器误差 ≤ 0.021 mm（同核同法，期望 ≤ 0.01 mm），不再有插值项，端部受限类与校验同约定，余量至少剩 0.008 mm。求值器误差实测 > 0.025 mm 时回到设计讨论，不擅自加大余量。
-- 缓存的确定性契约（ADR 0006）：求值器是 key 的纯函数，同环境下缓存值与重算值逐位相同，冷热缓存的 BuildPlan 与 Print Mesh 逐字节相同；种子命中的查询跨平台权威；种子之外的冷查询跨平台只保证 ≤ τ（颈厚 0.002 mm，孔喉 h_p·L_n），Build Manifest 标 `near_threshold`；`--plan` 只校验模式的判定放宽 τ。
+- 缓存的确定性契约（ADR 0006）：求值器是 key 的纯函数，同环境下缓存值与重算值逐位相同，冷热缓存的 BuildPlan 与 Print Mesh 逐字节相同；种子命中的查询跨平台权威；种子之外的冷查询跨平台只保证 ≤ τ（颈厚 0.002 mm，孔喉 h_p，即孔喉栅格的一个体素 L_n/100），Build Manifest 标 `near_threshold`；`--plan` 只校验模式的判定放宽 τ。
 - 新增退出路径：局部探测失败退出码 5，错误码 `E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`；可归因于某个 Zone 的 ρ 时附 `json_pointer` 与由求值器算出的 `suggestion`。`--probes gate|warn|off` 可降级，Preview Build 与 Crop Build 默认不探测。
-- 探测的残余风险：4 根鞋底柱约占鞋底 Lattice 的 15–20 %，Shell 窗口约占 Shell 的 10 %，Welt 窗口约覆盖 Footbed Edge 的 20 %，其余位置的非周期偏差仍只在整鞋 Printability Check 中发现（仍是权威判据）；一个 16 mm 核心只采到约 1.6 个 C = 10 的 Cell，相位采样不足；连通类检查对窗口外表面取乐观处理；局部 1 % 比全鞋 1 % 严格，可能误报；窗口读数与整鞋读数的等价性只是预期，由 M6.11 实测。
+- 探测的残余风险：4 根鞋底柱的核心约占鞋底 Lattice 的 5 %（16 × 16 mm × 4 对 EU42 约 21 000 mm² 的鞋底面积；算上 halo 才到 20–25 %，但只统计核心），Shell 窗口的核心约占 Shell 的 5 %，Welt 窗口约覆盖 Footbed Edge 的 20 %，其余位置的非周期偏差仍只在整鞋 Printability Check 中发现（仍是权威判据）；一个 16 mm 核心只采到约 1.6 个 C = 10 的 Cell，相位采样不足；连通类检查对窗口外表面取乐观处理；局部 1 % 比全鞋 1 % 严格，可能误报；窗口读数与整鞋读数的等价性只是预期，由 M6.11 实测。
 - P1 重新考虑 Adjustment 循环的条件：Build Manifest 记录每次探测失败的缺口，若 P0 期间的失败大多是"小 ρ 缺口且杠杆明确"，再引入有界循环，并同时让 Preview 跑探测，或放宽 plan_hash 共用规则。
-- 种子必须随方法 id 升版本重生成；种子守门（抽样逐位重算、G1–G5 与 Tuning Table 自检全部命中、sha256）进入 pre-merge。
+- 种子必须随方法 id 升版本重生成；它的随形部分是录制闭包，`tuning.v1`、比例表、Collar 形状参数或形状 fixture 改版后也要重生成；种子守门（抽样逐位重算、G1–G5 与 Tuning Table 自检全部命中、sha256）进入 pre-merge。

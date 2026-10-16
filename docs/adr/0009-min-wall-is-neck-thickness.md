@@ -1,12 +1,12 @@
 # 最小壁厚以韧带颈厚计，而不是局部厚度
 
-ManufacturingProfile 的"最小壁厚"在 Lattice 上按 Neck Thickness 判定：每根 Ligament 最细处的内切球直径。Resolver 的可行区间（Cell Properties）、局部探测与 Printability Check 使用同一定义；薄壁占比 = 颈厚低于限值的 Ligament 所占材料体积 ÷ 总材料体积，Cut Edge 不计入 hard 判据，另作 soft 报告：既包括距 Shoe Body 边界 0.5 mm 以内的残边，也包括最细处落在排除区边缘的 Ligament（最小内切球触及边界，或在 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，后者另列"实体接触占比"）。0.5 mm 站点排除本身挡不住这类读数（最大内切球可比站点更靠近边界，桥向实体单调变窄而最小值停在排除带边缘），因此改按"最小值落在哪里"判定；为防止豁免放过只靠细特征挂着的材料，另加 hard 的"悬挂材料"检查（1 mm 闭球开运算，ADR 0011）。粉末床打印中细特征的失效方式是细颈处断裂或烧结不良，颈厚直接对应它。
+ManufacturingProfile 的"最小壁厚"在 Lattice 上按 Neck Thickness 判定：每根 Ligament 最细处的内切球直径。Resolver 的可行区间（Cell Properties）、局部探测与 Printability Check 使用同一定义；薄壁占比 = 颈厚低于限值的 Ligament 所占材料体积 ÷ Lattice 材料总体积（不含 Skin、Rim 与 Welt，规格 10.2），Cut Edge 不计入 hard 判据，另作 soft 报告：既包括距 Shoe Body 边界 0.5 mm 以内的残边，也包括最细处落在排除区边缘的 Ligament（最小内切球触及边界，或在 Skin / Rim / Welt 表面 1.0 mm **[初值]** 以内，后者另列"实体接触占比"）。0.5 mm 站点排除本身挡不住这类读数（最大内切球可比站点更靠近边界，桥向实体单调变窄而最小值停在排除带边缘），因此改按"最小值落在哪里"判定；为防止豁免放过只靠细特征挂着的材料，另加 hard 的"悬挂材料"检查（1 mm 闭球开运算，ADR 0011）。粉末床打印中细特征的失效方式是细颈处断裂或烧结不良，颈厚直接对应它。
 
 ## Considered Options
 
 - 曲线骨架化（Lee）加 EDT：在 0.25 mm 体素上取骨架点的 EDT 半径。实测均值误差 −0.38 mm，误差落在 0.05 mm 以内的占 0%；扣除一个体素的系统偏移后偏差仍随 Cell 形状与 ligament 粗细变化（−0.04 至 −0.23 mm），残差标准差约 0.1 mm，按组相关，不会在体积占比上平均掉；另漏检 14% 的 Ligament（各向异性薄 Cell 中 23%）。漏检的 Ligament，其材料会被归给邻居，永远不会判失败，等于给 hard 判据留了一条假通过的通道。整鞋尺度上粗阶段约 250 B/体素，未分块需 3.5–4 GB 以上，且需要块边界一致的分块骨架化。拒绝。
 - 骨架化后在隐式场上做亚体素局部测量（B）：精度问题解决（近阈值误差 ≤ 0.03 mm），但漏检沿用骨架图的 14%，耗时约为本文方案的 7 倍（测试集 1301 s 对 183 s）。拒绝。
-- 放宽精度要求并加大 `neck_margin_mm`（A）：要安全就需要 0.3–0.6 mm 的余量，会让 airy、soft 档位不可行，默认 4 mm 壁下只剩 dense 可用；漏检仍然存在，假通过通道仍然开着。拒绝。
+- 放宽精度要求并加大 `neck_margin_mm`（A）：要安全就需要 0.3–0.6 mm 的余量，会让 airy、soft 档位不可行，默认 4 mm 壁下只剩 dense 可用（soft 一条基于 ADR 0010 之前的 C/2 鞋底；单一 C = 10 下 soft 下沿颈厚约 1.85 mm，已不受影响）；漏检仍然存在，假通过通道仍然开着。拒绝。
 - Hildebrand–Rüegsegger 局部厚度（增材制造软件常用）：会把被压扁的韧带两侧边缘判为"薄"（一根 2.0×1.16 mm 的扁韧带有 7.5% 体积被判薄），4 mm 壁下 airy、balanced 两档都不可行，全默认的鞋会被判 Infeasible；整鞋 Cut Edge 使薄壁占比达到约 1.8%，超过 1% 的 hard 阈值。要保留它就得把 Wall Thickness 加到 5 mm，或把 Openness 抬到 0.36 以上。
 
 ## Consequences

@@ -20,7 +20,7 @@
 | **M0** 工程骨架 | 能装、能测、公共基础件就位 | M0.1 H·medium；M0.2 S·medium；M0.3 S·medium | — | S（3） |
 | **M1** Shape Source | Blender 程序化控制笼产出合规 Shape Bundle；G1–G4 形状目视签收；6 份 fixture 入库 | M1.1 S·high；M1.2 S·medium；M1.3 S·high；M1.4 S·medium；**M1.5 O·xhigh**；M1.6 O·high；M1.7 O·high；M1.8 O·high；M1.9 S·high；M1.10 S·medium；**M1.R O·high** | M0；H1 | L（11） |
 | **M2** DesignSpec 与 Resolver | 阶段 A / B、Override、约束求解、schema 导出、错误格式（用桩求值器） | M2.1 S·medium；M2.2 S·medium；M2.3 S·medium；M2.4 H·medium；M2.5 S·high；M2.6 S·medium；**M2.7 O·high**；M2.8 S·high；M2.9 S·medium；**M2.R O·high** | M0（与 M1 并行）；M2.8 需 M1.3 | L（10） |
-| **M3** Cell Properties 与 `tuning.v1` | 按需求值的 Cell Properties 求值器与持久缓存、`gyroid_c.v1` 与种子，定稿 Openness 与 HeelCounter 的 ρ，冻结 G2 Adjustment 与哈希向量 | M3.1 S·high；M3.2 O·high；**M3.3 O·high**；M3.4 O·high；**M3.5 O·high**；M3.6 S·high；M3.7 S·medium；**M3.8 O·high**；M3.9 S·medium；**M3.R O·high** | M3.1–M3.5：M0；M3.6 起需 M2.6/M2.7；M3.7 需 M1.10；M3.8 需 M3.7、H1；H2 | M（10） |
+| **M3** Cell Properties 与 `tuning.v1` | 按需求值的 Cell Properties 求值器与持久缓存、`gyroid_c.v1` 与种子，定稿 Openness 与 HeelCounter 的 ρ，冻结 G2 Adjustment 与哈希向量 | M3.1 S·high；M3.2 O·high；**M3.3 O·high**；M3.4 O·high；**M3.5 O·high**；M3.6 S·high；M3.7 S·medium；**M3.8 O·high**；M3.9 S·medium；**M3.R O·high** | M3.1–M3.5：M0；M3.6 起需 M2.6/M2.7；M3.8 需 M3.6、H1；M3.7 需 M1.10 与 H2 批准的 `tuning.v1`；M3.9 需 M3.7 | L（10） |
 | **M4** 几何引擎 | Zone 推导、单一鞋底 Cell、Welt、随形场、合成、分块提取、清理、简化、导出 | M4.1 O·high；M4.2 O·high；M4.3 S·high；**M4.4 O·xhigh**；M4.5 O·high；M4.6 S·high；M4.7 S·high；M4.8 S·medium；M4.9 S·medium；M4.10 S·medium；**M4.R O·xhigh** | M1.3（合成 Bundle 起步）、M3.1；收尾需 M1.10、M3.6 | L（11） |
 | **M5** Printability Check | 移植分块 Direction C（逐位一致）、端部受限判定、悬挂材料、困粉、网格类检查、Donning | M5.1 S·high；**M5.2 O·high**；M5.3 O·high；M5.4 O·high；M5.5 O·high；M5.6 S·high；M5.7 S·low；M5.8 S·high；M5.9 O·high；**M5.10 O·high**；**M5.R O·xhigh** | M5.1/M5.2：M0（解析场）；M5.3 起需 M4.2、M4.4 | L（11） |
 | **M6** 集成与 G1 验收 | CLI、Build Manifest、Crop / Coupon Build；G1 0.25 mm 整鞋全部 hard 通过；阈值定稿；黄金回归 | M6.1 S·high；M6.2 S·medium；M6.3 S·medium；M6.4 S·high；M6.5 S·medium；M6.6 S·low；M6.7 S·high；**M6.8 O·xhigh**；M6.9 S·medium；M6.10 S·high；**M6.11 O·high**；**M6.R O·xhigh** | M2、M3、M4、M5；H3 | L（12） |
@@ -31,12 +31,12 @@
 ```
 M0 ─┬─► M1（Shape Source）──────────────► H1 ─┐
     ├─► M2（Resolver，桩表）─────────────────────┤
-    ├─► M3.1–M3.5（参考方法、孔喉、求值器 spike、缓存）─┼─► M3.6–M3.9 ─► H2 ─┐
+    ├─► M3.1–M3.5（参考方法、孔喉、求值器 spike、缓存）─┼─► M3.6、M3.8 ─► H2 ─► M3.7、M3.9 ─┐
     ├─► M5.1–M5.2（Direction C，解析场）─────────┘                      │
     └─────────► M4（几何引擎；起步用合成 Bundle）─► M5.3–M5.9 ───────────┼─► M6 ─► H3 ─► H4 ─► M7
 ```
 
-- 关键路径：M0 → M1 → H1 → M3.6–M3.8 → M6.8。M3 不再有离线长计算。局部探测（M5.10、M6.10）在 M4、M5 之后接入。控制笼越早出形状，越早得到 fixture 实测的 P(0)、P(0.5)、P(1)，Cell Properties 的定义域覆盖（§7.5 覆盖要求）才能定下。
+- 关键路径：M0 → M1 → H1 → M3.8 → H2 → M3.7 → M6.8。M3 不再有离线长计算。局部探测（M5.10、M6.10）在 M4、M5 之后接入。控制笼越早出形状，越早得到 fixture 实测的 P(0)、P(0.5)、P(1)，Cell Properties 的定义域覆盖（§7.5 覆盖要求）才能定下。
 - M1 与 M2 由两个 worktree 并行开发；M3.1–M3.5、M5.1–M5.2 只依赖解析场，可在机器空闲时穿插。**同一时刻只允许一个重计算任务**（第 1.1 节）。
 
 ### 0.3 人工检查点
@@ -65,7 +65,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
   - Blender 子进程与 fixture 生成：**4 GB**；
   - G1 0.25 mm 整鞋 Print Build 与 Crop Build：**9 GB**（规格预算 8 GB，§13；超过 8 GB 即视为未达标，9 GB 是保护机器的硬上限）。
 - **不建整体浮点栅格**：任何阶段都不得分配覆盖整只鞋包围盒的浮点数组（0.25 mm 下整鞋 2.5–3.5 亿体素，单个 float32 数组就超过 1 GB）。场按块生成、用完即释放；跨块信息只保留记录（盆地对、并查集、网格片）。代码评审把这一条当硬性检查项。
-- **worker ≤ 4**：进程池默认 4 个 worker（§13 实测：4 个 worker 约 1.95 GB，6 个约 2.5 GB，最坏外推约 4.5 GB）。不得按可用内存自适应地增减 worker 或块大小（ADR 0006）。
+- **worker ≤ 4**：进程池默认 4 个 worker（§13 实测：4 个 worker 约 1.95 GB，6 个约 2.5 GB，最坏外推约 3 GB）。不得按可用内存自适应地增减 worker 或块大小（ADR 0006）。
 - **先估算再执行**：每次重计算前，在任务记录（PR 描述或提交说明）里写出估算：体素数 × 字节/体素 + 每进程解释器约 0.15 GB。参考系数：Direction C 粗阶段每块 55–68 B/体素、每 worker ≤ 0.75 GB；网格阶段在鞋底大小区域实测峰值约 5.8 GB（§13）。估算超过上限的 70% 时，先缩小规模或改成分块再执行。
 - **一次只执行一个重计算**：并行开发的多个 agent 共用一台机器。重计算前用 `mkdir .scratch/heavy.lock`（原子操作）取得互斥锁，结束后删除；取不到锁就等待或改做轻任务。
 - 长任务放后台执行，输出写到 `.scratch/` 下的日志；不在前台阻塞会话。
@@ -87,7 +87,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | 层 | 内容 | 默认是否执行 | 典型耗时 |
 |---|---|---|---|
 | 单元（§15.1） | 解析与规则、几何单元、Neck Thickness 精度与检出、分块逐位一致；只读 `tests/fixtures/` 的 Shape Bundle，不需要 Blender | 是（`uv run pytest`） | 全部 ≤ 10 分钟 |
-| 冒烟（§15.4） | 1 mm 体素的 G1 端到端，只验证流程跑通 | 是 | ≤ 2 分钟 |
+| 冒烟（§15.4） | 1 mm 体素的 G1 端到端，只验证流程跑通；用 `tests/fixtures/` 的 Shape Bundle，不调用 Blender | 是 | ≤ 2 分钟 |
 | 慢测试（§15.4，`@pytest.mark.slow`） | 需要 Blender 的测试；全分辨率 Print Build；Welt 补丁全量扫描；留出验证 | 否（`-m slow` 显式执行） | 分钟到小时 |
 | 黄金回归（§15.3，属 slow） | G1–G5 0.5 mm 整鞋指标与 Adjustment 列表；`heel-transition`、`heel-collar` 0.25 mm Crop Build | 否 | 每例分钟级 |
 
@@ -230,7 +230,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | M2.6 | Cell Properties 接口与桩 | `spec/cellprops_api.py`：`CellQuery`、`CellProps`、`CellPropertiesProvider` 协议（`get`、`get_many`）、定义域边界（域外按不可行）；桩求值器 `tests/fixtures/cellprops_stub.py` | S·medium | 接口清楚 |
 | M2.7 | 约束求解 | §7.3 全部：检查点（每 5 mm 加两测点）、T 的估算与插值、孔喉级别划分、五步求解顺序、Adjustment 与 Infeasible 信息；经 `get_many` 取值；欧氏 C 闭式放大；随形 `cell_inplane` 按 0.25 mm 线性扫描；ρ 在 0.005 取值格上二分；区间端点夹逼；查询记录 | **O·high** | 边角情况多且彼此耦合，属于"Resolver 约束求解边角"类 |
 | M2.8 | 阶段 B 与 `--plan` | 第 8–12 步：N、随形求解、构建体积与资源预检接口（系数由 M6.7 测定）、plan_hash、探测钩子（M6.10 之前为空操作）；`--plan` 只校验模式，判定放宽 τ（§7.5） | S·high | 规格明确，但与 M2.7 的接口要对齐 |
-| M2.9 | 规则类测试补全 | §15.1"解析与规则"清单逐条对照补测；数据表对照规格表格的一致性测试 | S·medium | 测试编写 |
+| M2.9 | 规则类测试补全 | §15.1"解析与规则"清单逐条对照补测；数据表对照规格表格的一致性测试（只比对未标 [初值] 的设计约束；[初值] 只在首版数据表上核对一次，之后的标定只升数据表版本，见规格开头"数字的三类标记"） | S·medium | 测试编写 |
 | M2.R | 独立评审 | 新 Opus 会话按 §7 逐句对照实现，专找会放行不可行设计或误报 Infeasible 的路径 | O·high | 求解器错误会在 Printability Check 才暴露，代价高 |
 
 ---
@@ -238,26 +238,26 @@ M0 ─┬─► M1（Shape Source）──────────────�
 ## 5. M3 Cell Properties 与 `tuning.v1` 定稿
 
 - **目标**：实现按需求值的 Cell Properties 求值器与持久缓存（ADR 0012）：`gyroid_c.v1`、`neck-cell-dirc@1`、`pore-perc@1`、种子；以求值结果定稿 Openness 与 HeelCounter 的 ρ（含 airy 在 Collar 端的复核）；冻结 G2 的期望 Adjustment 与 plan_hash 测试向量。
-- **范围**：§7.2（定稿方式、自检）、§7.5、§9.1（`neck_margin_mm`）、§15.1（Tuning Table 自检、Cell Properties、定义域覆盖、plan_hash 测试向量）、§19 第 4–6 行、§20"Openness 定稿值"与"Cell Properties 的精度与成本"两行。
+- **范围**：§7.2（定稿方式、自检）、§7.5、§9.1（`neck_margin_mm`）、§15.1（Tuning Table 自检、Cell Properties、定义域覆盖、plan_hash 测试向量）、§19 第 4–5 行、§20"Openness 定稿值"与"Cell Properties 的精度与成本"两行。
 - **交付物**：`src/shoegen/lattice/gyroid.py`（场、梯度、c(ρ)）、`lattice/reference_neck.py`（参考方法，测试基准）、`lattice/cellprops.py`（求值器、键、种子 → 本地缓存 → 计算、`get_many`）、`lattice/pore_perc.py`、`scripts/gen_gyroid_c.py`、`scripts/gen_cellprops_seed.py`、`spec/data/gyroid_c.v1`、`spec/data/cellprops.seed.v1.jsonl`、定稿的 `tuning.v1`（升版本）、`tests/fixtures/neck_truth/`、`tests/spec/test_plan_hash_vectors.py`、`tests/golden/g2_adjustments.json`。
 - **验收标准**：
   1. 17 组真值复现：参考方法在 harness 真值上复现原值（差 ≤ 1e-6 mm），例如 C = 10 时 ρ 0.15 / 0.20 / 0.27 的颈厚 2.0886 / 2.4791 / 2.9596 mm，(6, 8, 4) ρ 0.20 的三类 1.1055 / 1.3074 / 1.2181 mm。
   2. 孔喉复现：`pore-perc@1` 在已发表的点上复现 ADR 0010 的数值：C = 10 时 Outsole（ρ 0.35）≥ 5.15 mm、芯部（firm 上沿 0.305）≈ 5.44·C/10 mm（容差由 M3.2 写明）。
   3. `neck-cell-dirc@1` 在 pass 类上的误差 ≤ 0.021 mm，并记录 junction 类与 Direction C 一致；冷查询 ≤ 3 s（M3.3 的 spike 结论）。
   4. 扩展真值达标（M3.4 列出的欧氏与随形真值组），拓扑断言在 ρ = 0.12 与 0.46 两端成立，求值器在端点处恰好找到 12 根 Ligament；定义域覆盖测试（§7.5、§15.1）：用 6 份 fixture 实测的 P(0)、P(0.5)、P(1)，对白名单内 `wall_thickness_mm` × `cell_inplane_mm` 的端点组合，7.1 第 9 步两端的 (a_s, a_t) 都落在定义域内。
-  5. 逐位一致与冷热 BuildPlan 相同：缓存值与重算值逐位相同；清空缓存跑 G2（有 Adjustment）与热跑一次，BuildPlan 与 plan_hash 相同；1 与 4 个 worker 的 `get_many` 结果相同。
+  5. 逐位一致与冷热 BuildPlan 相同：缓存值与重算值逐位相同；用一个随形查询全部落在种子之外的设计（例如 G1 加 `cell_inplane_mm` = 9.75 的 Override），清空本地缓存冷跑一次、再热跑一次，BuildPlan 与 plan_hash 相同（G1–G5 的查询全部命中种子，测不到本地缓存）；1 与 4 个 worker 的 `get_many` 结果相同。
   6. 种子守门：抽样重算逐位一致、G1–G5 与 Tuning Table 自检的全部查询命中种子（命中率 100 %）、sha256 与数据表登记一致。
   7. Tuning Table 自检（§7.2）：`pbf-tpu-generic`、heel 30 / drop 8，EU35、EU42、EU48 三个尺码，每个 Zone 每个档位的名义值运行 7.3 均不产生 Adjustment。
   8. airy 在 Collar 端的颈厚 ≥ 1.0 + `neck_margin_mm` = 1.05 mm（benchmark 值 1.106 mm）；若定稿值不满足，按 §20 微调 ρ，并保证 Tier Band 仍以相邻名义值中点为界。
-  9. G2 的期望 Adjustment 列表（前掌 Midsole 与 Footbed Layer）由求值结果生成并入库，G1、G3 为空（§15.3）；plan_hash 测试向量：G1、G2、带 Override 的 G5 的完整 BuildPlan 期望哈希，EU35.5、EU42.5 阶段 A 草稿中 `geometry.fit`、`geometry.shape` 的量化结果与 `shape_hash`（§15.1）。
+  9. G2 的期望 Adjustment 列表由求值结果生成并入库（单一鞋底 Cell 下鞋底部分预期为空，ADR 0010），G1、G3 为空（§15.3）；plan_hash 测试向量：G1、G2、带 Override 的 G5 的完整 BuildPlan 期望哈希，EU35.5、EU42.5 阶段 A 草稿中 `geometry.fit`、`geometry.shape` 的量化结果与 `shape_hash`（§15.1）。
   10. **H2**：用户批准 `tuning.v1` 定稿值、ρ 定义域与白名单收窄、求值器方法与精度。
-- **依赖**：M3.1–M3.5 只依赖 M0；M3.6 起需要 M2.6、M2.7；M3.7 需要 M1.10 的 fixture；M3.8 需要 M3.7 与 H1 之后的定稿 `proportions.v1`（否则哈希向量与种子会随比例表变化）；M3.9 需要 M3.8。
+- **依赖**：M3.1–M3.5 只依赖 M0；M3.6 起需要 M2.6、M2.7；M3.8 需要 M3.6 与 H1 之后的定稿 `proportions.v1`（否则哈希向量与种子会随比例表变化）；M3.7 需要 M1.10 的 fixture 与 H2 批准后的 `tuning.v1`（种子的随形部分是录制闭包，ρ 一变就要重录，§7.5）；M3.9 需要 M3.7。
 - **风险**：
   - 求值器误差或冷查询成本不达标时，余量论证（§9.1）或 Resolver 时长需回到设计讨论（M3.3 先实测）。
   - 孔喉栅格的内存：体素 L_n/100，上限 1500 万体素（受 1.1 节内存规则约束）。
   - ρ 在 0.12 与 0.46 两端的拓扑与真值约定：由 M3.4 解决 [缺口 G7]。
   - 种子录制闭包若覆盖不了全部黄金回归的查询，说明 Resolver 的查询序列依赖了不应依赖的状态，需要修 Resolver。
-- **规模**：M（10 会话）。
+- **规模**：L（10 会话）。
 
 | ID | 任务 | 交付 | 模型·effort | 理由 |
 |---|---|---|---|---|
@@ -267,7 +267,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | M3.4 | 扩展真值与 ρ 定义域 [缺口 G7] | 补充真值（后台，memguard 6 GB，约 1–2 核·小时）：欧氏 (1, 1) 的 ρ ∈ {0.12, 0.125, 0.38, 0.42, 0.46}；随形取 G1 两端形状与白名单角点形状（Wall 3/6 × `cell_inplane` 6/10）的 ρ ∈ {0.12, 0.175, 0.38, 0.46}；ρ = 0.12 与 0.46 两端的拓扑断言；评分 | O·high | 判断端点的拓扑与真值约定 |
 | M3.5 | 求值器与缓存 | `lattice/cellprops.py`：键、种子 → 本地 → 计算、namespace、原子写、损坏重算、`get_many` 的确定并行；逐位一致、冷热 BuildPlan 相同、跨 worker 数一致的测试 | **O·high** | 确定性契约（ADR 0006）是这里的主要风险 |
 | M3.6 | 接入约束求解 | 替换桩；Build Manifest 的 `cell_properties`；定义域覆盖测试（fixture 与白名单角点） | S·high | 接口已在 M2.6 定好 |
-| M3.7 | 种子生成与守门 | `scripts/gen_cellprops_seed.py`（录制闭包）、`cellprops.seed.v1`、pre-merge 守门测试（逐位抽样、命中率 100 %、sha） | S·medium | 编排性工作 |
+| M3.7 | 种子生成与守门 | 在 `tuning.v1` 定稿并经 H2 批准之后录制：`scripts/gen_cellprops_seed.py`（录制闭包）、`cellprops.seed.v1`、pre-merge 守门测试（逐位抽样、命中率 100 %、sha） | S·medium | 编排性工作 |
 | M3.8 | 定稿 `tuning.v1` | 按求值结果定 Openness 与 HeelCounter 的 ρ；复核 airy 在 G1–G4 Collar 端实际形状上 ≥ 1.05 mm；Tuning Table 自检；数据表升版本 | **O·high** | 设计判断：在余量、Tier Band 中点规则与档位可用性之间取舍 |
 | M3.9 | 冻结回归期望 | G2 的 Adjustment 列表、plan_hash 测试向量 | S·medium | 机械地记录求值结果 |
 | M3.R | 独立评审 | 新 Opus 会话用 harness 的 `truth.py` 与 `blendlib.py` 走另一条代码路径，抽查 ≥ 20 条求值结果；复核余量论证（§9.1）、冷热与跨 worker 的逐位一致、种子守门 | O·high | 求值器是 Resolver 与校验一致性的基石 |
@@ -317,7 +317,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 ## 7. M5 Printability Check
 
 - **目标**：§10.2 全部检查；Neck Thickness 用移植的分块 Direction C（与不分块逐位一致）；端部受限判定、实体接触、悬挂材料、困粉；网格类检查；Donning Check。
-- **范围**：§10.2、§10.3、§15.1"几何"中 Neck 精度与检出、分块逐位一致、端部受限、Welt 补丁、Island 空腔各项；§20 第 3、5、6 行。
+- **范围**：§10.2、§10.3、§15.1"几何"中 Neck 精度与检出、分块逐位一致、端部受限、Welt 补丁、Island 空腔各项；§20 第 3、5、9 行。
 - **交付物**：`validate/neck/{coarse,tiled,fine,attribution,classify}.py`、`validate/hanging.py`、`validate/trapped_powder.py`、`validate/mesh_checks.py`、`validate/donning.py`、`validate/check_grid.py`（分块重采样、跨块并查集）、`validate/window.py`（探测窗口运行器）；`tests/neck/{cases,scoring}.py`（自 harness）、`tests/geometry/test_welt_patch.py`、`tests/geometry/test_end_limited.py`。
 - **验收标准**：
   1. **Neck 精度与检出**（§10.2、§15.1）：在 harness 241 例上复现 `dirC_v2` 的逐 Ligament 结果（近阈值 298 根 100% 检出、最大误差 ≤ 0.021 mm、1.0 mm 判定 0/52 假通过）；参考颈厚 ≤ 1.5 mm 的 Ligament 误差 ≤ 0.05 mm、其余 ≤ 0.2 mm；无读数低于 1.05 mm 的虚假输出。覆盖 G1 每个 Zone 的 Cell 形状、两种随形端部形状与鞋底 ρ Grading 带（真值取法：带两端 ρ 的周期 Cell 真值加缓变 ρ 平板，容差 0.05 mm，[缺口 G8] 已解决）。
@@ -343,8 +343,8 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | M5.1 | 移植 Direction C（不分块）与基准 | `validate/neck/{coarse,fine}.py`（自 `dirC_saddle.py`，含只用有效站点的修正）；`tests/neck/` 基准与评分；复现 `dirC_v2` 结果 | S·high | 移植已验证原型，以逐 Ligament 复现为准 |
 | M5.2 | 移植分块粗阶段 | `validate/neck/tiled.py`（自 `dirC_tiled.py`）：固定核心、halo 40 / 回退 64、逐体素精确性证书、按全局盆地对合并、ToMATo、截面检验、细阶段进程池；逐位一致测试 | **O·high** | 分块精确性属"tiling exactness"，必须 Opus |
 | M5.3 | 薄壁占比与分类 | `validate/neck/{attribution,classify}.py`：§10.2 第 4、5、7、8 步——站点有效性、端部受限判定（0.1 mm、1.0 mm 两个 [初值] 作为 Profile 或数据表参数，位置见 [缺口 G9]）、裁切残边与实体接触占比、体素归属、前 20 个聚集区 | O·high | 规则新且只近似验证过，判定错误会开出假通过通道 |
-| M5.4 | 悬挂材料 | `validate/hanging.py`：1.0 mm 闭球开运算的分块实现、跨块并查集、与最大实体分量不连通的体积（自 `cfrun.topo`） | O·high | 分块形态学与全局连通的精确性 |
-| M5.5 | 困粉 | `validate/trapped_powder.py`：V_2 / V_4 分级、外部带 E、d ∈ {2, 4} 的开运算与自 E 的 26 连通重建、分块（自 `cfrun.trapped_powder`） | O·high | 同上，且分级依赖 Zone 与权重 |
+| M5.4 | 悬挂材料 | `validate/hanging.py`：直径 = 最小壁厚（默认 1.0 mm）的闭球开运算的分块实现、跨块并查集、与最大实体分量不连通的体积（自 `cfrun.topo`） | O·high | 分块形态学与全局连通的精确性 |
+| M5.5 | 困粉 | `validate/trapped_powder.py`：V_2 / V_4 分级、外部带 E、两级孔喉下限 d（取自 Profile，默认 2、4 mm）的开运算与自 E 的 26 连通重建、分块（自 `cfrun.trapped_powder`） | O·high | 同上，且分级依赖 Zone 与权重 |
 | M5.6 | 网格类检查 | `validate/mesh_checks.py`：流形、方向、退化面、BVH 自相交（数百万面）、实体壳与空腔壳计数（manifold3d `decompose()`）、构建体积 | S·high | 定义明确，性能需留意 |
 | M5.7 | Donning Check | `validate/donning.py`：开口周长 ÷ Long Heel Girth 估值 < 1.00 时 soft 警告（量的取法见 [缺口 G4]） | S·low | 简单比值 |
 | M5.8 | 端部受限与 Welt 补丁测试 | `tests/geometry/test_end_limited.py`、`test_welt_patch.py`：用 `cflib.Wall` 的解析几何构造补丁 Bundle，驱动 `shoegen` 的场与校验 | S·high | 移植 harness 的用例设计，断言来自规格 |
@@ -357,20 +357,20 @@ M0 ─┬─► M1（Shape Source）──────────────�
 ## 8. M6 集成与 G1 端到端验收
 
 - **目标**：CLI 与 Build Manifest 完整；Crop 与 Coupon Build 可用；**G1 在 0.25 mm 下的整鞋 Print Build 通过全部 hard 检查**，并用实测定稿 §10.2 的 [初值] 阈值；G1–G5 黄金回归与确定性测试入库。这是 §1.4 第 1、2 条。
-- **范围**：§1.4、§2、§7.6、§10、§11、§12、§13、§14、§15.3、§15.4、§20 第 3、6 行及局部探测一行。
+- **范围**：§1.4、§2、§7.6、§10、§11、§12、§13、§14、§15.3、§15.4、§20 第 3、8、9 行（端部受限、局部探测、Welt 处的实体接触）。
 - **交付物**：`pipeline.py`（按 (ManufacturingMode, StructureType) 分派、阶段化内存释放、超时）、`cli.py`、`export/manifest.py`、`fuse/crop.py`（Crop Region）、`spec/resolver/probes.py`（探测选取与闸门）、资源预检系数（代码常量）、`tests/golden/{g1..g5}/`（指标与 Adjustment 期望）、`tests/test_smoke.py`、G1 验收报告（PR 描述）。
 - **验收标准**：
   1. CLI：§12.1 全部命令；`-o` 非空报错（退出码 2），`--force` 只清理规定的文件；`--errors-json` 把错误数组写到 stderr；12.4 每个退出码至少一个端到端测试。
-  2. Build Manifest：开始时写 `running`，结束时原子替换；三种状态都通过 `shoegen schema --target manifest` 的 if/then 校验；`provenance` 含引擎版本、git sha 与 dirty 标记、数据表 `id@version` 与 sha256、`uv.lock` sha256、平台、Blender 完整版本与 build hash、Bundle 文件 sha256；`known_limitations` 固定三条；失败的 Build 不留下任何 STL 或 GLB。
+  2. Build Manifest：开始时写 `running`，结束时原子替换；三种状态都通过 `shoegen schema --target manifest` 的 if/then 校验；`provenance` 含引擎版本、git sha 与 dirty 标记、数据表 `id@version` 与 sha256、`uv.lock` sha256、平台、Blender 完整版本与 build hash、Bundle 文件 sha256 与 `shape.json`、Cell Properties 的方法 id 与本地 namespace（§11.3）；`known_limitations` 固定三条；失败的 Build 不留下任何 STL 或 GLB。
   3. 冒烟测试：G1 1 mm 端到端通过（默认测试集内）。Preview Build（0.5 mm）≤ 1 分钟（§13）。
   4. 资源预检：估算系数由 G1–G4 实测拟合；估算值超过 8 GB 预算时退出码 6；预检对 G1 0.25 mm 放行。
-  5. **Crop Build**：`heel-transition` 与 `heel-collar` 在 0.25 mm 下执行完整 hard 校验并通过（§15.3），栅格使用整鞋全局栅格（[缺口 G16] 采纳）；`heel-transition` 中 Welt 处的实体接触与悬挂材料逐项复核（§20 第 6 行）。
+  5. **Crop Build**：`heel-transition` 与 `heel-collar` 在 0.25 mm 下执行完整 hard 校验并通过（§15.3），栅格使用整鞋全局栅格（[缺口 G16] 采纳）；`heel-transition` 中 Welt 处的实体接触与悬挂材料逐项复核（§20 第 9 行）。
   6. **G1 整鞋 Print Build（0.25 mm，右脚）**：
      - 网格类 hard 全过：网格有效、实体壳数 1、空腔壳数 0、构建体积有可行朝向；
      - 体素类 hard 全过：薄壁占比 ≤ 1%、困粉占比 ≤ 1%、悬挂材料 ≤ 阈值；
      - 单只鞋 ≤ 10 分钟、memguard 峰值 ≤ 8 GB（§13）；
      - 裁切残边、实体接触与悬挂材料三项的分布在 PR 中逐项列出（§20 第 3 行"在 G1 整鞋上核对"）。
-  7. **阈值定稿**：用 G1 与两个 Crop Build 的实测数据，定稿实体接触距离（1.0 mm）、端部触及边界容差（0.1 mm）、悬挂材料（1 mm³）三个 [初值]，所在数据表升版本 [缺口 G9]。定稿时，把探测窗口内的裁切残边与实体接触读数一并纳入样本；定稿必须同时满足：(a) 在 G1 上不误报；(b) 人工注入的缺陷仍被判失败——在 G1 的若干位置把 Ligament 削细到 0.8 mm、制造只靠细特征挂着的材料，薄壁或悬挂材料检查必须检出。若 G1 的失败无法靠调整 [初值] 消除（例如真实缺陷，或规则本身不成立），停下回到设计讨论。**H3**。
+  7. **阈值定稿**：用 G1 与两个 Crop Build 的实测数据，定稿实体接触距离（1.0 mm）、端部触及边界容差（0.1 mm）、悬挂材料（1 mm³）三个 [初值]，所在数据表升版本 [缺口 G9]。定稿时，把探测窗口内的裁切残边与实体接触读数一并纳入样本；定稿必须同时满足：(a) 在 G1 上不误报；(b) 人工注入的缺陷仍被检出——在 G1 的若干位置把 Ligament 削细到 0.8 mm、制造只靠细特征挂着的材料：削细的 Ligament 必须出现在薄壁 soft 警告的聚集区位置中，削细总量超过 Lattice 材料的 1 % 时判 hard 失败；挂着的材料必须判悬挂材料 hard 失败。若 G1 的失败无法靠调整 [初值] 消除（例如真实缺陷，或规则本身不成立），停下回到设计讨论。**H3**。
   8. 黄金回归（§15.3）：G1–G5 在 0.5 mm 下整鞋几何的第 14 节指标与期望一致、Adjustment 列表逐条一致（G1、G3 为空）；不比对哈希。
   9. 确定性：G1 0.25 mm 连续两次 Print Build 的 STL 逐字节一致；左右脚同时成功。
   10. Coupon Build：soft、balanced、firm 三块全部通过 hard 检查，Build Manifest 记录各层 ρ、Cell 与试块包含的 Cell 数。
@@ -394,7 +394,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | M6.8 | G1 验收与阈值定稿 | 验收顺序：先局部探测（M6.10），再 `heel-transition`，再整鞋；依次执行 `heel-transition`、`heel-collar`、`sole-section`、G1 整鞋；逐项判读失败原因；注入缺陷实验；提出阈值定稿值；交 H3 | **O·xhigh** | 区分"真实缺陷"与"判据误报"是本项目最关键的判断 |
 | M6.9 | 黄金回归与确定性 | `tests/golden/`：G1–G5 0.5 mm 指标与 Adjustment、两个 0.25 mm Crop Build、逐字节确定性测试 | S·medium | 记录与比对 |
 | M6.10 | 探测选取与阶段 B 接入 | `spec/resolver/probes.py`：Archetype 数据中的 `probes` 段、由 Landmark 推出的中心、数据驱动的两项（曲率、参数化畸变）、去重、对齐全局栅格；闸门判定、`E_PROBE_*`、`suggestion`；`--probes`；Manifest 的 `probes`；可选的结果缓存 | S·high | 规则明确，需细心处理边界情况 |
-| M6.11 | 探测标定与验收 | 在 G1–G4（0.25 mm）上运行：耗时 ≤ 60 s、memguard 峰值 ≤ 2 GB；窗口读数与整鞋 Print Build 同位置读数比较（逐 Ligament）；W-heel 与 `heel-transition` 的 Crop Build 互相核对；在窗口内注入缺陷，必须被 `E_PROBE_*` 提前检出；在窗口外注入缺陷，用来记录残余风险；提出探测集 [初值] 定稿值，交 H3 | **O·high** | 判断探测是否值得它的时间，以及漏掉了什么 |
+| M6.11 | 探测标定与验收 | 在 G1–G4（0.25 mm）上运行：耗时 ≤ 60 s、memguard 峰值 ≤ 2 GB；窗口读数与整鞋 Print Build 同位置读数比较（逐 Ligament）；W-heel 与 `heel-transition` 的 Crop Build 互相核对；在窗口内注入超过探测阈值的缺陷，必须被 `E_PROBE_*` 提前检出（低于阈值的必须出现在 soft 警告中）；在窗口外注入缺陷，用来记录残余风险；提出探测集 [初值] 定稿值，交 H3 | **O·high** | 判断探测是否值得它的时间，以及漏掉了什么 |
 | M6.R | P0 完成度审计 | 新 Opus 会话对照 §1.4、§15 全部条目逐条核对证据，列出未覆盖项 | O·xhigh | 合并前最后一道独立把关 |
 
 ---
@@ -407,18 +407,18 @@ M0 ─┬─► M1（Shape Source）──────────────�
 - **验收标准**：
   1. 服务商 Profile 对照其设计指南逐项复核最小壁厚、孔喉与构建体积，差异写入 PR（§16 第 1 步）。
   2. `sole-section`、`heel-collar` 两个 Crop Build 与三块 Coupon 在服务商 Profile 下全部通过 hard 检查（§16 第 2 步）。
-  3. 试验结果（排粉、试穿、压缩）以结构化记录入库；据此修订的数据表（Donning 阈值、Collar 形状参数、Tuning Table 等）全部升版本；若形状参数变化则重新生成 fixture 并重跑黄金回归（§16 第 3 步）。
+  3. 试验结果（排粉、试穿、压缩）以结构化记录入库；据此修订的数据表（Donning 阈值、Collar 形状参数、Tuning Table 等）全部升版本；若形状参数或 `tuning.v1` 变化，则重新生成 fixture、重新录制 Cell Properties 种子（§7.5）并重跑黄金回归（§16 第 3 步）。
   4. 整鞋 Print Build：所有 hard 检查通过，薄壁占比与困粉占比 ≤ 1%，soft 警告逐条复核并记入 Build Manifest（§16 第 4 步）。
   5. 实物打印完成（H7）。
 - **依赖**：M6；H4（服务商选定与设计指南）。
-- **风险**：服务商的孔喉口径若接近部分 SLS 指南的"≥ 5 mm"，Shell 与 Footbed Layer 将不可行（§9.2），因此优先 MJF；试验周期由外部决定。Coupon 与 Crop Build 如何选用服务商 Profile 尚无入口 [缺口 G11]。
+- **风险**：服务商的孔喉口径若接近部分 SLS 指南的"≥ 5 mm"，Shell 将不可行（§9.2；单一鞋底 Cell 下 Footbed Layer 与 Outsole 不受影响），因此优先 MJF；试验周期由外部决定。Coupon 与 Crop Build 如何选用服务商 Profile 尚无入口 [缺口 G11]。
 - **规模**：M（5 会话 + 外部周期）。
 
 | ID | 任务 | 交付 | 模型·effort | 理由 |
 |---|---|---|---|---|
 | M7.1 | 服务商 Profile | 新 Profile 数据文件与复核记录 | S·high | 逐条阅读设计指南并映射到规格量，要细心 |
 | M7.2 | 打印包 | 裁切件与 Coupon 的 Build、打包与清单 | S·low | 执行已有命令 |
-| M7.3 | 修订数据表 | 解读试验结果、提出修订值、升版本、必要时重生成 fixture 与黄金回归 | O·high | 从物理结果反推参数需要判断 |
+| M7.3 | 修订数据表 | 解读试验结果、提出修订值、升版本、必要时重生成 fixture、Cell Properties 种子与黄金回归 | O·high | 从物理结果反推参数需要判断 |
 | M7.4 | 整鞋 Print Build | 服务商 Profile 下的整鞋 Build、soft 警告复核清单 | S·medium | 执行与整理 |
 | M7.R | 收尾审计 | 新 Opus 会话核对 §16 四步与 §1.4 三条的证据 | O·high | 收尾把关 |
 
@@ -444,6 +444,11 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | G12 | **依赖清单缺 numba**：§17 的参考依赖不含 numba，而已验证的 Direction C 原型依赖它。规格允许替换，但 numba 的确定性要求（禁用 parallel 与 fastmath）应写明。 | M0.1、M5 | 建议把 numba 加入 §17 列表并注明确定性约束 |
 | G13 | **量化的舍入对象不明确**：§6.3 要求"银行家舍入"到 1e-4 mm / 1e-6，但没说是对二进制浮点的精确值舍入（Python `round(x, n)` 的语义），还是对十进制字面量舍入。两者在少数值上结果不同，会改变 plan_hash 测试向量。 | M0.3、M3.9 | 建议以 Python `round(x, n)` 为准，写入规格 |
 | G14 | **N 的取整方式未规定**：§7.1 第 8 步 N = max(1, round(P(0.5)/cell_inplane)) 中 `round` 是四舍五入还是银行家舍入，在恰为 .5 时结果不同。 | M2.8 | 建议与 G13 一致，用 Python `round` |
-| G15 | **部分错误码没有命名**：§12.4 规定了退出码 1、5、6、7 的类别，但除 `E_BUILD_VOLUME` 外，hard 检查失败（薄壁、困粉、悬挂材料、网格无效、连通分量、封闭腔）、资源预检、超时与内部错误的 `code` 都没有给出；`E_SHAPE_PARAM_MISSING` 的退出码也未明写（按 class shape 推断为 4）。 | M0.2、M5、M6 | 建议在 M0.2 提出一组名称（如 `E_PRINT_THIN_WALL`、`E_PRINT_TRAPPED_POWDER`、`E_PRINT_HANGING_MATERIAL`、`E_PRINT_MESH_INVALID`、`E_PRINT_COMPONENTS`、`E_PRINT_CAVITY`、`E_RESOURCE_BUDGET`、`E_TIMEOUT`、`E_INTERNAL`），由用户确认后写入规格；**已扩展**：加入局部探测的五个错误码 `E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`（规格 §12.4） |
+| G15 | **部分错误码没有命名**：§12.4 规定了退出码 1、5、6、7 的类别，但除 `E_BUILD_VOLUME` 外，hard 检查失败（薄壁、困粉、悬挂材料、网格无效、连通分量、封闭腔）、资源预检与超时的 `code` 都没有给出（内部错误已在规格 §7.6 用 `E_INTERNAL`）；`E_SHAPE_PARAM_MISSING` 的退出码也未明写（按 class shape 推断为 4）。 | M0.2、M5、M6 | 建议在 M0.2 提出一组名称（如 `E_PRINT_THIN_WALL`、`E_PRINT_TRAPPED_POWDER`、`E_PRINT_HANGING_MATERIAL`、`E_PRINT_MESH_INVALID`、`E_PRINT_COMPONENTS`、`E_PRINT_CAVITY`、`E_RESOURCE_BUDGET`、`E_TIMEOUT`、`E_INTERNAL`），由用户确认后写入规格；**已扩展**：加入局部探测的五个错误码 `E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`（规格 §12.4） |
 | G16 | **Crop Build 的体素栅格是否与整鞋对齐未写明**：§12.2 只说 Crop Build 与整鞋共用 BuildPlan。若裁切件的栅格原点与整鞋不同，`heel-transition` 的 0.25 mm 黄金回归与整鞋在同一位置的结果就不可比。 | M6.4 | **已采纳**：Crop Build 与探测窗口都使用整鞋全局栅格（规格 §12.2） |
-| G17 | **Crop Build 的"实体壳数为 1"hard 检查会看到被裁切盒切下的 Lattice 碎块。** 被裁切面切下、只在 Crop Region 之外才与主体相连的 Lattice 碎块，在 Crop Build 中是独立的壳；不足 10 mm³ 的由 §8.5 Island 清理删除，> 10 mm³ 的会幸存并使该检查失败。局部探测因此采用"窗口外表面有依托"的语义，Crop Build 目前没有同样的规则。 | M6.4、M6.8 | 在 M6 做 Crop Build 之前定一条规则，例如与探测一致：触及裁切盒的碎块按有依托或外部处理，不计入实体壳数与 Island 判据；待用户确认 |
+| G17 | **Crop Build 的"实体壳数为 1"hard 检查会看到被裁切盒切下的 Lattice 碎块。** 被裁切面切下、只在 Crop Region 之外才与主体相连的 Lattice 碎块，在 Crop Build 中是独立的壳；不足 10 mm³ 的由 §8.5 Island 清理删除，> 10 mm³ 的会幸存并使该检查失败。局部探测因此采用"窗口外表面有依托"的语义，Crop Build 目前没有同样的规则。Coupon Build 的四个侧面也是裁切面（§12.3），同样会遇到，而 M6 验收第 10 条与 M7 验收第 2 条要求三块 Coupon 通过 hard 检查。 | M6.4、M6.5、M6.8 | 在 M6 做 Crop Build 之前定一条规则，例如与探测一致：触及裁切盒的碎块按有依托或外部处理，不计入实体壳数与 Island 判据；待用户确认 |
+| G18 | **Midsole 主体厚度 T 有两个定义**：§7.3 在阶段 A 沿中线按 Heel/Forefoot Stack 线性估算，§8.1 按 (x, y) 竖直实测 z_F − z_G。单一鞋底 Cell 后 T 只用来判定 T < C 的薄层孔喉级别，两者在足弓、后跟凹窝、偏离中线处与 Toe Spring 段可能给出不同级别，Resolver 与困粉检查对同一点用的孔喉下限就不一致。 | M2.7、M5.5 | 建议把欧氏约束求解移到阶段 B、统一用 §8.1 的 T，或干脆按 Zone 定级、不再用 T；待用户确认 |
+| G19 | **Cell Properties 的求值尺度未定**：结果按 L_n 归一化，键不含 L_n（欧氏形状恒为 (1, 1)），但颈厚方法的常数（hs 0.07–0.16 mm、δ = 1.0 mm、精度 0.021 mm）是绝对毫米。按查询的实际 L_n 求值，同一 key 的值会随先填入的 C 而不同，违背"求值器是 key 的纯函数"；按固定参考尺度求值，毫米误差又随 L_n/L_ref 缩放，§9.1 的余量账要按白名单最大 L_n 重算。 | M3.3、M3.5 | 建议固定参考尺度（如 L_ref = 10 mm）并写进方法 id，§9.1 按最大 L_n 核对误差；待用户确认 |
+| G20 | **局部脱开的接缝没有生产期检测**：ADR 0011 的接缝脱开（某段 Welt 上下没有材料通路，但两侧在别处相连，全局分量数仍为 1）不会被悬挂材料检查发现，探测的 W 窗口对外表面又取乐观处理。目前只有 Welt 补丁单测的"材料路径瓶颈"与后跟处的 `heel-transition` Crop Build 能看到。 | M5.4、M5.8、M6.8 | 建议沿 `footbed_edge` 分段做跨 Welt 的材料路径瓶颈检查（hard），至少在 W-* 探测窗口内做；待用户确认 |
+| G21 | **粗体素 Print Build 没有权威的体素类闸门**：`voxel_mm` > 0.25 时整鞋体素类检查降为 soft（§10.2），只剩局部探测是权威的；再加 `--probes warn` 或 `off`，Build 照常写出 STL 并以退出码 0 结束，只在 Build Manifest 标 `authoritative: false`。 | M6.1、M6.3 | 建议 `voxel_mm` > 0.25 的 Print Build 不允许 `--probes warn/off`，或不写出 STL、以非零退出码结束；待用户确认 |
+| G22 | **悬挂材料的开运算可能误伤合法颈**：§10.2 在 0.25 mm 栅格上用直径 = 最小壁厚（1.0 mm）的闭球开运算，33 体素的模板只有在颈厚 1.05–1.3 mm 的合法 Ligament 轴线接近体素中心线时才放得进。评审期的纯 Python 模拟里，与栅格对齐的 airy (6, 8, 4) ρ 0.20 Shell 出现过 12–24 mm³ 的内部断块；ρ ≥ 0.25 或 0.125 mm 栅格下没有。ADR 0011 的 harness 未见此现象。 | M5.4、M6.8 | 先用 `.scratch/neck-acc/crossframe/` 的 harness 在 memguard 下复现；若复现，把球径改为 d − 2h 或改用亚体素判定；待用户确认 |

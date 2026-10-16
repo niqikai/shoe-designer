@@ -217,10 +217,10 @@ Midsole 中紧贴 Footbed 的一层，Relative Density 更高、Cell 与 Midsole
 _Avoid_: 鞋垫、insole、脚床过渡
 
 **Upper**（鞋面）:
-Shell 中位于 Sole Envelope 之外、包裹脚背与脚侧的 Zone。
+Welt 以上、用随形晶格的 Zone 之一，包裹脚背与脚侧；包括 Shell 与 Sole Envelope 高出 Welt 的侧壁（ADR 0011）。
 
 **HeelCounter**（主跟）:
-Shell 中位于 Sole Envelope 之外、包裹脚跟后部与两侧、提供后跟支撑的 Zone。
+Welt 以上、用随形晶格的 Zone 之一，包裹脚跟后部与两侧、提供后跟支撑；同样包括该处 Sole Envelope 高出 Welt 的侧壁。
 _Avoid_: 后跟杯、heel cup
 
 ### 结构
@@ -263,7 +263,7 @@ _Avoid_: 填充率、infill、单说"密度"
 Cell 沿固定直角坐标轴排列的 Lattice。
 
 **Conformal Lattice**（随形晶格）:
-Cell 沿 Surface Parameterization 展开、法向恰好一个 Cell 的 Lattice。
+Cell 沿 Surface Parameterization 展开、法向 Cell Size 等于 Wall Thickness 的 Lattice；Shell 内法向恰好一个 Cell，Welt 以上的侧壁中随形坐标照常向外延续。
 _Avoid_: 共形晶格
 
 **Rim**（收边）:
