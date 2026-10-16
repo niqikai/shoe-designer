@@ -66,6 +66,11 @@ class LatticeExtractionError(ValueError):
                          "mesh_repair_applied": False, "components_removed": 0}
         super().__init__(message)
 
+    def __reduce__(self):
+        # Spawned parameter workers must return the original diagnostic error;
+        # losing constructor arguments during unpickling breaks the whole pool.
+        return type(self), (str(self), self.metadata['numerical_attempts'])
+
 
 def _serialization_area_checks(mesh):
     """Check actual STL coordinate quantization without repairing triangles.

@@ -178,3 +178,12 @@ def test_open_and_point_contact_meshes_fail_integrity():
     contact.faces[contact.faces == second] = 0
     contact.remove_unreferenced_vertices()
     assert mesh_integrity(contact)["singular_vertex_count"] == 1
+
+
+def test_extraction_failure_roundtrips_between_spawned_workers():
+    import pickle
+    error = LatticeExtractionError('non-area integrity', [{'level': 0., 'status': 'FAIL'}])
+    restored = pickle.loads(pickle.dumps(error))
+    assert type(restored) is type(error)
+    assert str(restored) == str(error)
+    assert restored.metadata == error.metadata
