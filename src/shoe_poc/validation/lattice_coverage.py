@@ -130,6 +130,7 @@ def validate_lattice_coverage(model, *, native_sections: Callable, bounds_mm,
                               clearance_mm: float, domain_field: Callable | None = None,
                               start_fraction: float = .55, lanes: int = 5,
                               reference_datum_mm: float | None = None,
+                              x_stations: int = 3, refine_sparse_bins: bool = True,
                               tolerance_mm: float = 2e-5) -> dict:
     """Measure CAD support, certified-domain support and actual STL per X bin.
 
@@ -150,6 +151,8 @@ def validate_lattice_coverage(model, *, native_sections: Callable, bounds_mm,
         raise ValueError('Invalid clearance or longitudinal start fraction')
     if isinstance(lanes, bool) or not isinstance(lanes, int) or not 3 <= lanes <= 11:
         raise ValueError('Coverage lanes must be an integer from 3 to 11')
+    if isinstance(x_stations, bool) or not isinstance(x_stations, int) or not 3 <= x_stations <= 9:
+        raise ValueError('Coverage X stations must be an integer from 3 to 9')
     if reference_datum_mm is not None and not math.isfinite(reference_datum_mm):
         raise ValueError('Reference datum must be finite')
     mesh = _mesh(model)
@@ -161,6 +164,8 @@ def validate_lattice_coverage(model, *, native_sections: Callable, bounds_mm,
         'vertical_end_reserve_mm': clearance_mm+math.sqrt(3)*resolution_mm,
         'minimum_required_domain_fraction': .01, 'minimum_required_lattice_fraction': .005,
         'reference_datum_mm': reference_datum_mm,
+        'initial_y_lane_count': lanes, 'initial_x_station_count': x_stations,
+        'sparse_bin_refinement': 'At most one deterministic 7 x 7 refinement of a coverage-only failing bin; unchanged support thresholds, initial measurement retained',
         'measurement_errors': [], 'bins': [], 'samples': [],
         'limitations': ['Finite line-length sums are not volume or global coverage proof.',
             'Vertical reserve is not an exact three-dimensional CAD offset; near-sidewall support is descriptive.',
@@ -185,7 +190,9 @@ def validate_lattice_coverage(model, *, native_sections: Callable, bounds_mm,
                'raised_usable_length_sum_mm': 0., 'raised_lattice_length_sum_mm': 0.,
                'raised_domain_negative_length_sum_mm': 0.,
                'lattice_outside_intended_sole_length_sum_mm': 0.}
-        for x in left+(right-left)*np.array([.1732050808, .5031056200, .8273268354]):
+        fractions = (np.array([.1732050808, .5031056200, .8273268354]) if x_stations == 3
+                     else (np.arange(x_stations)+.38196601125)/x_stations)
+        for x in left+(right-left)*fractions:
             for y in ys:
                 record = {'bin_index': index, 'x_mm': float(x), 'y_mm': float(y)}
                 try:
@@ -272,6 +279,37 @@ def validate_lattice_coverage(model, *, native_sections: Callable, bounds_mm,
         if reasons:
             failures.append(index)
         report['bins'].append(row)
+    # A coarse set of lines can land mostly in gyroid phase gaps, particularly
+    # in a thin curved terminal bin. Refine the measurement once, rather than
+    # lowering its thresholds or accepting absent material. Intrusions and
+    # unresolved CAD measurements never qualify for this refinement.
+    if refine_sparse_bins and not report['measurement_errors']:
+        for index, row in enumerate(report['bins']):
+            if row['status'] != 'FAIL' or row['lattice_outside_intended_sole_length_sum_mm'] > tolerance_mm:
+                continue
+            local_bounds = bounds.copy()
+            local_bounds[:, 0] = row['x_bounds_mm']
+            refined = validate_lattice_coverage(mesh, native_sections=native_sections, bounds_mm=local_bounds,
+                period_mm=period_mm, resolution_mm=resolution_mm, clearance_mm=clearance_mm,
+                domain_field=domain_field, start_fraction=0., lanes=7, x_stations=7,
+                reference_datum_mm=reference_datum_mm, refine_sparse_bins=False,
+                tolerance_mm=tolerance_mm)
+            if (len(refined['bins']) != 1 or refined['measurement_errors']
+                    or (row['coverage_required'] and not refined['bins'][0]['coverage_required'])
+                    or (row['raised_coverage_required'] and not refined['bins'][0]['raised_coverage_required'])):
+                report['measurement_errors'].append({'bin_index': index, 'reason': 'Sparse-bin refinement did not resolve the required native measurement'})
+                continue
+            replacement = refined['bins'][0]
+            offset = len(report['samples'])
+            for sample in refined['samples']:
+                sample['bin_index'] = index
+            replacement['samples'] = [offset+i for i in replacement['samples']]
+            replacement['index'] = index
+            replacement['coarse_measurement'] = row
+            replacement['refined_y_lane_count'] = replacement['refined_x_station_count'] = 7
+            report['samples'].extend(refined['samples'])
+            report['bins'][index] = replacement
+    failures = [row['index'] for row in report['bins'] if row['status'] == 'FAIL']
     report['failed_bin_indices'] = failures
     report['coverage_required_bin_count'] = sum(row['coverage_required'] for row in report['bins'])
     report['raised_coverage_required_bin_count'] = sum(row['raised_coverage_required'] for row in report['bins'])

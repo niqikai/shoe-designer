@@ -88,7 +88,9 @@ def render_parameter_sections(directory: Path, output: Path) -> None:
     primary.merge_vertices(digits_vertex=12)
     metadata = json.loads((directory/'lattice_metadata.json').read_text())
     entries = [(primary, metadata['actual_lattice_parameters'], metadata['meshing'].get('level', 0.))]
-    for name in ('period_16', 'threshold_045'):
+    controls = json.loads((directory/'parameter_change_report.json').read_text())['runs']
+    threshold_name, = [name for name in controls if name.startswith('threshold_')]
+    for name in ('period_16', threshold_name):
         path = directory/'variants'/name
         mesh = trimesh.load_mesh(path/'lattice.stl', process=False)
         mesh.merge_vertices(digits_vertex=12)

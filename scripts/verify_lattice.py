@@ -18,6 +18,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 from shoe_poc.lattice.domain import GridPlan, NativeDomainProbe
+from shoe_poc.lattice.envelope import SoleEnvelope
 from shoe_poc.lattice.gyroid import GyroidParameters, sample_gyroid, save_field_npz
 from shoe_poc.lattice.meshing import extract_lattice_mesh, export_lattice
 from shoe_poc.lattice.pipeline import accepted_baseline, validate_output_paths
@@ -60,8 +61,10 @@ def _verify_variant(task):
         raise ValueError('Variant verification output must not be a symbolic link')
     path.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
+    worker_memory_mb = task.get('worker_memory_mb', 4096)
+    allocation_bytes = int(worker_memory_mb*1024**2)
     try:
-        with MemoryBudget(4096, path, 'verify-lattice-variant') as budget:
+        with MemoryBudget(worker_memory_mb, path, 'verify-lattice-variant') as budget:
             # Both checks precede loading the source arrays or importing CAD.
             _check_hashes(directory, task['primary_hashes'])
             _check_hashes(domain_source, task['domain_hashes'])
@@ -75,12 +78,14 @@ def _verify_variant(task):
                 raise ValueError('Domain NPZ and metadata sampling spacings differ')
             from build123d import import_step
             shoe, cavity = import_step(base/'base_shoe.step'), import_step(base/'cavity.step')
-            probe = NativeDomainProbe(shoe, cavity, *metadata['sole_z_bounds_mm'])
+            envelope = SoleEnvelope.from_metadata(metadata['envelope']) if metadata.get('envelope') else None
+            probe = NativeDomainProbe(shoe, cavity, *metadata['sole_z_bounds_mm'], envelope=envelope)
             settings = GyroidParameters(period, threshold, plan.spacing_mm, tuple(spec.lattice.phase_origin_mm))
             field = sample_gyroid(settings, plan, domain_signed_field=values, domain_metadata=metadata,
-                                 max_memory_bytes=4*1024**3)
+                                 max_memory_bytes=allocation_bytes,
+                                 max_voxels=task.get('max_voxels', 10_000_000))
             save_field_npz(field, path/'gyroid_field.npz')
-            result = extract_lattice_mesh(field, max_memory_bytes=4*1024**3)
+            result = extract_lattice_mesh(field, max_memory_bytes=allocation_bytes)
             export_lattice(result, path/'lattice.stl')
             mesh = validate_lattice_mesh(path/'lattice.stl', reference_mesh=result.mesh)
             native = validate_lattice_domain(path/'lattice.stl', classify_points=probe.classify_points,
@@ -95,6 +100,16 @@ def _verify_variant(task):
             if not implicit['all_vertices_checked']:
                 raise RuntimeError('Variant analytic residual did not cover every exported vertex')
             checks = {'mesh': mesh, 'cad_samples': native, 'implicit_residual': implicit}
+            if envelope is not None:
+                from shoe_poc.validation.lattice_coverage import NativeVerticalSoleSections, validate_lattice_coverage
+                sections = NativeVerticalSoleSections(shoe, cavity, upper_z=envelope.upper_z,
+                                                     z_min_mm=envelope.z_bounds[0])
+                checks['sole_coverage'] = validate_lattice_coverage(path/'lattice.stl',
+                    native_sections=sections, bounds_mm=sections.bounds_mm,
+                    period_mm=period, resolution_mm=plan.spacing_mm,
+                    clearance_mm=spec.lattice.domain.clearance_mm,
+                    domain_field=RegularGridInterpolator(plan.axes, values, bounds_error=False, fill_value=1.),
+                    reference_datum_mm=envelope.z_bounds[0]+spec.sole.height_mm)
             status = 'PASS' if all(r['geometry_status'] == 'PASS' for r in checks.values()) else 'FAIL'
             # Detect changes during computation as well as before loading.
             _check_hashes(directory, task['primary_hashes'])
@@ -113,8 +128,8 @@ def _verify_variant(task):
                 'lattice_sha256': sha256(path/'lattice.stl'), 'lattice_bytes': (path/'lattice.stl').stat().st_size,
                 'meshing': result.metadata, 'validation': checks,
                 'worker': {'pid': os.getpid(), 'process_start_method': 'spawn',
-                           'rss_limit_mb': 4096, 'sampled_peak_rss_bytes': budget.peak_bytes,
-                           'allocation_preflight_bytes': 4*1024**3},
+                           'rss_limit_mb': worker_memory_mb, 'sampled_peak_rss_bytes': budget.peak_bytes,
+                           'allocation_preflight_bytes': allocation_bytes},
                 'environment': environment()}
             write_json(path/'verification_report.json', record)
             return record
@@ -127,9 +142,14 @@ def _verify_variant(task):
         raise
 
 
-def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse_passed: bool = False):
+def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse_passed: bool = False,
+           worker_memory_mb: float = 4096, threshold_variant: float = .45):
     if isinstance(jobs, bool) or jobs not in (1, 2):
         raise ValueError('Variant jobs must be 1 or 2 isolated spawned processes')
+    if not np.isfinite(worker_memory_mb) or worker_memory_mb <= 0:
+        raise ValueError('Worker memory budget must be positive and finite')
+    if threshold_variant not in (.45, .5):
+        raise ValueError('Threshold comparison must select the explicit 0.45 or 0.5 case')
     directory = directory.resolve()
     resolution_domain = resolution_domain.resolve() if resolution_domain else None
     execution = json.loads((directory/'execution_report.json').read_text())
@@ -158,9 +178,11 @@ def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse
             'domain_field_sha256': sha256(directory/'domain_field.npz'),
             'domain_metadata_sha256': sha256(directory/'domain_metadata.json'),
             'parameters': {'spacing_mm': grid.spacing_mm, 'clearance_mm': parameters.domain.clearance_mm,
-                'sole_z_bounds_mm': domain_meta['sole_z_bounds_mm'], 'bounds_mm': parameters.domain.bounds_mm}}
+                'sole_z_bounds_mm': domain_meta['sole_z_bounds_mm'], 'bounds_mm': parameters.domain.bounds_mm,
+                'envelope': domain_meta.get('envelope')}}
+    threshold_name = f'threshold_{round(threshold_variant*100):03d}'
     controls = [('period_16', 16., parameters.threshold, directory),
-                ('threshold_045', parameters.period_mm, .45, directory),
+                (threshold_name, parameters.period_mm, threshold_variant, directory),
                 ('repeat', parameters.period_mm, parameters.threshold, directory)]
     if resolution_domain:
         provenance = json.loads((resolution_domain/'domain_provenance.json').read_text())
@@ -176,8 +198,11 @@ def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse
         for key in ('sole_z_bounds_mm', 'computation_bounds_mm', 'clearance_mm'):
             if not np.allclose(alt[key], domain_meta[key], rtol=0., atol=1e-6):
                 raise ValueError(f'Resolution comparison changed the actual CAD domain parameter: {key}')
+        if alt.get('envelope') != domain_meta.get('envelope'):
+            raise ValueError('Resolution comparison changed the curved sole envelope')
         if (provenance['parameters']['bounds_mm'] != parameters.domain.bounds_mm
                 or provenance['parameters']['clearance_mm'] != parameters.domain.clearance_mm
+                or provenance['parameters'].get('envelope') != domain_meta.get('envelope')
                 or not np.isclose(provenance['parameters']['spacing_mm'], alt['spacing_mm'], rtol=0., atol=1e-9)
                 or not np.allclose(provenance['parameters']['sole_z_bounds_mm'], alt['sole_z_bounds_mm'], rtol=0., atol=1e-9)
                 or not provenance['run_id'] or provenance['run_id'] in (execution['run_id'], primary_sampling_run_id)):
@@ -224,10 +249,12 @@ def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse
             'primary_hashes': primary_hashes, 'domain_hashes': source_hashes,
             'baseline': baseline, 'primary_m2_run_id': execution['run_id'],
             'domain_sampling_run_id': primary_sampling_run_id if domain_source == directory else provenance['run_id'],
-            'domain_provenance': primary_provenance if domain_source == directory else provenance})
+            'domain_provenance': primary_provenance if domain_source == directory else provenance,
+            'worker_memory_mb': worker_memory_mb,
+            'max_voxels': execution.get('resource_limits', {}).get('max_voxels', 10_000_000)})
     del domain
     print(f'Verifying {len(tasks)} actual lattice variants with {jobs} isolated spawn workers; '
-          'parent RSS guard 8192 MiB covers parent only; each worker has its own 4096 MiB guard.', flush=True)
+          f'parent RSS guard 8192 MiB covers parent only; each worker has its own {worker_memory_mb:g} MiB guard.', flush=True)
     runs, errors = dict(reused), {}
     with ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context('spawn')) as pool:
         futures = {pool.submit(_verify_variant, task): task['name'] for task in tasks}
@@ -264,7 +291,7 @@ def verify(directory: Path, resolution_domain: Path | None, jobs: int = 2, reuse
             'scope': 'Repeated sampling of identical certified domain and identical parameters, independent MC extraction and STL export; not a second CAD-domain run'},
         'resolution_scope': 'Independently certified CAD domains; full cell diagonal reserve and conservative omitted volume change with spacing. Not a fixed-domain convergence proof.',
         'runs': runs, 'parallel_execution': {'jobs': jobs, 'start_method': 'spawn',
-            'parent_rss_limit_mb': 8192, 'worker_rss_limit_mb': 4096,
+            'parent_rss_limit_mb': 8192, 'worker_rss_limit_mb': worker_memory_mb,
             'rss_scope': 'Parent guard covers only parent RSS; each worker independently monitors its own RSS, no aggregate OS memory limit'},
         'reused_verified_reports': reused_hashes,
         'environment': environment(), 'manufacturing_status': 'NOT_VERIFIED'}
@@ -282,10 +309,15 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, default=Path('output/m2'))
     parser.add_argument('--resolution-domain', type=Path)
     parser.add_argument('--jobs', type=int, choices=(1, 2), default=2,
-                        help='Independent spawned CAD workers (default 2, maximum 2); each has a 4096 MiB RSS guard')
+                        help='Independent spawned CAD workers (default 2, maximum 2); each has its own configurable memory guard')
     parser.add_argument('--reuse-passed', action='store_true', help='Reuse prior PASS evidence only when run, source, parameters and STL hashes are unchanged')
+    parser.add_argument('--worker-memory-mb', type=float, default=4096,
+                        help='Per-worker RSS and allocation preflight budget in MiB (default 4096)')
+    parser.add_argument('--threshold-variant', type=float, choices=(.45, .5), default=.45,
+                        help='Requested threshold comparison; failed cases remain evidence and are never silently changed')
     args = parser.parse_args()
     primary = json.loads((args.output/'execution_report.json').read_text())
     validate_output_paths(args.output, Path(primary['baseline']['directory']))
     with MemoryBudget(8192, args.output, 'verify-lattice'):
-        verify(args.output, args.resolution_domain, jobs=args.jobs, reuse_passed=args.reuse_passed)
+        verify(args.output, args.resolution_domain, jobs=args.jobs, reuse_passed=args.reuse_passed,
+               worker_memory_mb=args.worker_memory_mb, threshold_variant=args.threshold_variant)

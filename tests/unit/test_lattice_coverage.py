@@ -81,6 +81,28 @@ def test_period_bins_allow_individual_phase_gaps():
     assert all(row['lattice_support_fraction'] > 0 for row in report['bins'])
 
 
+def test_sparse_phase_aliasing_gets_one_measured_refinement_without_lowering_thresholds():
+    # A periodic physical sheet lies between the original three X probes.
+    # The first measurement misses it; denser off-grid probes must actually
+    # intersect exported triangles before this can qualify.
+    sheets = []
+    for origin in np.arange(0., 60., 12.):
+        x = origin+4.08
+        sheet = trimesh.creation.box(extents=[.5, 20., 10.])
+        sheet.vertices[:, 2] += .3*(sheet.vertices[:, 0]+x)-7.
+        sheet.vertices[:, 0] += x
+        sheets.append(sheet)
+    mesh = trimesh.util.concatenate(sheets)
+    coarse = _coverage(mesh, refine_sparse_bins=False)
+    assert coarse['geometry_status'] == 'FAIL'
+    refined = _coverage(mesh)
+    assert refined['geometry_status'] == 'PASS'
+    assert refined['minimum_required_lattice_fraction'] == coarse['minimum_required_lattice_fraction']
+    assert all(row['coarse_measurement']['status'] == 'FAIL' for row in refined['bins'])
+    assert all(row['lattice_usable_length_sum_mm'] > 0 for row in refined['bins'])
+    assert all(row['refined_x_station_count'] == row['refined_y_lane_count'] == 7 for row in refined['bins'])
+
+
 def test_thin_terminal_solid_reserve_is_measured_without_false_missingtoe_failure():
     def thin_tip(x, y):
         if x > 48:

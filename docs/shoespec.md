@@ -86,6 +86,18 @@ are **not used to generate lattice geometry in Milestone 1**. Upper ventilation,
 lattice generation and their manufacturing validation belong to later
 milestones, following Milestone 1 acceptance.
 
+## M2 design envelope
+
+M2 additionally accepts `lattice.domain.mode`, default `planar` for old configs.
+The repaired example selects `curved_lower_foot`, using the immutable M1 rocker
+and lower-foot connection guide to define a piecewise linear upper roof. The
+existing nonpositive `max_z_offset_mm` reduces that local roof in curved mode;
+`clearance_mm` and optional reducing `bounds_mm` keep their existing meanings.
+The roof, source geometry-report hash and interpolation contract are recorded
+in domain metadata and must match exactly when reusing CAD certificates. This
+design subset follows raised toe material without changing any accepted M1
+parameter or asserting a globally uniform shell thickness.
+
 ## Experimental manufacturing profiles
 
 `manufacturing.process` is `SLS`. `material_profile` declares a profile ID,
