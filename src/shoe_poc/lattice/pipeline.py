@@ -17,7 +17,7 @@ GENERATED = ("lattice.stl", "lattice_metadata.json", "gyroid_field.npz", "domain
              "domain_metadata.json", "shoe_spec.json", "execution_report.json", "failure_report.json",
              "validation_report.json", "preview.png", "artifact_manifest.json", "test_report.json",
              "acceptance_report.json", "parameter_change_report.json", "parameter_sections.png",
-             "m1_preservation_report.json")
+             "m1_preservation_report.json", "performance_report.json")
 
 
 def validate_output_paths(output: Path, base_directory: Path) -> None:

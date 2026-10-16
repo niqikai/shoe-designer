@@ -1,4 +1,4 @@
-# Development notes — Milestone 1
+# Development notes — core engine
 
 ## Environment
 
@@ -22,4 +22,7 @@ Keep implementation, execution, and acceptance distinct. Record actual commands,
 
 For this collaboration, geometry implementation used `gpt-6-astra` with `high` reasoning, ShoeSpec/schema/tests/independent review and final parameter verification used `gpt-6.1-sol` with `high`, and initial documentation used `gpt-6-luna` with `medium`. The root agent handled integration, rendered inspection, runtime corrections and final acceptance evidence. Astra reached its usage limit after the corrected real build; Sol completed the remaining parameter comparison. These are actual task assignments, not a universal benchmark of model quality.
 
-The official [model selection guide](https://developers.openai.com/api/docs/guides/model-selection) informed the complexity/cost allocation. No API key was needed for these built-in Codex subagents. Milestone 1 remains the authorized scope until the user accepts its report under `docs/PROMPT.md`.
+The official [model selection guide](https://developers.openai.com/api/docs/guides/model-selection) informed the complexity/cost allocation. No API key was needed for these built-in Codex subagents. M1 shape acceptance is recorded; the user subsequently authorized M2. M3 remains outside the authorized implementation scope until M2 acceptance.
+
+
+M2 work assigns exact CAD domain reconstruction/diagnosis to `gpt-6-astra` / `high`, and gyroid sampling/extraction plus independent validation/regressions to `gpt-6.1-sol` / `high`. The root integrates the command, freezes inputs, runs real geometry, inspects STL previews and records evidence. `build-lattice` is an explicit M2 command; `run` remains M1.

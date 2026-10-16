@@ -79,3 +79,40 @@ def render_lattice_preview(lattice_model: Path, base_model: Path, output: Path) 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=135)
     plt.close(fig)
+
+
+def render_parameter_sections(directory: Path, output: Path) -> None:
+    """Shared-plane sections from the actual period/threshold variant STLs."""
+    import json
+    primary = trimesh.load_mesh(directory/'lattice.stl', process=False)
+    primary.merge_vertices(digits_vertex=12)
+    metadata = json.loads((directory/'lattice_metadata.json').read_text())
+    entries = [(primary, metadata['actual_lattice_parameters'], metadata['meshing'].get('level', 0.))]
+    for name in ('period_16', 'threshold_045'):
+        path = directory/'variants'/name
+        mesh = trimesh.load_mesh(path/'lattice.stl', process=False)
+        mesh.merge_vertices(digits_vertex=12)
+        report = json.loads((path/'verification_report.json').read_text())
+        entries.append((mesh, report['settings'], report['meshing'].get('level', 0.)))
+    z = float(primary.bounds[:, 2].mean())
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), facecolor='#f3f5f7', sharex=True, sharey=True)
+    for axis, (mesh, settings, actual_level) in zip(axes, entries):
+        section = mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+        if section is None:
+            raise ValueError('Actual lattice has no intersection at parameter review plane')
+        for points in section.discrete:
+            axis.plot(points[:, 0], points[:, 1], color='#148eaa', linewidth=.8)
+        axis.set_aspect('equal')
+        axis.set_xlim(primary.bounds[0, 0]-3, primary.bounds[1, 0]+3)
+        axis.set_ylim(primary.bounds[0, 1]-3, primary.bounds[1, 1]+3)
+        axis.set_xlabel('X (mm)'); axis.set_ylabel('Y (mm)')
+        title = f"Period {settings['period_mm']} mm · requested threshold {settings['threshold']}"
+        if actual_level:
+            title += f"\nEffective threshold {settings['threshold']+actual_level:.8f} · level {actual_level:.2e}"
+        axis.set_title(title)
+        axis.grid(alpha=.2)
+    fig.suptitle(f'Actual STL parameter sections · same plane Z={z:.3f} mm · threshold is dimensionless', fontsize=15)
+    fig.tight_layout(rect=(0, 0, 1, .94))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=140)
+    plt.close(fig)

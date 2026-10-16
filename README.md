@@ -67,7 +67,7 @@ The subsequent toe repair preserves `output/m1_design_refine/` and writes to `ou
 
 Its optional `toe_roll_radius_mm` defaults to zero for legacy geometry. A positive value replaces the terminal flat rocker with a continuous quintic roll. The CLI measures actual CAD toe sections and exports STL from bounded, repaired native CAD. STEP geometric roundtrip does not qualify direct STEP remeshing: the recorded offset-face meshing issue requires reapplying the native representation repair after STEP import. See [toe repair evidence and limits](docs/milestone1_toe_refine_report.md). M1 fixes conspicuous geometry defects; styling can be frozen once the base silhouette is accepted.
 
-The user has confirmed the 16 mm base silhouette. Its frozen run and artifact hashes are recorded in [M1 shape acceptance](docs/milestone1_shape_acceptance.json). The current M1 acceptance is PASS and the M2 gate is READY; the runtime still implements M1 only. The report keeps the user's decision separate from the original build-time PENDING fields, and refuses to transfer approval to a different run or changed model. Manufacturing, printing and wear remain unqualified.
+The user has confirmed the 16 mm base silhouette. Its frozen run and artifact hashes are recorded in [M1 shape acceptance](docs/milestone1_shape_acceptance.json). The current M1 acceptance is PASS and the M2 gate is READY; M2 is now available through the explicit `build-lattice` command. The report keeps the user's decision separate from the original build-time PENDING fields, and refuses to transfer approval to a different run or changed model. Manufacturing, printing and wear remain unqualified.
 
 ## Configuration and outputs
 
@@ -76,3 +76,25 @@ ShoeSpec is JSON with explicit millimetre units for geometry. Manufacturing rule
 See [architecture](docs/architecture.md) for the milestone boundary, and [development notes](docs/development.md) for environment and implementation status conventions.
 
 The Dockerfile uses the hashed `requirements.lock` exported from `uv.lock`. Build and test with `docker build -t shoe-poc .` and `docker run --rm --entrypoint python shoe-poc -m pytest -m 'not real_last'`. Mount licensed inputs read-only and output separately for real geometry runs. Docker/Linux execution has not been verified on the current macOS host.
+
+## M2 lattice engine
+
+The approved M1 shape is a read-only input. Generate the actual closed gyroid STL with:
+
+```sh
+.venv/bin/python -m shoe_poc build-lattice --spec input/specs/shoe_spec_m2.json --base-dir output/m1_toe_refine --output output/m2
+.venv/bin/python scripts/verify_lattice.py --output output/m2
+.venv/bin/python scripts/preview_lattice.py --help
+```
+
+Outputs include `lattice.stl`, `gyroid_field.npz`, `domain_field.npz`, metadata, independent geometry validation, execution records and an actual-STL preview. The optional domain controls are `max_z_offset_mm` (default 0), `clearance_mm` (default 2), and reducing `bounds_mm` (default null). Optional `phase_origin_mm` defaults to `[0, 0, 0]`. The M2 example uses a 12 mm period, 0.6 dimensionless threshold and 0.4 mm grid; the old 0.3/1 mm placeholder is rejected by the engine's resolution screen. Threshold is not measured wall thickness.
+
+The default design domain is the actual sole material below the normalized last datum with a conservative experimental reserve. It omits the upturned toe above that level and any uncertified narrow areas. It does not change the approved shoe silhouette. M2 produces a separate lattice; combining it with an outer shell and qualifying a complete shoe belongs to M3. `run` continues to build M1 only. See [M2 report](docs/milestone2_report.md) for actual results and limitations.
+
+
+M2 can reuse completed CAD domain certificates with `build-lattice --domain-cache <directory>` only when the separate `domain_provenance.json`, source hashes, frozen baseline, actual parameters, grid headers and saved CAD evidence all agree. The loader checks array budgets before decompression. Such execution records identify cache reuse and retain the original sampling run and time; they do not claim new CAD sampling. Independent checks still run on the newly exported STL.
+
+`verify_lattice.py --jobs 2` uses two isolated spawned processes by default (`--jobs 1` is available). Each worker imports its own CAD and enforces a sampled 4096 MiB RSS guard plus allocation preflight; the 8192 MiB parent guard covers the parent process only. These are per-process safeguards, not a combined OS hard limit. Closed internal void boundaries are validated by nesting orientation rather than incorrectly requiring every connected boundary surface to have positive signed volume. Cross-shell contact/intersection checks are independent; global self-intersection within one shell remains unverified.
+
+
+A zero contour is always attempted first. If only strict native/STL triangle-area checks fail, the extractor can retry at two bounded, conservative negative levels based on float32 epsilon. It records each attempt, actual level, effective gyroid threshold and extra domain inset; the saved requested scalar field stays unchanged. Other topology failures stop immediately. The real 0.45 threshold case required this numerical approximation; its effective value and failure evidence are included in the M2 report.

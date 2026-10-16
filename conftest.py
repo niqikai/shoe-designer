@@ -41,4 +41,5 @@ def pytest_sessionfinish(session, exitstatus):
                              "collected": session.testscollected, "counts": counts,
                              "tests": results, "environment": environment(),
                              "build_provenance": provenance,
-                             "design_build_provenance": getattr(session.config, "_shoe_design_provenance", {})})
+                             "design_build_provenance": getattr(session.config, "_shoe_design_provenance", {}),
+                             "lattice_build_provenance": getattr(session.config, "_shoe_lattice_provenance", {})})
