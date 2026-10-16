@@ -45,7 +45,7 @@ class GridPlan:
 @dataclass
 class SoleDomain:
     plan: GridPlan
-    occupancy: np.ndarray
+    occupancy: np.ndarray | None  # Cached certified fields do not retain raw scanline occupancy.
     field_mm: np.ndarray
     metadata: dict[str, Any]
 

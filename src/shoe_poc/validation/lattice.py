@@ -31,13 +31,202 @@ def _mesh(value):
     return value
 
 
+def _triangle_pair_contacts(first, second, tolerance_mm):
+    """Conservative triangle SAT, including coplanar edge separation axes."""
+    origin = first[:, :1]
+    second = second-origin
+    first = first-origin
+    edge_a = np.roll(first, -1, axis=1)-first
+    edge_b = np.roll(second, -1, axis=1)-second
+    normal_a = np.cross(edge_a[:, 0], edge_a[:, 1])
+    normal_b = np.cross(edge_b[:, 0], edge_b[:, 1])
+    axes = np.concatenate([normal_a[:, None], normal_b[:, None],
+        np.cross(edge_a[:, :, None], edge_b[:, None, :]).reshape(-1, 9, 3),
+        np.cross(normal_a[:, None], edge_a), np.cross(normal_b[:, None], edge_b)], axis=1)
+    lengths = np.linalg.norm(axes, axis=2)
+    projection_a = np.einsum("nvj,naj->nav", first, axes)
+    projection_b = np.einsum("nvj,naj->nav", second, axes)
+    separating = ((projection_a.max(axis=2) < projection_b.min(axis=2)-tolerance_mm*lengths)
+                  | (projection_b.max(axis=2) < projection_a.min(axis=2)-tolerance_mm*lengths))
+    return ~np.any(separating & (lengths > 1e-15), axis=1)
+
+
+def _validate_shell_nesting(mesh, components, volumes, *, tolerance_mm=1e-7,
+                             maximum_pair_candidates=5_000_000,
+                             maximum_ray_candidates=5_000_000,
+                             maximum_minor_triangles=250_000):
+    """Check all surface-shell orientation by geometric nesting parity.
+
+    Cross-shell triangle contacts/intersections are checked exhaustively through
+    conservative centroid spheres and SAT. Then disjoint connected closed shells
+    have constant containment relative to each other, so three non-edge surface
+    witnesses per shell determine nesting. This still does not establish absence
+    of self-intersections *within* an individual shell.
+    """
+    started = time.perf_counter()
+    report = {"geometry_status": "NOT_VERIFIED", "shell_count": len(components),
+              "method": "Conservative 3D centroid-sphere candidates and triangle SAT for cross-shell intersections; conservative YZ projection candidates and oriented X-line crossings for shell nesting parity",
+              "tolerance_mm": tolerance_mm, "maximum_pair_candidates": maximum_pair_candidates,
+              "maximum_ray_candidates": maximum_ray_candidates,
+              "maximum_minor_triangles": maximum_minor_triangles,
+              "pair_candidate_count": 0, "tested_triangle_pair_count": 0,
+              "ray_candidate_count": 0, "shells": [], "measurement_errors": [],
+              "global_self_intersection_status": "NOT_VERIFIED",
+              "limitations": ["Nesting assumes each individually closed manifold surface is embedded; global within-shell self-intersections are not verified.",
+                              "Contact tolerance concerns numeric STL shell separation, not printable wall thickness."]}
+    if not np.isfinite(volumes).all() or np.any(volumes == 0):
+        report["geometry_status"] = "FAIL"
+        report["measurement_errors"].append("Every closed surface shell must have finite nonzero signed volume")
+        return report
+    triangles = mesh.triangles
+    labels = np.empty(len(triangles), dtype=np.int64)
+    bounds = []
+    for index, faces in enumerate(components):
+        labels[faces] = index
+        vertices = mesh.vertices[np.unique(mesh.faces[faces])]
+        bounds.append([vertices.min(axis=0), vertices.max(axis=0)])
+    bounds = np.asarray(bounds)
+    centers = triangles.mean(axis=1)
+    radii = np.linalg.norm(triangles-centers[:, None], axis=2).max(axis=1)
+    maximum_radius = float(radii.max())
+    largest = int(np.argmax([len(faces) for faces in components]))
+    minor_faces = np.concatenate([faces for index, faces in enumerate(components) if index != largest]) if len(components) > 1 else np.array([], dtype=int)
+    if len(minor_faces) > maximum_minor_triangles:
+        report["measurement_errors"].append("Cross-shell triangle query budget exceeded")
+        return report
+    # Every cross-shell pair has at least one member outside the largest shell.
+    # A centroid-sphere query is conservative even for unusually large triangles.
+    if len(minor_faces):
+        tree = cKDTree(centers)
+        for face in minor_faces:
+            candidates = tree.query_ball_point(centers[face], maximum_radius+radii[face]+tolerance_mm)
+            report["pair_candidate_count"] += len(candidates)
+            if report["pair_candidate_count"] > maximum_pair_candidates:
+                report["measurement_errors"].append("Conservative cross-shell candidate-pair budget exceeded")
+                return report
+            candidates = np.asarray(candidates, dtype=np.int64)
+            candidates = candidates[(labels[candidates] != labels[face])
+                        & ((labels[candidates] == largest) | (candidates > face))]
+            if not len(candidates):
+                continue
+            second = triangles[candidates]
+            overlap = np.all(second.max(axis=1) >= triangles[face].min(axis=0)-tolerance_mm, axis=1)
+            overlap &= np.all(second.min(axis=1) <= triangles[face].max(axis=0)+tolerance_mm, axis=1)
+            candidates = candidates[overlap]
+            for begin in range(0, len(candidates), 2048):
+                chunk = candidates[begin:begin+2048]
+                if not len(chunk):
+                    continue
+                origin = triangles[face, 0]
+                first = np.broadcast_to(triangles[face]-origin, (len(chunk), 3, 3))
+                contacts = _triangle_pair_contacts(first, triangles[chunk]-origin, tolerance_mm)
+                report["tested_triangle_pair_count"] += len(chunk)
+                if contacts.any():
+                    report["geometry_status"] = "FAIL"
+                    report["cross_shell_contact_examples"] = [
+                        {"first_face": int(face), "second_face": int(other),
+                         "first_shell": int(labels[face]), "second_shell": int(labels[other])}
+                        for other in chunk[contacts][:20]]
+                    report["measurement_errors"].append("Distinct surface shells intersect or contact within the numeric tolerance")
+                    return report
+        del tree
+    report["cross_shell_intersection_status"] = "PASS"
+    # A single conservative projected-radius tree supports independent X-rays.
+    projected = centers[:, 1:]
+    projected_radius = float(np.linalg.norm(triangles[:, :, 1:]-projected[:, None], axis=2).max())
+    tree = cKDTree(projected)
+
+    def parents_at(point, possible):
+        candidates = tree.query_ball_point(point[1:], projected_radius+tolerance_mm)
+        report["ray_candidate_count"] += len(candidates)
+        if report["ray_candidate_count"] > maximum_ray_candidates:
+            raise ValueError("Conservative shell ray-candidate budget exceeded")
+        indices = np.asarray(candidates, dtype=np.int64)
+        indices = indices[np.isin(labels[indices], possible)]
+        if not len(indices):
+            return ()
+        a, b, c = np.moveaxis(triangles[indices], 1, 0)
+        v, w = b-a, c-a
+        determinant = v[:, 1]*w[:, 2]-v[:, 2]*w[:, 1]
+        usable = np.abs(determinant) > 1e-14
+        if np.any(~usable):
+            # An almost X-parallel face has a degenerate projected triangle.
+            # If the ray lies on that projection, do not silently discard a
+            # potentially meaningful crossing; select another witness instead.
+            flat = triangles[indices[~usable], :, 1:]
+            edge = np.roll(flat, -1, axis=1)-flat
+            delta = point[1:]-flat
+            length2 = np.einsum("nij,nij->ni", edge, edge)
+            parameter = np.clip(np.einsum("nij,nij->ni", delta, edge)
+                                / np.maximum(length2, 1e-30), 0., 1.)
+            distance = np.linalg.norm(delta-parameter[:, :, None]*edge, axis=2)
+            if np.any(distance <= tolerance_mm):
+                return None
+        a, v, w, determinant, indices = a[usable], v[usable], w[usable], determinant[usable], indices[usable]
+        dy, dz = point[1]-a[:, 1], point[2]-a[:, 2]
+        beta = (dy*w[:, 2]-dz*w[:, 1])/determinant
+        gamma = (v[:, 1]*dz-v[:, 2]*dy)/determinant
+        hit = (beta >= -1e-10) & (gamma >= -1e-10) & (beta+gamma <= 1+1e-10)
+        if np.any(hit & ((beta <= 1e-10) | (gamma <= 1e-10) | (beta+gamma >= 1-1e-10))):
+            return None  # Retry another surface witness; never discard edge hits.
+        xs = a[:, 0]+beta*v[:, 0]+gamma*w[:, 0]
+        if np.any(hit & (np.abs(xs-point[0]) <= tolerance_mm)):
+            return None
+        before = hit & (xs < point[0])
+        winding = np.bincount(labels[indices[before]], weights=-np.sign(determinant[before]), minlength=len(components))
+        if np.any(np.abs(winding) > 1):
+            raise ValueError("A parent shell has ambiguous nonunit ray winding")
+        return tuple(int(index) for index in possible if winding[index] != 0)
+
+    violations = 0
+    for index, faces in enumerate(components):
+        possible = np.flatnonzero(np.all(bounds[:, 0] < bounds[index, 0]+tolerance_mm, axis=1)
+                                 & np.all(bounds[:, 1] > bounds[index, 1]-tolerance_mm, axis=1))
+        possible = possible[possible != index]
+        witnesses, observed = [], []
+        if len(possible):
+            # Faces are selected across component ranks and use asymmetric
+            # barycentric weights to avoid axis-aligned triangulation edges.
+            for face in faces[_sample_indices(len(faces), min(12, len(faces)))]:
+                point = np.array([.233, .347, .420]) @ triangles[face]
+                try:
+                    parents = parents_at(point, possible)
+                except ValueError as error:
+                    report["measurement_errors"].append({"shell": index, "reason": str(error)})
+                    return report
+                if parents is not None:
+                    witnesses.append(point.tolist())
+                    observed.append(parents)
+                if len(observed) == 3:
+                    break
+            if len(observed) < 3 or any(parents != observed[0] for parents in observed):
+                report["measurement_errors"].append({"shell": index, "reason": "Could not establish three unambiguous agreeing shell nesting witnesses"})
+                return report
+            parents = observed[0]
+        else:
+            parents = ()
+        depth = len(parents)
+        expected_positive = depth % 2 == 0
+        correct = bool((volumes[index] > 0) == expected_positive)
+        violations += not correct
+        report["shells"].append({"shell_index": index, "triangles": len(faces),
+            "signed_volume_mm3": float(volumes[index]), "nesting_depth": depth,
+            "enclosing_shells": list(parents), "expected_orientation": "positive" if expected_positive else "negative",
+            "orientation_status": "PASS" if correct else "FAIL", "witness_points_mm": witnesses})
+    report.update({"geometry_status": "FAIL" if violations else "PASS",
+                   "orientation_violation_count": int(violations),
+                   "negative_void_shell_count": int(np.count_nonzero(volumes < 0)),
+                   "runtime_seconds": time.perf_counter()-started})
+    return report
+
+
 def validate_lattice_mesh(model, *, reference_mesh=None,
                           serialization_tolerance_mm: float = 5e-5) -> dict:
     """Check a closed lattice with any genus and any number of components.
 
-    Every face component must have positive signed volume: an outward component
-    cannot conceal an inverted component in the summed volume. Connectivity to
-    a future shoe shell is a separate M3 requirement.
+    Each closed surface shell must follow nesting parity: material exterior
+    shells point outward, enclosed void boundaries point inward, and material
+    islands in voids point outward. Connectivity to a future shoe shell is M3.
     """
     if not np.isfinite(serialization_tolerance_mm) or serialization_tolerance_mm <= 0:
         raise ValueError("Serialization tolerance must be finite and positive")
@@ -84,8 +273,14 @@ def validate_lattice_mesh(model, *, reference_mesh=None,
     contributions = np.einsum("ij,ij->i", triangles[:, 0],
                              np.cross(triangles[:, 1], triangles[:, 2])) / 6.0
     component_volumes = np.asarray([contributions[indices].sum() for indices in components])
-    check("positive_component_volume_mm3", bool(np.all(np.isfinite(component_volumes) & (component_volumes > 0))),
-          {"minimum": float(component_volumes.min()), "nonpositive_count": int(np.count_nonzero(~np.isfinite(component_volumes) | (component_volumes <= 0)))}, "> 0 for every component")
+    topology_ready = not boundary and not nonmanifold and not singular and mesh.is_winding_consistent and not degenerate and finite_areas
+    nesting = (_validate_shell_nesting(mesh, components, component_volumes) if topology_ready else
+               {"geometry_status": "NOT_VERIFIED", "measurement_errors": ["Closed manifold shell prerequisites failed"]})
+    check("shell_nesting_orientation", nesting["geometry_status"] == "PASS",
+          nesting.get("orientation_violation_count", nesting["geometry_status"]),
+          "positive at even nesting depth; negative at odd nesting depth; disjoint closed shells")
+    total_volume = float(component_volumes.sum())
+    check("positive_material_volume_mm3", np.isfinite(total_volume) and total_volume > 0, total_volume, "> 0 finite signed material volume")
     reference_report = None
     if reference_mesh is not None:
         reference = _mesh(reference_mesh)
@@ -108,7 +303,7 @@ def validate_lattice_mesh(model, *, reference_mesh=None,
             "triangles": len(mesh.faces), "euler_number": int(mesh.euler_number),
             "connected_components": len(components),
             "component_volume_range_mm3": [float(component_volumes.min()), float(component_volumes.max())],
-            "singular_vertex_examples": singular[:30], "roundtrip": reference_report,
+            "singular_vertex_examples": singular[:30], "shell_nesting": nesting, "roundtrip": reference_report,
             "runtime_seconds": time.perf_counter()-started}
 
 

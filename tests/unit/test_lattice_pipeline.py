@@ -303,3 +303,16 @@ def test_cli_invalid_lattice_resource_budget_fails_before_outputs(tmp_path, flag
                      "--output", output, flag, value, "--max-rss-mb", 1)
     assert result.returncode == 2, result.stdout + result.stderr
     assert not output.exists()
+
+
+def test_cli_domain_cache_cannot_be_cleared_as_output(tmp_path):
+    output = tmp_path/'existing-domain'
+    output.mkdir()
+    field = output/'domain_field.npz'
+    field.write_bytes(b'original certificate field')
+    result = run_cli('--spec', tmp_path/'missing.json', '--base-dir', tmp_path/'frozen',
+                     '--output', output, '--domain-cache', output, '--max-rss-mb', 1)
+    assert result.returncode == 2
+    assert 'domain-cache must differ' in result.stderr
+    assert field.read_bytes() == b'original certificate field'
+    assert not (output/'failure_report.json').exists()

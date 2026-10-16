@@ -16,7 +16,8 @@ from shoe_poc.schemas import ShoeSpec
 GENERATED = ("lattice.stl", "lattice_metadata.json", "gyroid_field.npz", "domain_field.npz",
              "domain_metadata.json", "shoe_spec.json", "execution_report.json", "failure_report.json",
              "validation_report.json", "preview.png", "artifact_manifest.json", "test_report.json",
-             "acceptance_report.json", "parameter_change_report.json")
+             "acceptance_report.json", "parameter_change_report.json", "parameter_sections.png",
+             "m1_preservation_report.json")
 
 
 def validate_output_paths(output: Path, base_directory: Path) -> None:
@@ -81,10 +82,13 @@ def accepted_baseline(directory: Path, spec: ShoeSpec, acceptance_path: Path) ->
 
 def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
                   acceptance_path: Path, max_voxels: int = 10_000_000,
-                  max_field_memory_mb: float = 4096., run_id: str | None = None) -> dict:
+                  max_field_memory_mb: float = 4096., run_id: str | None = None,
+                  domain_cache: Path | None = None) -> dict:
     """Build M2 only and preserve diagnostics on every failed attempt."""
     output, base_directory = output.resolve(), base_directory.resolve()
     validate_output_paths(output, base_directory)
+    if domain_cache is not None and domain_cache.resolve() == output:
+        raise ValueError("Domain cache and output must differ; preserve the source field")
     if max_voxels <= 0 or not np.isfinite(max_field_memory_mb) or max_field_memory_mb <= 0:
         raise ValueError("M2 voxel and allocation budgets must be positive")
     run_id = run_id or str(uuid4())
@@ -135,12 +139,24 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         source_base = last.bounding_box().min.Z
         settings = spec.lattice
         memory = int(max_field_memory_mb*1024**2)
-        domain = stage("sample_certified_sole_domain", lambda: sample_sole_domain(shoe, cavity,
-            z_min_mm=source_base-spec.sole.height_mm,
-            z_max_mm=source_base+settings.domain.max_z_offset_mm,
-            spacing_mm=settings.resolution_mm, clearance_mm=settings.domain.clearance_mm,
-            bounds_mm=settings.domain.bounds_mm, max_voxels=max_voxels,
-            max_memory_mb=max_field_memory_mb))
+        if domain_cache is None:
+            domain = stage("sample_certified_sole_domain", lambda: sample_sole_domain(shoe, cavity,
+                z_min_mm=source_base-spec.sole.height_mm,
+                z_max_mm=source_base+settings.domain.max_z_offset_mm,
+                spacing_mm=settings.resolution_mm, clearance_mm=settings.domain.clearance_mm,
+                bounds_mm=settings.domain.bounds_mm, max_voxels=max_voxels,
+                max_memory_mb=max_field_memory_mb))
+            domain_source = {"mode": "fresh_CAD_sampling", "run_id": run_id}
+        else:
+            from .cache import load_certified_domain
+            domain = stage("load_bound_certified_domain", lambda: load_certified_domain(domain_cache,
+                baseline=baseline, shape=shoe, z_min_mm=source_base-spec.sole.height_mm,
+                z_max_mm=source_base+settings.domain.max_z_offset_mm, settings=settings.domain,
+                spacing_mm=settings.resolution_mm, max_voxels=max_voxels, max_memory_mb=max_field_memory_mb))
+            domain_source = {"mode": "validated_cached_CAD_certificates", "directory": str(domain_cache.resolve()),
+                "provenance_sha256": sha256(domain_cache/"domain_provenance.json"),
+                "provenance": json.loads((domain_cache/"domain_provenance.json").read_text()),
+                "note": "Original CAD sampling reused; this run independently rechecks the extracted STL against CAD."}
         write_json(output/"domain_metadata.json", domain.metadata)
         stage("save_domain_field", lambda: np.savez_compressed(output/"domain_field.npz",
             field_mm=domain.field_mm, origin_mm=domain.plan.origin_mm,
@@ -162,8 +178,9 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         residual = stage("independent_implicit_residual", lambda: validate_gyroid_residual(output/"lattice.stl",
             period_mm=settings.period_mm, threshold=settings.threshold,
             phase_origin_mm=settings.phase_origin_mm, domain_field=interpolator,
-            cap_tolerance_mm=settings.resolution_mm,
+            cap_tolerance_mm=np.sqrt(3)*settings.resolution_mm, max_samples=2_000_000,
             residual_tolerance=(2*np.pi/settings.period_mm*settings.resolution_mm)**2/4+1e-4))
+        residual["cap_classification_basis"] = "One full MC voxel diagonal: mixed domain/gyroid cells may contain Lewiner interior fan vertices; their boundary is not a pure gyroid level set. Analytic residual tolerance is unchanged."
         validation = {"run_id": run_id, "mesh": mesh_report, "native_domain_samples": containment,
                       "gyroid_residual": residual, "geometry_status": "PASS" if all(
                           r["geometry_status"] == "PASS" for r in (mesh_report, containment, residual)) else "FAIL",
@@ -173,13 +190,14 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         # Recheck inputs after all computation; the accepted base is immutable.
         accepted_baseline(base_directory, spec, acceptance_path)
         metadata = {"milestone": 2, "algorithm_version": "m2-certified-gyroid-v1", "run_id": run_id, "baseline": baseline,
-                    "field": field.metadata, "meshing": result.metadata,
+                    "field": field.metadata, "meshing": result.metadata, "domain_source": domain_source,
                     "actual_lattice_parameters": settings.model_dump(mode="json"),
                     "validation": validation, "manufacturing_status": "NOT_VERIFIED"}
         write_json(output/"lattice_metadata.json", metadata)
         execution = {"milestone": 2, "run_id": run_id, "status": validation["geometry_status"],
             "milestone_status": "PARTIAL", "user_acceptance": "PENDING", "generated_at": utc_now(),
             "spec_source": str(spec_path.resolve()), "spec_sha256": sha256(spec_path), "baseline": baseline,
+            "domain_source": domain_source,
             "elapsed_seconds": time.perf_counter()-started, "timings_seconds": timings,
             "resource_limits": {"max_voxels": max_voxels, "max_field_memory_mb": max_field_memory_mb},
             "environment": environment(), "outputs": artifact_manifest(output)}

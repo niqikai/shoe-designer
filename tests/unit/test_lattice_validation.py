@@ -37,7 +37,7 @@ def test_reversed_component_cannot_hide_behind_positive_total_volume():
     second.apply_translation([20, 0, 0])
     report = validate_lattice_mesh(trimesh.util.concatenate([first, second]))
     assert report["volume_mm3"] > 0
-    assert check(report, "positive_component_volume_mm3")["status"] == "FAIL"
+    assert check(report, "shell_nesting_orientation")["status"] == "FAIL"
 
 
 def test_inconsistent_winding_detected():
@@ -343,3 +343,93 @@ def test_gyroid_numeric_overflow_cannot_produce_passing_nan_residuals():
         validate_gyroid_residual(mesh, period_mm=1e-320, threshold=.3,
             domain_field=lambda points: -np.ones(len(points)),
             cap_tolerance_mm=.01, residual_tolerance=.01)
+
+
+def _sphere_shell(radius, *, inward=False, translation=(0, 0, 0)):
+    mesh = trimesh.creation.icosphere(subdivisions=1, radius=radius)
+    mesh.apply_translation(translation)
+    if inward:
+        mesh.invert()
+    return mesh
+
+
+def test_legal_closed_void_and_material_island_follow_nesting_parity():
+    outer = _sphere_shell(5)
+    cavity = _sphere_shell(3, inward=True)
+    island = _sphere_shell(1)
+    report = validate_lattice_mesh(trimesh.util.concatenate([outer, cavity, island]))
+    assert report["geometry_status"] == "PASS"
+    nesting = report["shell_nesting"]
+    assert nesting["cross_shell_intersection_status"] == "PASS"
+    assert sorted(shell["nesting_depth"] for shell in nesting["shells"]) == [0, 1, 2]
+    assert nesting["negative_void_shell_count"] == 1
+    assert nesting["orientation_violation_count"] == 0
+    assert report["volume_mm3"] == pytest.approx(outer.volume+cavity.volume+island.volume)
+    assert report["connected_components"] == 3
+
+
+@pytest.mark.parametrize("inward_flags", [(False, False), (True, True), (True, False)])
+def test_nested_shells_with_incorrect_orientation_fail(inward_flags):
+    shells = [_sphere_shell(radius, inward=inward) for radius, inward in zip([5, 2], inward_flags)]
+    report = validate_lattice_mesh(trimesh.util.concatenate(shells))
+    assert report["geometry_status"] == "FAIL"
+    assert report["shell_nesting"]["orientation_violation_count"] > 0
+
+
+def test_negative_shell_in_torus_hole_is_not_inside_torus_material():
+    # The tiny negative shell is strictly inside the torus bbox but lies in its
+    # through-hole: bbox inclusion alone cannot authorize its inward orientation.
+    torus = trimesh.creation.torus(major_radius=5, minor_radius=1)
+    inverted = _sphere_shell(.3, inward=True)
+    report = validate_lattice_mesh(trimesh.util.concatenate([torus, inverted]))
+    assert report["geometry_status"] == "FAIL"
+    negative = next(shell for shell in report["shell_nesting"]["shells"] if shell["signed_volume_mm3"] < 0)
+    assert negative["nesting_depth"] == 0
+    assert negative["orientation_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("translation", [(1, 0, 0), (1.9, .1, .1)])
+def test_crossing_shells_fail_even_when_individually_closed_and_positive(translation):
+    first = trimesh.creation.box(extents=[2, 2, 2])
+    second = first.copy()
+    second.apply_translation(translation)
+    report = validate_lattice_mesh(trimesh.util.concatenate([first, second]))
+    assert report["geometry_status"] == "FAIL"
+    assert report["shell_nesting"]["cross_shell_contact_examples"]
+
+
+def test_coplanar_shell_contact_fails_without_changing_or_welding_input():
+    first = trimesh.creation.box(extents=[2, 2, 2])
+    second = first.copy()
+    second.apply_translation([2, 0, 0])
+    mesh = trimesh.util.concatenate([first, second])
+    original = mesh.faces.copy()
+    report = validate_lattice_mesh(mesh)
+    assert report["geometry_status"] == "FAIL"
+    assert report["shell_nesting"]["cross_shell_contact_examples"]
+    assert np.array_equal(mesh.faces, original)
+
+
+def test_nested_boxes_are_resolved_without_ray_edge_guessing():
+    outer = trimesh.creation.box(extents=[10, 10, 10])
+    inner = trimesh.creation.box(extents=[2, 2, 2])
+    inner.invert()
+    report = validate_lattice_mesh(trimesh.util.concatenate([outer, inner]))
+    assert report["geometry_status"] == "PASS"
+    inner_report = next(shell for shell in report["shell_nesting"]["shells"] if shell["nesting_depth"] == 1)
+    assert len(inner_report["witness_points_mm"]) == 3
+
+
+def test_shell_nesting_candidate_budget_exhaustion_cannot_pass():
+    from shoe_poc.validation.lattice import _validate_shell_nesting
+    outer, inner = _sphere_shell(5), _sphere_shell(2, inward=True)
+    mesh = trimesh.util.concatenate([outer, inner])
+    components = trimesh.graph.connected_components(mesh.face_adjacency,
+        nodes=np.arange(len(mesh.faces)), min_len=1, engine="scipy")
+    volumes = np.array([outer.volume, inner.volume])
+    pair = _validate_shell_nesting(mesh, components, volumes, maximum_pair_candidates=1)
+    assert pair["geometry_status"] == "NOT_VERIFIED"
+    assert pair["measurement_errors"]
+    ray = _validate_shell_nesting(mesh, components, volumes, maximum_ray_candidates=1)
+    assert ray["geometry_status"] == "NOT_VERIFIED"
+    assert ray["measurement_errors"]

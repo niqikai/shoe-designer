@@ -327,6 +327,7 @@ def parser() -> argparse.ArgumentParser:
     lattice.add_argument("--output", type=Path, default=Path("output/m2"))
     lattice.add_argument("--max-voxels", type=int, default=10_000_000)
     lattice.add_argument("--max-field-memory-mb", type=float, default=4096.)
+    lattice.add_argument("--domain-cache", type=Path, help="Reuse a hash-bound CAD domain; independent STL/CAD checks still run")
     for subcommand in commands.choices.values():
         subcommand.add_argument("--max-rss-mb", type=float, default=8192,
                                 help="Sampled process RSS budget in MiB (default 8192); exit 3 when observed exceeded")
@@ -346,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             validate_output_paths(args.output, args.base_dir)
         except ValueError as error:
             parser().error(str(error))
+        if args.domain_cache is not None and args.domain_cache.resolve() == args.output.resolve():
+            parser().error("--domain-cache must differ from --output; preserve its source field")
         if (args.max_voxels <= 0 or not np.isfinite(args.max_field_memory_mb)
                 or args.max_field_memory_mb <= 0):
             parser().error("M2 voxel and allocation budgets must be positive and finite")
@@ -365,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
             from shoe_poc.lattice.pipeline import build_lattice
             build_lattice(args.spec, args.output, base_directory=args.base_dir,
                 acceptance_path=args.acceptance, max_voxels=args.max_voxels,
-                max_field_memory_mb=args.max_field_memory_mb, run_id=run_id)
+                max_field_memory_mb=args.max_field_memory_mb, run_id=run_id, domain_cache=args.domain_cache)
         elif args.command == "validate":
             from shoe_poc.validation import validate_mesh
             report = validate_mesh(args.model)
