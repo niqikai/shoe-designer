@@ -124,6 +124,7 @@ def validate_terminal_coverage(model, *, field_mm, gyroid_values, origin_mm, spa
         'measurement_errors': [], 'terminal_planes': [], 'lattice_field_mismatch_planes': [],
         'limitations': ['Finite exact-CAD sites do not establish global completeness or minimum wall thickness.',
                        'A nonempty principal cross-section establishes connected reach, not full sectional density.',
+                       'STL reach requires crossings on both nearby planes beyond float32 coordinate uncertainty; extensions smaller than that conservative margin do not pass.',
                        'No components were deleted, smoothed, or counted as connected merely by bounding-box overlap.']}
     threshold = clearance_mm+math.sqrt(3)*spacing_mm+8e-6+approximation_tolerance_mm
     for row in expected_nodes:
@@ -181,11 +182,26 @@ def validate_terminal_coverage(model, *, field_mm, gyroid_values, origin_mm, spa
                         'maximum_dimensionless_error': maximum_field_error})
                 expected = int(np.count_nonzero(independent < actual_level-2e-7))
             in_domain = int(np.count_nonzero(labels[i] == principal_label))
-            crossed = int(np.count_nonzero((triangle_lo < x-1e-7) & (triangle_hi > x+1e-7)))
+            # MC triangles live inside individual cells. At an exact grid
+            # plane they can meet along shared edges without any single face
+            # strictly straddling it. Probe both nearby planes beyond the
+            # serialized float32 coordinate uncertainty; a tangent cap has
+            # no crossing on its outer side and cannot pass this test.
+            delta = max(1e-5, 8*float(np.spacing(np.float32(max(1., abs(x))))))
+            if delta >= spacing_mm/100:
+                raise ValueError('STL coordinate precision is insufficient for terminal plane probes')
+            left, right = x-delta, x+delta
+            crossed_left = int(np.count_nonzero((triangle_lo < left) & (triangle_hi > left)))
+            crossed_right = int(np.count_nonzero((triangle_lo < right) & (triangle_hi > right)))
+            crossed = min(crossed_left, crossed_right)
             report['terminal_planes'].append({'x_mm': x, 'expected_lattice_negative_node_count': expected,
                 'independent_field_maximum_error': maximum_field_error,
                 'principal_domain_negative_node_count': in_domain,
                 'principal_stl_crossing_triangle_count': crossed,
+                'stl_probe_x_mm': [left, right],
+                'stl_probe_delta_mm': delta,
+                'principal_stl_left_crossing_triangle_count': crossed_left,
+                'principal_stl_right_crossing_triangle_count': crossed_right,
                 'status': 'FAIL' if in_domain == 0 or (expected > 0 and crossed == 0) else 'PASS'})
     failed_planes = [row for row in report['terminal_planes'] if row['status'] == 'FAIL']
     report['failed_terminal_planes'] = failed_planes

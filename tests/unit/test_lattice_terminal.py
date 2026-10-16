@@ -74,6 +74,29 @@ def test_cap_merely_touching_terminal_plane_cannot_establish_material_coverage()
     assert report['failed_terminal_planes'][-1]['principal_stl_crossing_triangle_count'] == 0
 
 
+@pytest.mark.parametrize('x_origin', [0., 259.1459322558137])
+def test_real_marching_cubes_faces_meet_at_grid_planes_without_false_gaps(x_origin):
+    from skimage.measure import marching_cubes
+    field = _field()
+    vertices, faces, _, _ = marching_cubes(field, level=0, spacing=(1., 1., 1.))
+    vertices[:, 0] += x_origin
+    # Reproduce the actual float32 serialization coordinates, including
+    # world-space rounding at the toe, rather than testing an ideal box only.
+    mesh = trimesh.Trimesh(vertices=vertices.astype(np.float32), faces=faces, process=False)
+    if mesh.volume < 0:
+        mesh.invert()
+    expected = [_expected(3), _expected(9)]
+    for row in expected:
+        row['point_mm'][0] += x_origin
+    report = validate_terminal_coverage(mesh, field_mm=field, gyroid_values=field,
+        origin_mm=[x_origin, 0., 0.], spacing_mm=1., expected_nodes=expected,
+        clearance_mm=.5, approximation_tolerance_mm=.1)
+    assert report['geometry_status'] == 'PASS'
+    assert all(row['principal_stl_left_crossing_triangle_count'] > 0
+               and row['principal_stl_right_crossing_triangle_count'] > 0
+               for row in report['terminal_planes'])
+
+
 def test_missing_saved_lattice_plane_cannot_change_analytic_expectation_to_void():
     from shoe_poc.lattice.gyroid import GyroidParameters, SamplingGrid, sample_gyroid
     field = _field()
