@@ -204,7 +204,7 @@ def test_legacy_lattice_loads_optional_domain_and_phase_defaults():
     data["lattice"].pop("phase_origin_mm")
     spec = ShoeSpec.model_validate(data)
     assert spec.lattice.phase_origin_mm == [0., 0., 0.]
-    assert spec.lattice.domain.model_dump() == {"max_z_offset_mm": 0., "clearance_mm": 2., "bounds_mm": None}
+    assert spec.lattice.domain.model_dump() == {"mode": "planar", "max_z_offset_mm": 0., "clearance_mm": 2., "bounds_mm": None}
 
 
 @pytest.mark.parametrize(("path", "value"), [
@@ -217,6 +217,7 @@ def test_legacy_lattice_loads_optional_domain_and_phase_defaults():
     (("domain", "bounds_mm"), [[0., 0., 0.], [10001., 1., 1.]]),
     (("domain", "bounds_mm"), [[0., 0., 0.], [float("inf"), 1., 1.]]),
     (("domain", "max_z_offset_mm"), .1), (("domain", "max_z_offset_mm"), -20.1),
+    (("domain", "mode"), "raised_global_slab"),
     (("domain", "clearance_mm"), .49), (("domain", "clearance_mm"), 10.1),
     (("domain", "clearance_mm"), True), (("resolution_mm",), 0.),
     (("resolution_mm",), float("nan")), (("resolution_mm",), float("inf")),

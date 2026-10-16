@@ -98,7 +98,7 @@ def _validate_solid(shape, name):
 
 class NativeDomainProbe:
     """Reusable exact classifiers/scanlines independent of any lattice raster."""
-    def __init__(self, shape, cavity, z_min_mm, z_max_mm):
+    def __init__(self, shape, cavity, z_min_mm, z_max_mm, *, envelope=None):
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
         from OCP.IntCurvesFace import IntCurvesFace_ShapeIntersector
         _validate_solid(shape, 'Shoe')
@@ -107,6 +107,9 @@ class NativeDomainProbe:
             raise ValueError('Sole Z bounds must be finite and increasing')
         self.shape, self.cavity = shape, cavity
         self.z_min_mm, self.z_max_mm = float(z_min_mm), float(z_max_mm)
+        self.envelope = envelope
+        if envelope is not None and not np.allclose(envelope.z_bounds, [z_min_mm, z_max_mm], rtol=0, atol=1e-8):
+            raise ValueError('Curved envelope and global Z bounds disagree')
         self.classifiers = [BRepClass3d_SolidClassifier(s.solids()[0].wrapped) for s in (shape, cavity)]
         self.rays = []
         self._line_cache = {}
@@ -240,6 +243,8 @@ class NativeDomainProbe:
             cavity.append(memberships[1])
         sole, cavity = np.asarray(sole, bool), np.asarray(cavity, bool)
         z_ok = (points[:, 2] > self.z_min_mm) & (points[:, 2] < self.z_max_mm)
+        if self.envelope is not None:
+            z_ok &= self.envelope.contains(points)
         return {'inside_sole': sole, 'inside_cavity': cavity,
                 'within_z_bounds': z_ok, 'allowed': sole & ~cavity & z_ok}
 
@@ -285,7 +290,11 @@ class NativeDomainProbe:
 
     def scanline(self, y, z):
         try:
-            return {'sole_intervals_mm': self._intervals(0, y, z),
+            intervals = self._intervals(0, y, z)
+            if self.envelope is not None:
+                intervals = [[max(a, c), min(b, d)] for a, b in intervals
+                             for c, d in self.envelope.x_intervals(z) if min(b, d) > max(a, c)]
+            return {'sole_intervals_mm': intervals,
                     'cavity_intervals_mm': self._intervals(1, y, z),
                     'within_z_bounds': self.z_min_mm < z < self.z_max_mm}
         except Exception as exc:
@@ -302,7 +311,7 @@ def _mask_intervals(axis, intervals):
 
 def sample_sole_domain(shape, cavity, *, z_min_mm, z_max_mm, spacing_mm=1.,
                        clearance_mm=2., bounds_mm=None, max_voxels=12_000_000,
-                       max_memory_mb=1024, max_certificate_queries=4_000):
+                       max_memory_mb=1024, max_certificate_queries=4_000, envelope=None):
     """Sample exact CAD occupancy and conservatively certify the retained subset.
 
     ``bounds_mm`` only reduces the computation window; it cannot enlarge the
@@ -317,7 +326,7 @@ def sample_sole_domain(shape, cavity, *, z_min_mm, z_max_mm, spacing_mm=1.,
         raise ValueError('max_certificate_queries must be a positive integer')
     if not math.isfinite(clearance_mm) or clearance_mm < 0:
         raise ValueError('clearance_mm must be finite and nonnegative')
-    probe = NativeDomainProbe(shape, cavity, z_min_mm, z_max_mm)
+    probe = NativeDomainProbe(shape, cavity, z_min_mm, z_max_mm, envelope=envelope)
     box = shape.bounding_box()
     actual_bounds = np.array([[box.min.X, box.min.Y, z_min_mm],
                               [box.max.X, box.max.Y, z_max_mm]], dtype=float)
@@ -392,6 +401,8 @@ def sample_sole_domain(shape, cavity, *, z_min_mm, z_max_mm, spacing_mm=1.,
         minimum = stats['minimum_anchor_boundary_distance_mm']
         stats['minimum_anchor_boundary_distance_mm'] = native_distance if minimum is None else min(native_distance, minimum)
         distance_to_bounds = min(*(anchor-actual_bounds[0]), *(actual_bounds[1]-anchor))
+        if envelope is not None:
+            distance_to_bounds = min(distance_to_bounds, envelope.boundary_distance(anchor))
         radius = min(native_distance, distance_to_bounds)-clearance_mm-diagonal-8*CAD_TOLERANCE_MM
         if radius <= CAD_TOLERANCE_MM:
             continue
@@ -426,6 +437,7 @@ def sample_sole_domain(shape, cavity, *, z_min_mm, z_max_mm, spacing_mm=1.,
         'estimated_peak_bytes': plan.estimated_peak_bytes,
         'computation_bounds_mm': actual_bounds.tolist(),
         'sole_z_bounds_mm': [z_min_mm, z_max_mm], 'clearance_mm': clearance_mm,
+        'envelope': None if envelope is None else envelope.metadata,
         'occupancy_count': int(occupancy.sum()), 'candidate_count': int(candidate.sum()),
         'certified_negative_node_count': retained_count,
         'conservatively_omitted_candidate_count': int(remaining.sum()),
@@ -436,7 +448,7 @@ def sample_sole_domain(shape, cavity, *, z_min_mm, z_max_mm, spacing_mm=1.,
         'runtime_seconds': time.perf_counter()-started,
         'scanline_runtime_seconds': scanline_seconds,
         'containment_scope': 'Every cell incident to a negative node is within the actual CAD shoe, outside the cavity, and inside the bounded sole window, with reserved clearance, conditional on OCCT distance/classifier tolerance.',
-        'limitations': ['This deliberately bounded sole subset excludes upper material and toe/rocker material above the chosen maximum sole Z.',
+        'limitations': ['The explicit sole envelope selects a design subset; planar mode omits raised toe material, curved mode follows the frozen lower-foot guide and rocker.',
                         'Sampling and conservative certificates can omit narrow material regions; sampled geometry is not an exact CAD offset.',
                         'The 2 mm default reserve is an experimental shell allowance, not manufacturing qualification.',
                         'CAD containment does not establish printable wall thickness, fusion quality, or comfort.'],

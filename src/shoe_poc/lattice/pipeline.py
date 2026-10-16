@@ -14,7 +14,7 @@ from shoe_poc.schemas import ShoeSpec
 
 
 GENERATED = ("lattice.stl", "lattice_metadata.json", "gyroid_field.npz", "domain_field.npz",
-             "domain_metadata.json", "shoe_spec.json", "execution_report.json", "failure_report.json",
+             "domain_metadata.json", "domain_provenance.json", "shoe_spec.json", "execution_report.json", "failure_report.json",
              "validation_report.json", "preview.png", "artifact_manifest.json", "test_report.json",
              "acceptance_report.json", "parameter_change_report.json", "parameter_sections.png",
              "m1_preservation_report.json", "performance_report.json")
@@ -138,11 +138,15 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         last = stage("import_accepted_last", lambda: import_step(base_directory/"last_normalized.step"))
         source_base = last.bounding_box().min.Z
         settings = spec.lattice
+        from .envelope import build_sole_envelope
+        envelope = build_sole_envelope(shoe, last, spec,
+            json.loads((base_directory/'geometry_report.json').read_text()),
+            source_sha256=sha256(base_directory/'geometry_report.json'))
+        z_min, z_max = (source_base-spec.sole.height_mm, source_base+settings.domain.max_z_offset_mm) if envelope is None else envelope.z_bounds
         memory = int(max_field_memory_mb*1024**2)
         if domain_cache is None:
             domain = stage("sample_certified_sole_domain", lambda: sample_sole_domain(shoe, cavity,
-                z_min_mm=source_base-spec.sole.height_mm,
-                z_max_mm=source_base+settings.domain.max_z_offset_mm,
+                z_min_mm=z_min, z_max_mm=z_max, envelope=envelope,
                 spacing_mm=settings.resolution_mm, clearance_mm=settings.domain.clearance_mm,
                 bounds_mm=settings.domain.bounds_mm, max_voxels=max_voxels,
                 max_memory_mb=max_field_memory_mb))
@@ -150,8 +154,8 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         else:
             from .cache import load_certified_domain
             domain = stage("load_bound_certified_domain", lambda: load_certified_domain(domain_cache,
-                baseline=baseline, shape=shoe, z_min_mm=source_base-spec.sole.height_mm,
-                z_max_mm=source_base+settings.domain.max_z_offset_mm, settings=settings.domain,
+                baseline=baseline, shape=shoe, z_min_mm=z_min,
+                z_max_mm=z_max, settings=settings.domain, envelope=envelope,
                 spacing_mm=settings.resolution_mm, max_voxels=max_voxels, max_memory_mb=max_field_memory_mb))
             domain_source = {"mode": "validated_cached_CAD_certificates", "directory": str(domain_cache.resolve()),
                 "provenance_sha256": sha256(domain_cache/"domain_provenance.json"),
@@ -161,6 +165,13 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         stage("save_domain_field", lambda: np.savez_compressed(output/"domain_field.npz",
             field_mm=domain.field_mm, origin_mm=domain.plan.origin_mm,
             spacing_mm=domain.plan.spacing_mm, metadata_json=np.asarray(json.dumps(domain.metadata))))
+        write_json(output/'domain_provenance.json', {'run_id': run_id, 'baseline': baseline,
+            'parameters': {'spacing_mm': settings.resolution_mm, 'clearance_mm': settings.domain.clearance_mm,
+                'sole_z_bounds_mm': [z_min, z_max], 'bounds_mm': settings.domain.bounds_mm,
+                'envelope': None if envelope is None else envelope.metadata},
+            'domain_field_sha256': sha256(output/'domain_field.npz'),
+            'domain_metadata_sha256': sha256(output/'domain_metadata.json'),
+            'domain_source': domain_source})
         field = stage("sample_gyroid", lambda: sample_gyroid(parameters, domain.plan,
             domain_signed_field=domain.field_mm, domain_metadata=domain.metadata,
             max_voxels=max_voxels, max_memory_bytes=memory))
@@ -169,7 +180,7 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
         stage("export_lattice_stl", lambda: export_lattice(result, output/"lattice.stl"))
         mesh_report = stage("reimport_validate_stl", lambda: validate_lattice_mesh(output/"lattice.stl", reference_mesh=result.mesh))
         probe = NativeDomainProbe(shoe, cavity,
-            z_min_mm=source_base-spec.sole.height_mm, z_max_mm=source_base+settings.domain.max_z_offset_mm)
+            z_min_mm=z_min, z_max_mm=z_max, envelope=envelope)
         containment = stage("independent_cad_containment", lambda: validate_lattice_domain(output/"lattice.stl",
             classify_points=probe.classify_points, max_samples=4096,
             native_line_probe=lambda mesh: validate_native_line_containment(mesh, scanline=probe.scanline, maximum_lines=32)))
@@ -181,15 +192,28 @@ def build_lattice(spec_path: Path, output: Path, *, base_directory: Path,
             cap_tolerance_mm=np.sqrt(3)*settings.resolution_mm, max_samples=2_000_000,
             residual_tolerance=(2*np.pi/settings.period_mm*settings.resolution_mm)**2/4+1e-4))
         residual["cap_classification_basis"] = "One full MC voxel diagonal: mixed domain/gyroid cells may contain Lewiner interior fan vertices; their boundary is not a pure gyroid level set. Analytic residual tolerance is unchanged."
+        coverage = None
+        if envelope is not None:
+            from shoe_poc.validation.lattice_coverage import NativeVerticalSoleSections, validate_lattice_coverage
+            sections = NativeVerticalSoleSections(shoe, cavity,
+                upper_z=envelope.upper_z, z_min_mm=envelope.z_bounds[0])
+            coverage = stage('independent_sole_coverage', lambda: validate_lattice_coverage(
+                output/'lattice.stl', native_sections=sections, bounds_mm=sections.bounds_mm,
+                period_mm=settings.period_mm, resolution_mm=settings.resolution_mm,
+                clearance_mm=settings.domain.clearance_mm, domain_field=interpolator,
+                reference_datum_mm=source_base))
+        geometry_reports = [mesh_report, containment, residual]+([] if coverage is None else [coverage])
         validation = {"run_id": run_id, "mesh": mesh_report, "native_domain_samples": containment,
                       "gyroid_residual": residual, "geometry_status": "PASS" if all(
-                          r["geometry_status"] == "PASS" for r in (mesh_report, containment, residual)) else "FAIL",
+                          r["geometry_status"] == "PASS" for r in geometry_reports) else "FAIL",
                       "manufacturing_status": "NOT_VERIFIED", "M3_shell_fusion": "NOT_IMPLEMENTED"}
+        if coverage is not None:
+            validation['sole_coverage'] = coverage
         write_json(output/"validation_report.json", validation)
         stage("render_actual_stl", lambda: render_lattice_preview(output/"lattice.stl", base_directory/"base_shoe.stl", output/"preview.png"))
         # Recheck inputs after all computation; the accepted base is immutable.
         accepted_baseline(base_directory, spec, acceptance_path)
-        metadata = {"milestone": 2, "algorithm_version": "m2-certified-gyroid-v1", "run_id": run_id, "baseline": baseline,
+        metadata = {"milestone": 2, "algorithm_version": "m2-certified-curved-gyroid-v2" if envelope is not None else "m2-certified-gyroid-v1", "run_id": run_id, "baseline": baseline,
                     "field": field.metadata, "meshing": result.metadata, "domain_source": domain_source,
                     "actual_lattice_parameters": settings.model_dump(mode="json"),
                     "validation": validation, "manufacturing_status": "NOT_VERIFIED"}

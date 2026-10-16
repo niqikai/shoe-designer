@@ -62,7 +62,7 @@ def _check_archive(path, expected_shape):
 def load_certified_domain(directory: Path, *, baseline: dict, shape,
                           z_min_mm: float, z_max_mm: float,
                           settings: LatticeDomainParameters, spacing_mm: float,
-                          max_voxels: int, max_memory_mb: float) -> SoleDomain:
+                          max_voxels: int, max_memory_mb: float, envelope=None) -> SoleDomain:
     """Validate provenance, exact saved evidence and grid before replaying a field.
 
     No missing or stale evidence falls back to an unvalidated cache. No field is
@@ -70,6 +70,8 @@ def load_certified_domain(directory: Path, *, baseline: dict, shape,
     """
     if not np.isfinite([z_min_mm, z_max_mm]).all() or z_min_mm >= z_max_mm:
         raise ValueError("Cached domain requires finite ordered sole Z bounds")
+    if envelope is not None and not np.allclose(envelope.z_bounds, [z_min_mm, z_max_mm], rtol=0, atol=1e-8):
+        raise ValueError('Cached domain curved envelope and global Z bounds disagree')
     box = shape.bounding_box()
     bounds = np.array([[box.min.X, box.min.Y, z_min_mm],
                        [box.max.X, box.max.Y, z_max_mm]], dtype=float)
@@ -86,6 +88,11 @@ def load_certified_domain(directory: Path, *, baseline: dict, shape,
     if not isinstance(provenance.get("run_id"), str) or not provenance["run_id"].strip():
         raise ValueError("Cached domain requires an identified original sampling run_id")
     parameters = provenance.get("parameters", {})
+    expected_envelope = None if envelope is None else envelope.metadata
+    if (settings.mode == 'curved_lower_foot') != (envelope is not None):
+        raise ValueError('Cached domain mode requires the matching explicit envelope')
+    if parameters.get('envelope') != expected_envelope:
+        raise ValueError('Cached domain provenance envelope differs')
     _same_numeric(parameters.get("spacing_mm"), spacing_mm, "provenance spacing")
     _same_numeric(parameters.get("clearance_mm"), settings.clearance_mm, "provenance clearance")
     _same_numeric(parameters.get("sole_z_bounds_mm"), [z_min_mm, z_max_mm], "provenance sole Z bounds")
@@ -99,6 +106,8 @@ def load_certified_domain(directory: Path, *, baseline: dict, shape,
         if sha256(path) != provenance.get(key):
             raise ValueError(f"Cached domain hash changed: {path.name}")
     metadata = json.loads(metadata_path.read_text())
+    if metadata.get('envelope') != expected_envelope:
+        raise ValueError('Cached domain metadata envelope differs')
     if metadata.get("axis_order") != "XYZ" or metadata.get("shape_xyz") != list(plan.shape):
         raise ValueError("Cached domain metadata axis order or grid shape differs")
     for key, expected in (("origin_mm", plan.origin_mm), ("spacing_mm", spacing_mm),

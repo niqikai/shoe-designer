@@ -66,6 +66,38 @@ def test_replays_exact_cached_field_without_new_sampling(cache):
     assert result.plan.shape == field.shape
 
 
+def test_planar_cache_cannot_be_replayed_as_curved_domain(cache, monkeypatch):
+    from shoe_poc.lattice.envelope import SoleEnvelope
+    directory, _, _, _, kwargs = cache
+    kwargs['settings'] = LatticeDomainParameters(mode='curved_lower_foot')
+    kwargs['envelope'] = SoleEnvelope({'version': 'lower-foot-roof-polyline-v1',
+        'lower_datum_z_mm': -4., 'upper_points_xz_mm': [[0., -1.], [8., 0.]]})
+    monkeypatch.setattr(np, 'load', lambda *a, **k: pytest.fail('stale curved contract must reject before field load'))
+    with pytest.raises(ValueError, match='envelope'):
+        load_certified_domain(directory, **kwargs)
+
+
+@pytest.mark.parametrize('changed', ['roof', 'guide_hash'])
+def test_curved_cache_requires_identical_roof_and_frozen_guide_identity(cache, monkeypatch, changed):
+    from shoe_poc.lattice.envelope import SoleEnvelope
+    directory, field, metadata, provenance, kwargs = cache
+    identity = {'version': 'lower-foot-roof-polyline-v1', 'lower_datum_z_mm': -4.,
+        'upper_points_xz_mm': [[0., -1.], [8., 0.]], 'source_geometry_report_sha256': 'frozen-guide'}
+    metadata['envelope'] = copy.deepcopy(identity)
+    provenance['parameters']['envelope'] = copy.deepcopy(identity)
+    save_cache(directory, field, metadata, provenance)
+    kwargs['settings'] = LatticeDomainParameters(mode='curved_lower_foot')
+    kwargs['envelope'] = SoleEnvelope(identity)
+    assert np.array_equal(load_certified_domain(directory, **kwargs).field_mm, field)
+    if changed == 'roof':
+        identity['upper_points_xz_mm'][0][1] = -.5
+    else:
+        identity['source_geometry_report_sha256'] = 'different-guide'
+    monkeypatch.setattr(np, 'load', lambda *a, **k: pytest.fail('stale envelope must reject before field load'))
+    with pytest.raises(ValueError, match='envelope'):
+        load_certified_domain(directory, **kwargs)
+
+
 @pytest.mark.parametrize("change", ["source", "accepted_run", "support_hash"])
 def test_stale_baseline_is_rejected_before_numpy_load(cache, monkeypatch, change):
     directory, _, _, _, kwargs = cache

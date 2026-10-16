@@ -94,6 +94,15 @@
       "additionalProperties": false,
       "description": "Conservative underfoot computational region inside the accepted CAD.",
       "properties": {
+        "mode": {
+          "default": "planar",
+          "enum": [
+            "planar",
+            "curved_lower_foot"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
         "max_z_offset_mm": {
           "default": 0.0,
           "maximum": 0,

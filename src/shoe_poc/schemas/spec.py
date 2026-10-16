@@ -135,6 +135,7 @@ class SoleParameters(StrictModel):
 class LatticeDomainParameters(StrictModel):
     """Conservative underfoot computational region inside the accepted CAD."""
 
+    mode: Literal['planar', 'curved_lower_foot'] = 'planar'
     max_z_offset_mm: Annotated[float, Field(ge=-20, le=0)] = 0.0
     clearance_mm: Annotated[float, Field(ge=0.5, le=10)] = 2.0
     bounds_mm: Annotated[list[RotationRow], Field(min_length=2, max_length=2)] | None = None
