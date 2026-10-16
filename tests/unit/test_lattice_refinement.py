@@ -99,6 +99,13 @@ def test_native_refinement_checkpoint_resumes_only_bound_seed_and_still_complete
     eligible = depth > .1+np.sqrt(3)*.8+8e-6+.1
     assert eligible.any() and np.all(result.field_mm[eligible] < 0)
     assert np.all(depth[result.field_mm < 0] >= .1+np.sqrt(3)*.8-1e-6)
+    fresh = refine_sole_domain(seed(), shoe, cavity, settings=settings, envelope=roof,
+                               source_identity={'test': 'box'})
+    replayed = refine_sole_domain(seed(), shoe, cavity, settings=settings, envelope=roof,
+                                  checkpoint_path=journal, source_identity={'test': 'box'})
+    assert np.array_equal(result.field_mm, fresh.field_mm)
+    assert np.array_equal(result.field_mm, replayed.field_mm)
+    assert replayed.metadata['refinement']['native_distance_queries'] == 0
     with pytest.raises(DomainSamplingError, match='binding'):
         refine_sole_domain(seed(), shoe, cavity, settings=settings, envelope=roof,
                            checkpoint_path=journal, source_identity={'test': 'changed'})

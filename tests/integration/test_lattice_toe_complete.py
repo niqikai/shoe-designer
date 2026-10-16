@@ -27,6 +27,7 @@ def completed(request):
              'validation_report.json', 'terminal_coverage_report.json', 'terminal_comparison.png',
              'terminal_preview_report.json', 'repeatability_report.json',
              'debug/terminal_expectations.json', 'debug/previous_terminal_coverage_report.json',
+             'debug/refinement_query_seed.json',
              'debug/preserved_artifacts_before.json')
     request.config._shoe_terminal_provenance = {'directory': str(directory.resolve()),
         'run_id': execution['run_id'], 'files': {name: {'sha256': sha256(directory/name),
@@ -92,6 +93,8 @@ def test_actual_mesh_closure_cavity_and_field_checks_still_pass(completed):
     repeated = json.loads((directory/'repeatability_report.json').read_text())
     assert repeated['geometry_status'] == 'PASS'
     assert repeated['identical_stl_sha256'] is True
+    assert repeated['identical_replayed_domain'] is True
+    assert repeated['domain_query_replay']['native_distance_queries'] == 0
     assert repeated['primary_stl_sha256'] == sha256(directory/'lattice.stl')
 
 

@@ -38,11 +38,16 @@ def rasterize(mesh, elevation, azimuth, width=900, height=520, frame_bounds=None
     if base_colors.shape not in ((3,), (len(mesh.faces), 3)) or not np.isfinite(base_colors).all() or np.any((base_colors < 0) | (base_colors > 1)):
         raise ValueError('Raster face colors must be finite RGB values in [0,1]')
     colors = (0.4 + 0.6*diffuse[:, None]) * base_colors
-    for triangle, color in zip(screen[mesh.faces], colors):
-        x0, y0 = np.maximum(np.floor(triangle[:, :2].min(axis=0)), [0, 0]).astype(int)
-        x1, y1 = np.minimum(np.ceil(triangle[:, :2].max(axis=0)), [width-1, height-1]).astype(int)
-        if x1 < x0 or y1 < y0:
-            continue
+    triangles = screen[mesh.faces]
+    # The identical pixel bounds can be calculated in one batch. This also
+    # skips off-frame faces before the Python loop in close-up views; all
+    # in-frame triangles keep their original order and depth-buffer behavior.
+    lows = np.maximum(np.floor(triangles[:, :, :2].min(axis=1)), [0, 0]).astype(int)
+    highs = np.minimum(np.ceil(triangles[:, :, :2].max(axis=1)), [width-1, height-1]).astype(int)
+    for index in np.flatnonzero(np.all(highs >= lows, axis=1)):
+        triangle, color = triangles[index], colors[index]
+        x0, y0 = lows[index]
+        x1, y1 = highs[index]
         a, b, c = triangle
         denominator = (b[1]-c[1])*(a[0]-c[0]) + (c[0]-b[0])*(a[1]-c[1])
         if abs(denominator) < 1e-9:

@@ -190,7 +190,6 @@ def refine_sole_domain(domain, shape, cavity, *, settings, envelope=None,
                     or key != ','.join(map(str, np.rint((p-np.asarray(domain.plan.origin_mm))/domain.plan.spacing_mm).astype(int)))):
                 raise DomainSamplingError('Refinement checkpoint contains invalid query records')
             records[key] = row
-            boundary_points.append(b)
         resumed = True
     tree, tree_size = None, 0
     counters = {'native_distance_queries': 0, 'reused_distance_queries': 0}
@@ -235,6 +234,10 @@ def refine_sole_domain(domain, shape, cavity, *, settings, envelope=None,
         if key in records:
             counters['reused_distance_queries'] += 1
             row = records[key]
+            # Introduce supporting points in the original traversal order.
+            # Preloading future points could prune earlier blocks differently
+            # and change the certificate field on an otherwise identical run.
+            boundary_points.append(np.asarray(row['boundary_point_mm']))
             return row['distance_mm'], row['inside']
         measure = BRepExtrema_DistShapeShape(Vertex(*point).wrapped, boundary.wrapped)
         if not measure.IsDone() or not math.isfinite(measure.Value()):

@@ -112,6 +112,19 @@ this check. The old outputs and first query-budget failure remain preserved.
 component-colored preview, tests and frozen-input hashes. Manufacturing and
 M3 fusion remain separate.
 
+The current completion evidence is in
+[the principal toe completion report](docs/milestone2_toe_complete_report.md).
+The actual run preserves and reuses the previous coarse CAD certificates:
+
+```sh
+.venv/bin/python -m shoe_poc build-lattice --spec input/specs/shoe_spec_m2_toe_complete.json --base-dir output/m1_toe_refine --domain-cache output/m2_toe_repair --output output/m2_toe_complete --max-voxels 25000000 --max-field-memory-mb 6144 --max-rss-mb 8192
+```
+
+Without a saved coarse seed, omit `--domain-cache` to perform native sampling
+before adaptive completion. Domain replay from the bound exact-query journal,
+gyroid resampling and actual STL export are checked separately; replay is not
+reported as a fresh native sampling run.
+
 
 M2 can reuse completed CAD domain certificates with `build-lattice --domain-cache <directory>` only when the separate `domain_provenance.json`, source hashes, frozen baseline, actual parameters, grid headers and saved CAD evidence all agree. The loader checks array budgets before decompression. Such execution records identify cache reuse and retain the original sampling run and time; they do not claim new CAD sampling. Independent checks still run on the newly exported STL.
 

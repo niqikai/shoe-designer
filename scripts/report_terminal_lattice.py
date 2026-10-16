@@ -39,8 +39,8 @@ def report(directory, document):
     for name, record in provenance['files'].items():
         if sha256(directory/name) != record['sha256'] or (directory/name).stat().st_size != record['bytes']:
             raise ValueError(f'Tested evidence changed: {name}')
-    # Pipeline output hashes include live debug logs; final acceptance binds the
-    # immutable geometry outputs explicitly and the final artifact manifest later.
+    # Bind the original immutable geometry outputs explicitly; later verification
+    # artifacts are additionally bound by tested provenance and the final manifest.
     for name in ('lattice.stl', 'domain_field.npz', 'domain_metadata.json', 'gyroid_field.npz',
                  'domain_provenance.json', 'validation_report.json', 'lattice_metadata.json', 'shoe_spec.json'):
         record = execution['outputs'][name]
@@ -68,6 +68,8 @@ def report(directory, document):
     refinement = domain['refinement']
     passed = (execution['status'] == validation['geometry_status'] == terminal['geometry_status']
               == repeated['geometry_status'] == 'PASS' and previous['geometry_status'] == 'FAIL'
+              and repeated['identical_replayed_domain']
+              and repeated['domain_query_replay']['native_distance_queries'] == 0
               and refinement['status'] == 'COMPLETE' and not refinement['query_budget_reached']
               and tests['pytest_exit_code'] == tests['counts']['FAIL'] == tests['counts']['NOT_TESTED'] == 0
               and replay['pytest_exit_code'] == replay['counts']['FAIL'] == replay['counts']['NOT_TESTED'] == 0
@@ -119,7 +121,7 @@ def report(directory, document):
 
 真实 STL 共 {terminal['mesh']['surface_component_count']} 个边界表面，正向材料表面 {terminal['mesh']['positive_component_count']} 个；其余表面完整保留并在图中标为橙色。主体伸达通过不代表整鞋融合或所有碎片已连接。灰色是冻结 M1，蓝色为主体；剖面绿点代表域应存在的位置，可能落在合法 Gyroid 孔隙中。红叉表示测量位置不具备所需预留空间。最前端薄区仍不能强行填充晶格；M3 的外壳及实体过渡尚未生成。
 
-原生 CAD 归属、鞋腔排除、网格水密/流形、方向、解析场误差及底域覆盖检查通过。独立重新采样 Gyroid、提取及实际 STL 序列化 SHA 相同：`{repeated['identical_stl_sha256']}`；复用同一已认证域，未声称第二次 CAD 域重建。
+原生 CAD 归属、鞋腔排除、网格水密/流形、方向、解析场误差及底域覆盖检查通过。使用绑定的精确查询记录重新遍历认证域，数组完全相同：`{repeated['identical_replayed_domain']}`，新增原生距离查询为 {repeated['domain_query_replay']['native_distance_queries']}。随后独立重新采样 Gyroid、提取及实际 STL 序列化 SHA 相同：`{repeated['identical_stl_sha256']}`。这是缓存查询重放，不是第二次全新原生 CAD 采样。
 
 ## 证据和性能
 
@@ -138,7 +140,7 @@ def report(directory, document):
 .venv/bin/python scripts/report_terminal_lattice.py
 ```
 
-本轮没有重新验证周期、阈值、分辨率变体；历史 0.45 失败仍保留，参数稳健性保持 PARTIAL。全局壁厚、制造、打印及穿着分别为 NOT_VERIFIED / NOT_TESTED。复杂几何诊断和初始重建由 GPT-6 Astra / high 执行，主任务整合、资源优化、独立验证及报告；后续 Astra 配额不足后未声称其完成余下修改。
+本轮没有重新验证周期、阈值、分辨率变体；历史 0.45 失败仍保留，参数稳健性保持 PARTIAL。全局壁厚、制造、打印及穿着分别为 NOT_VERIFIED / NOT_TESTED。复杂几何诊断和初始重建由 GPT-6 Astra / high 执行；GPT-6.1 Sol / high 独立审查发现并复现 MC 网格平面验收误判。主任务完成整合、资源优化、该误判修正、实际运行、独立验证及报告；后续 Astra 配额不足后未声称其完成余下修改。
 ''')
     write_json(directory/'artifact_manifest.json', artifact_manifest(directory))
     if not passed:
