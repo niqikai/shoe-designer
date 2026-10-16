@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import gc
 from pathlib import Path
 import time
 
@@ -18,7 +19,7 @@ class LatticeMeshResult:
     metadata: dict
 
 
-def _active_cells(values):
+def _active_cells(values, level=0.0):
     count = 0
     for index in range(values.shape[0] - 1):
         corners = [values[index + dx, dy:values.shape[1] - 1 + dy,
@@ -26,7 +27,7 @@ def _active_cells(values):
                    for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)]
         lower = np.minimum.reduce(corners)
         upper = np.maximum.reduce(corners)
-        count += int(np.count_nonzero((lower <= 0) & (upper >= 0) & (lower < upper)))
+        count += int(np.count_nonzero((lower <= level) & (upper >= level) & (lower < upper)))
     return count
 
 
@@ -57,6 +58,41 @@ def mesh_integrity(mesh: trimesh.Trimesh) -> dict:
             "manufacturing_status": "NOT_VERIFIED"}
 
 
+class LatticeExtractionError(ValueError):
+    """An unsuccessful bounded contour ladder, retaining all attempt evidence."""
+
+    def __init__(self, message, attempts):
+        self.metadata = {"target_level": 0.0, "numerical_attempts": attempts,
+                         "mesh_repair_applied": False, "components_removed": 0}
+        super().__init__(message)
+
+
+def _serialization_area_checks(mesh):
+    """Check actual STL coordinate quantization without repairing triangles.
+
+    Binary STL stores float32 coordinates. Work in bounded triangle slabs after
+    quantizing vertices, avoiding a second complete triangle-array allocation.
+    Full reimport topology checks remain the pipeline's independent validation.
+    """
+    with np.errstate(over="ignore", invalid="ignore"):
+        serialized = mesh.vertices.astype(np.float32)
+    finite = bool(np.isfinite(serialized).all())
+    if not finite:
+        return {"serialized_finite_vertices": False,
+                "serialized_minimum_area_mm2": None,
+                "serialized_degenerate_triangle_count": None}
+    minimum, degenerate = float("inf"), 0
+    for start in range(0, len(mesh.faces), 65536):
+        triangles = serialized[mesh.faces[start:start+65536]].astype(np.float64)
+        area = np.linalg.norm(np.cross(triangles[:, 1]-triangles[:, 0],
+                                       triangles[:, 2]-triangles[:, 0]), axis=1)*.5
+        minimum = min(minimum, float(area.min()))
+        degenerate += int(np.count_nonzero(area <= 1e-12))
+    return {"serialized_finite_vertices": finite,
+            "serialized_minimum_area_mm2": minimum,
+            "serialized_degenerate_triangle_count": degenerate}
+
+
 def extract_lattice_mesh(field: SampledField, *, max_memory_bytes=DEFAULT_MAX_MEMORY_BYTES) -> LatticeMeshResult:
     started = time.perf_counter()
     values = field.values
@@ -68,29 +104,67 @@ def extract_lattice_mesh(field: SampledField, *, max_memory_bytes=DEFAULT_MAX_ME
         raise ValueError("Open scalar boundary: require strictly positive padded samples before extraction")
     if not np.isfinite(field.spacing_mm) or field.spacing_mm <= 0 or not np.isfinite(field.origin_mm).all():
         raise ValueError("Field origin and positive spacing must be finite millimetre coordinates")
-    active = _active_cells(values)
-    # Conservative active-cell reservation for native extraction, Trimesh,
-    # edge sorting/adjacency and vertex-link checks; check before native MC.
-    estimate = int(values.size * 48 + active * 1536)
-    if max_memory_bytes <= 0 or estimate > max_memory_bytes:
-        raise ValueError(f"Estimated field/meshing peak {estimate} bytes exceeds budget {max_memory_bytes}; reduce domain or increase spacing")
     from skimage.measure import marching_cubes
-    vertices, faces, _, _ = marching_cubes(values, level=0.0,
-        spacing=(field.spacing_mm,) * 3, gradient_direction="descent",
-        method="lewiner", allow_degenerate=False)
-    # MC returns local float32 positions. Add potentially large world offsets
-    # only after promoting them, preserving submillimetre translation accuracy.
-    vertices = vertices.astype(np.float64) + np.asarray(field.origin_mm, dtype=np.float64)
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    # Negative material means MC descent's orientation can depend on library
-    # convention. Reverse every triangle as a unit when necessary; no topology
-    # repair, component dropping, vertex smoothing or cap patching occurs.
-    if mesh.volume < 0:
-        mesh.invert()
-    integrity = mesh_integrity(mesh)
-    if integrity["status"] != "PASS":
-        raise ValueError(f"Extracted lattice mesh failed integrity checks: {integrity}")
-    metadata = {"method": "scikit-image Lewiner Marching Cubes", "level": 0,
+    field_minimum, field_maximum = float(values.min()), float(values.max())
+    scale = max(1.0, abs(field_minimum), abs(field_maximum))
+    epsilon = float(np.finfo(np.float32).eps)
+    attempts = []
+    for multiplier in (0, 16, 128):
+        inset = multiplier * epsilon * scale
+        level = -inset if inset else 0.0
+        if not field_minimum < level < field_maximum:
+            attempts.append({"level": level, "inset_dimensionless": inset,
+                             "status": "FAIL", "reason": "Conservative contour no longer brackets material"})
+            raise LatticeExtractionError("Bounded numerical contour removed the valid zero crossing", attempts)
+        active = _active_cells(values, level=level)
+        # Reserve before EVERY native extraction, including numerical retries.
+        estimate = int(values.size * 48 + active * 1536)
+        if max_memory_bytes <= 0 or estimate > max_memory_bytes:
+            attempts.append({"level": level, "inset_dimensionless": inset, "status": "FAIL",
+                             "reason": "Meshing allocation budget exceeded", "peak_memory_estimate_bytes": estimate})
+            raise LatticeExtractionError(
+                f"Estimated field/meshing peak {estimate} bytes exceeds budget {max_memory_bytes}; reduce domain or increase spacing", attempts)
+        vertices, faces, _, _ = marching_cubes(values, level=level,
+            spacing=(field.spacing_mm,) * 3, gradient_direction="descent",
+            method="lewiner", allow_degenerate=False)
+        # Promote local float32 MC positions before adding physical origin.
+        vertices = vertices.astype(np.float64) + np.asarray(field.origin_mm, dtype=np.float64)
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        if mesh.volume < 0:
+            mesh.invert()
+        integrity = mesh_integrity(mesh)
+        native_area = mesh.area_faces
+        serialized = _serialization_area_checks(mesh)
+        serialization_ok = serialized["serialized_finite_vertices"] and serialized["serialized_degenerate_triangle_count"] == 0
+        passed = integrity["status"] == "PASS" and serialization_ok
+        attempt = {"level": level, "inset_dimensionless": inset, "float32_eps_multiplier": multiplier,
+                   "status": "PASS" if passed else "FAIL", "active_cells": active,
+                   "minimum_area_mm2": float(native_area.min()),
+                   "degenerate_triangle_count": int(np.count_nonzero(native_area <= 1e-12)),
+                   "peak_memory_estimate_bytes": estimate, "integrity": integrity, **serialized}
+        attempts.append(attempt)
+        if passed:
+            break
+        # Numerical contour shifts cannot be used to excuse another topology,
+        # winding, manifold, finite-coordinate or volume failure.
+        other_checks = {name: passed for name, passed in integrity.get("checks", {}).items()
+                        if name != "nondegenerate_triangles"}
+        if not other_checks or not all(other_checks.values()):
+            raise LatticeExtractionError(f"Extracted lattice mesh failed non-area integrity checks: {integrity}", attempts)
+        if multiplier == 128:
+            raise LatticeExtractionError("Extracted lattice mesh failed strict native/STL area checks after all bounded numerical contours", attempts)
+        del mesh, vertices, faces, native_area
+        gc.collect()
+    threshold = field.metadata.get("threshold")
+    metadata = {"method": "scikit-image Lewiner Marching Cubes", "level": level,
+                "target_level": 0.0, "numerical_level_inset_dimensionless": inset,
+                "effective_gyroid_threshold": float(threshold)-inset if threshold is not None else None,
+                "numerical_domain_inset_mm": field.spacing_mm*inset,
+                "numerical_field_scale": scale, "numerical_attempts": attempts,
+                "numerical_contour_reason": (
+                    "Zero target attempted first; only strict native/STL float32 area failures with all other integrity checks passing permit bounded inward 16/128-epsilon contours. "
+                    "Original scalar field and parameters are unchanged; actual negative level is a conservative numerical shrink, not the exact requested zero contour. "
+                    "All components of the chosen actual level are retained; no faces, components or vertices are repaired or removed."),
                 "axis_order": "xyz", "coordinate_units": "mm",
                 "spacing_mm": field.spacing_mm, "origin_mm": list(field.origin_mm),
                 "active_cells": active, "peak_memory_estimate_bytes": estimate,

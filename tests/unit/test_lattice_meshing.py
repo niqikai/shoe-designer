@@ -1,9 +1,11 @@
+import copy
+
 import numpy as np
 import pytest
 import trimesh
 
 from shoe_poc.lattice.gyroid import GyroidParameters, SampledField, SamplingGrid, sample_gyroid
-from shoe_poc.lattice.meshing import extract_lattice_mesh, export_lattice, mesh_integrity
+from shoe_poc.lattice.meshing import LatticeExtractionError, extract_lattice_mesh, export_lattice, mesh_integrity
 
 
 def make_field(*, period=12, threshold=.6, spacing=.4, phase=(0, 0, 0)):
@@ -50,12 +52,112 @@ def test_disconnected_implicit_material_components_are_retained():
 
 
 def test_large_world_origin_does_not_quantize_native_vertices():
-    field = make_field()
+    # A coarse closed block is representable in STL at these large origins;
+    # submillimetre gyroid features may legitimately fail serialization there.
+    values = np.ones((7, 7, 7), dtype=np.float32)
+    values[2:5, 2:5, 2:5] = -1
+    field = SampledField(values, (0., 0., 0.), .5, {})
     local = extract_lattice_mesh(field).mesh
     offset = np.array([1_000_000.0, 2_000_000.0, -3_000_000.0])
     translated = SampledField(field.values, tuple(np.array(field.origin_mm) + offset), field.spacing_mm, field.metadata)
     distant = extract_lattice_mesh(translated).mesh
     assert np.allclose(distant.vertices - offset, local.vertices, atol=1e-8, rtol=0)
+
+
+def tiny_void_field(positive_value, origin=(0., 0., 0.)):
+    values = np.ones((9, 9, 9), dtype=np.float32)
+    values[2:7, 2:7, 2:7] = -1
+    # A zero surface very close to a node produces an arbitrarily small closed
+    # void; no face is deleted to make the numerical contour acceptable.
+    values[4, 4, 4] = positive_value
+    return SampledField(values, origin, 1., {"threshold": .45, "nested": {"original": True}})
+
+
+@pytest.mark.parametrize(("positive_value", "origin", "first_native_pass"), [
+    (5e-7, (0., 0., 0.), False),
+    (3e-6, (100., 100., 100.), True),
+])
+def test_bounded_inward_contour_handles_native_or_stl_tiny_area_without_mutating_field(
+        positive_value, origin, first_native_pass):
+    field = tiny_void_field(positive_value, origin)
+    original = field.values.copy()
+    original_metadata = copy.deepcopy(field.metadata)
+    values_object, metadata_object = field.values, field.metadata
+    result = extract_lattice_mesh(field)
+    attempts = result.metadata["numerical_attempts"]
+    assert attempts[0]["level"] == 0 and attempts[0]["status"] == "FAIL"
+    assert attempts[0]["integrity"]["checks"]["nondegenerate_triangles"] is first_native_pass
+    if first_native_pass:
+        assert attempts[0]["serialized_degenerate_triangle_count"] > 0
+    else:
+        assert attempts[0]["degenerate_triangle_count"] > 0
+    assert 2 <= len(attempts) <= 3
+    assert attempts[-1]["status"] == "PASS"
+    assert attempts[-1]["degenerate_triangle_count"] == attempts[-1]["serialized_degenerate_triangle_count"] == 0
+    assert attempts[-1]["minimum_area_mm2"] > 1e-12
+    assert attempts[-1]["serialized_minimum_area_mm2"] > 1e-12
+    inset = result.metadata["numerical_level_inset_dimensionless"]
+    assert inset in (16*np.finfo(np.float32).eps, 128*np.finfo(np.float32).eps)
+    assert result.metadata["target_level"] == 0
+    assert result.metadata["level"] == -inset
+    assert result.metadata["effective_gyroid_threshold"] == .45-inset
+    assert result.metadata["numerical_domain_inset_mm"] == field.spacing_mm*inset
+    assert result.metadata["components_removed"] == 0
+    assert not result.metadata["mesh_repair_applied"]
+    assert result.mesh.is_watertight and result.mesh.is_winding_consistent
+    assert result.metadata["integrity"]["connected_components"] == 2
+    assert field.values is values_object and field.metadata is metadata_object
+    assert np.array_equal(field.values, original)
+    assert field.metadata == original_metadata
+
+
+def test_numerical_ladder_stops_after_three_strict_serialization_failures():
+    field = tiny_void_field(3e-6, (1_000_000., 1_000_000., 1_000_000.))
+    original = field.values.copy()
+    with pytest.raises(LatticeExtractionError, match="all bounded numerical contours") as caught:
+        extract_lattice_mesh(field)
+    attempts = caught.value.metadata["numerical_attempts"]
+    assert len(attempts) == 3
+    assert [attempt["float32_eps_multiplier"] for attempt in attempts] == [0, 16, 128]
+    assert all(attempt["status"] == "FAIL" for attempt in attempts)
+    assert all(attempt["serialized_degenerate_triangle_count"] > 0 for attempt in attempts)
+    assert np.array_equal(field.values, original)
+
+
+def test_resource_budget_cannot_be_evaded_by_numerical_retries(monkeypatch):
+    import skimage.measure
+    field = tiny_void_field(5e-7)
+    monkeypatch.setattr(skimage.measure, "marching_cubes", lambda *a, **k: pytest.fail("Allocation preflight must run first"))
+    with pytest.raises(LatticeExtractionError, match="meshing peak") as caught:
+        extract_lattice_mesh(field, max_memory_bytes=100)
+    assert len(caught.value.metadata["numerical_attempts"]) == 1
+    assert caught.value.metadata["numerical_attempts"][0]["level"] == 0
+
+
+def test_valid_target_zero_contour_is_retained_without_retry():
+    result = extract_lattice_mesh(make_field())
+    assert result.metadata["level"] == result.metadata["target_level"] == 0
+    assert result.metadata["numerical_level_inset_dimensionless"] == 0
+    assert result.metadata["effective_gyroid_threshold"] == .6
+    assert len(result.metadata["numerical_attempts"]) == 1
+
+
+def test_non_area_integrity_failure_is_never_retried(monkeypatch):
+    import shoe_poc.lattice.meshing as meshing
+    original = meshing.mesh_integrity
+    calls = []
+
+    def reject_winding(mesh):
+        report = original(mesh)
+        calls.append(report)
+        report["checks"]["consistent_winding"] = False
+        report["status"] = "FAIL"
+        return report
+
+    monkeypatch.setattr(meshing, "mesh_integrity", reject_winding)
+    with pytest.raises(LatticeExtractionError, match="non-area integrity") as caught:
+        extract_lattice_mesh(tiny_void_field(5e-7))
+    assert len(calls) == len(caught.value.metadata["numerical_attempts"]) == 1
 
 
 def test_open_boundary_and_memory_budget_fail_before_native_extraction():
