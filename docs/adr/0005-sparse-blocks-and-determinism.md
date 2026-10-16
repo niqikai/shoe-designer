@@ -5,7 +5,7 @@
 ## Considered Options
 
 - **整鞋稠密栅格**：0.25 mm 下约 3 亿体素，一个 float32 数组就超过 1 GB，PR #1 的原型曾在 16 GB 机器上耗尽内存。拒绝。
-- **OpenVDB**：成熟的稀疏格式，但 Python 绑定在 macOS arm64 上安装不便。M0 不用；M2 视性能再评估，接口保持可替换。
+- **OpenVDB**：成熟的稀疏格式，但 Python 绑定在 macOS arm64 上安装不便。M0 不用；M1 视性能再评估，接口保持可替换。
 - **自研块稀疏网格（采用）**：实现量小，内存与表面积成正比。
 
 ## Consequences
