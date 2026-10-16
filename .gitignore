@@ -1,0 +1,6 @@
+input/lasts/
+output/
+.scratch/
+.venv/
+__pycache__/
+*.egg-info/
