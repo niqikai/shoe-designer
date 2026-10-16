@@ -432,7 +432,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 ### 6.3 规范化与哈希
 
-- **量化**：Resolver 写入前，把 `geometry` 中的长度量化到 1e-4 mm，比例量化到 1e-6（银行家舍入），并把 −0.0 规范为 0.0。BuildPlan 中存储的就是量化后的值。schema 中长度一律为 number，整数字面量按浮点处理。
+- **量化**：Resolver 写入前，把 `geometry` 中的长度量化到 1e-4 mm，比例量化到 1e-6，一律用 Python `round(x, n)` 的语义（对二进制浮点的精确值做银行家舍入，不对十进制字面量舍入），并把 −0.0 规范为 0.0。BuildPlan 中存储的就是量化后的值。schema 中长度一律为 number，整数字面量按浮点处理。
 - **plan_hash**：
 
   ```
@@ -466,7 +466,7 @@ BuildPlan 分为 `geometry`（几何段）和 `resolution`（分辨率段），�
 
 **阶段 B（Shape Source 之后）**：
 
-8. **确定 N**：N = max(1, round(P(0.5) / cell_inplane_mm))。P(0.5) 是中间高度环（τ = 0.5）的周长（5.5，ADR 0005）。N 写入 `shell.circumferential_cells`，并记一条 Resolution Note。
+8. **确定 N**：N = max(1, round(P(0.5) / cell_inplane_mm))，`round` 为 Python 内建语义（恰为 .5 时取偶数）。P(0.5) 是中间高度环（τ = 0.5）的周长（5.5，ADR 0005）。N 写入 `shell.circumferential_cells`，并记一条 Resolution Note。
 9. **随形部分约束求解**：对 Upper 与 HeelCounter 执行 7.3。两端分别使用以下 Cell 形状（周向, t 向, 法向）：
 
    | 端 | Cell 形状 |
@@ -1097,13 +1097,13 @@ Crop Region 与局部探测窗口（7.6）共用"由 Landmark 与 BuildPlan 参�
 | 码 | 含义 | `errors[].class` |
 |---|---|---|
 | 0 | 成功（可能带 soft 警告） | — |
-| 1 | 内部错误 | internal |
+| 1 | 内部错误（`E_INTERNAL`） | internal |
 | 2 | CLI 用法错误，包括输出目录非空 | — |
 | 3 | DesignSpec 无效、版本不支持、Override 非法或 Infeasible | spec |
-| 4 | Shape Source 失败：子进程失败、Bundle 违反不变量、Blender 版本不符、`--plan` 形状不一致 | shape |
-| 5 | hard 级 Printability Check 失败，含阶段 B 的构建体积预检（`E_BUILD_VOLUME`）与局部探测（`E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`） | printability |
-| 6 | 资源预检不通过（确定性失败，重试无用） | resource |
-| 7 | 超时（可重试） | timeout |
+| 4 | Shape Source 失败：子进程失败、Bundle 违反不变量、Blender 版本不符、缺少 Surface Parameterization（`E_SHAPE_PARAM_MISSING`）、`--plan` 形状不一致 | shape |
+| 5 | hard 级 Printability Check 失败（`E_PRINT_THIN_WALL`、`E_PRINT_TRAPPED_POWDER`、`E_PRINT_HANGING_MATERIAL`、`E_PRINT_MESH_INVALID`、`E_PRINT_COMPONENTS`、`E_PRINT_CAVITY`），含阶段 B 的构建体积预检（`E_BUILD_VOLUME`）与局部探测（`E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`） | printability |
+| 6 | 资源预检不通过（`E_RESOURCE_BUDGET`；确定性失败，重试无用） | resource |
+| 7 | 超时（`E_TIMEOUT`；可重试） | timeout |
 
 ---
 
@@ -1256,7 +1256,7 @@ tests/                          # fixtures/ 下放 Shape Bundle
 examples/specs/                 # G1–G5 的 DesignSpec
 ```
 
-**第三方库**：以下都是已验证可用的参考选择，并且都有 cp313 macOS arm64 的安装包：numpy、scipy、scikit-image、trimesh、manifold3d、libigl、pydantic v2、fast-simplification、pytest。实现者可以替换，但必须满足第 13 节的性能要求和 ADR 0006 的确定性要求。
+**第三方库**：以下都是已验证可用的参考选择，并且都有 cp313 macOS arm64 的安装包：numpy、scipy、scikit-image、trimesh、manifold3d、libigl、pydantic v2、fast-simplification、numba、pytest。numba 代码禁用 `parallel=True` 与 `fastmath=True`（ADR 0006 的确定性要求）。实现者可以替换，但必须满足第 13 节的性能要求和 ADR 0006 的确定性要求。
 
 **已知坑**：trimesh 的 proximity 查询太慢，不可用于整鞋距离场。
 

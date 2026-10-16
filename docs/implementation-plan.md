@@ -146,16 +146,16 @@ M0 ─┬─► M1（Shape Source）──────────────�
 - **交付物**：`pyproject.toml`（uv、Python 3.13；§17 列出的依赖加 numba）、`uv.lock`、`src/shoegen/{spec,shape,zones,lattice,fuse,validate,export}/__init__.py`、`src/shoegen/{pipeline,cli,errors}.py`、`src/shoegen/spec/canonical.py`、`src/shoegen/spec/data/__init__.py`（数据表登记）、`scripts/memguard.sh`、`tests/`、`examples/specs/`。
 - **验收标准**：
   1. 在干净 checkout 上 `uv sync && uv run pytest` 通过；`uv run shoegen --help` 输出子命令列表（尚未实现的子命令以退出码 1、class `internal` 报"未实现"）。
-  2. 规范化测试：长度量化到 1e-4 mm、比例到 1e-6（银行家舍入，[缺口 G13]）；−0.0 规范为 0.0；`allow_nan=False` 遇 NaN 报错；整数字面量按浮点处理；同一数值经不同运算顺序得到的浮点差异不改变哈希（ADR 0006）。
+  2. 规范化测试：长度量化到 1e-4 mm、比例到 1e-6（Python `round(x, n)` 语义，§6.3，[缺口 G13] 已解决）；−0.0 规范为 0.0；`allow_nan=False` 遇 NaN 报错；整数字面量按浮点处理；同一数值经不同运算顺序得到的浮点差异不改变哈希（ADR 0006）。
   3. 错误对象序列化与 §3.5 示例逐字段一致；12.4 的每个退出码都有对应的 class。
 - **依赖**：无。
-- **风险**：低。numba 的 cp313 macOS arm64 安装包需确认（§17 列表里没有它，见 [缺口 G12]）。
+- **风险**：低。numba 已列入 §17（[缺口 G12] 已解决），其 cp313 macOS arm64 安装包需在 M0.1 确认。
 - **规模**：S（3 会话）。
 
 | ID | 任务 | 交付 | 模型·effort | 理由 |
 |---|---|---|---|---|
 | M0.1 | 仓库骨架 | pyproject、目录、pytest 选项（`slow` 标记、默认排除）、CLI 入口占位、收入 memguard.sh | H·medium | 纯样板，有现成清单 |
-| M0.2 | 错误模型与退出码 | `errors.py`：ErrorObject、class 枚举、异常层级到退出码的映射 | S·medium | 规格明确，但要给后续所有阶段定接口 |
+| M0.2 | 错误模型与退出码 | `errors.py`：ErrorObject、class 枚举、异常层级到退出码的映射，错误码按 §12.4（[缺口 G15] 已解决） | S·medium | 规格明确，但要给后续所有阶段定接口 |
 | M0.3 | 规范化、哈希与数据表登记 | `spec/canonical.py`、`spec/data/` 登记（`id@version`、sha256）及测试 | S·medium | 浮点 repr 与舍入的边角容易出错，需要细致的测试向量 |
 
 ---
@@ -214,7 +214,7 @@ M0 ─┬─► M1（Shape Source）──────────────�
   3. 四种 schema 导出：`llm` 投影中所有对象 `additionalProperties: false`、去掉 `overrides`/`fit`/`schema_version`、枚举为 `anyOf[{const, description}]`、数值范围写进 `description`；`buildplan` 中白名单叶子带 `x-overridable: true` 与范围；`full` 中 `overrides` 的键用白名单枚举。
   4. Override：白名单 15 条路径逐条测试范围与类型（五个 ρ 字段为 0.12–0.45）；非法键或值报 `E_SPEC_OVERRIDE`；被覆盖的值被钉住；Build Manifest 的 `overridden_semantics` 记录被覆盖的语义。
   5. 约束求解（桩求值器上）：Adjustment、Infeasible（附可行替代方案）、Tier Band 边界（半开区间、最外侧对称半宽、单档 ±0.03）、随形 Zone 放大 Cell 无效时不放大、Midsole ρ 的 Override 使 Footbed Layer 不可行 → `E_INFEASIBLE_OVERRIDE`、钉住的 ρ 借放大未被钉住的 Cell 变为可行（Cell 也被钉住时报 `E_INFEASIBLE_OVERRIDE`）、`rho_delta` 只在 Midsole ρ 未被钉住时可调、放大 `cell_inplane` 后重算 N；求值次数与查询记录符合 §7.3。
-  6. 阶段 B：N = max(1, round(P(0.5)/cell_inplane))（舍入方式见 [缺口 G14]）并记 Resolution Note；构建体积预检 6 种朝向，失败报 `E_BUILD_VOLUME`、退出码 5；`--plan` 路径中 N 不一致报 `E_PLAN_SHAPE_MISMATCH`、约束不满足报 `E_INFEASIBLE`、不产生 Adjustment。用 M1 fixture（或合成 Bundle）提供 P(τ)。
+  6. 阶段 B：N = max(1, round(P(0.5)/cell_inplane))（Python `round`，[缺口 G14] 已解决）并记 Resolution Note；构建体积预检 6 种朝向，失败报 `E_BUILD_VOLUME`、退出码 5；`--plan` 路径中 N 不一致报 `E_PLAN_SHAPE_MISMATCH`、约束不满足报 `E_INFEASIBLE`、不产生 Adjustment。用 M1 fixture（或合成 Bundle）提供 P(τ)。
   7. 每条 Adjustment 带路径、原值、新值、原因（`neck`、`pore`、`cell`）。
 - **依赖**：M0；M2.8 需要 M1.3 的 Bundle 读取与合成 Bundle。
 - **风险**：约束求解的组合边角（钉住的派生量、带两端检查点、放大 Cell 时颈厚与孔喉分别求值、阶段 A 与 B 两次求解的交互）。Tuning Table 自检要等 M3 的正式求值器才能最终通过。
@@ -441,10 +441,10 @@ M0 ─┬─► M1（Shape Source）──────────────�
 | G9 | **§10.2 新规则阈值与其他几何常量存放在哪里未定**：实体接触距离 1.0 mm、端部触及边界容差 0.1 mm、悬挂材料 1 mm³、σ = 0.5 mm、Island 10 mm³、光滑半径 0.3 mm。ADR 0006 要求它们经数据表版本与哈希追溯，但没有指定哪张表；§19 说 [初值] 由 §16 的实物结果标定，而本轮已决定前三项由 G1 实测定稿。 | M5.3、M6.8 | 建议：校验阈值放入 ManufacturingProfile（`pbf-tpu-generic.v1`），几何常量放入一张新的引擎常量数据表；并在规格中注明前三项由 G1 定稿、其余仍由 §16 标定；**部分解决**：探测的局部阈值（`probe_thin_fraction`、`probe_trapped_fraction`、`probe_hanging_mm3`）已放入 ManufacturingProfile（规格 §9.1），其余常量的存放位置仍待定 |
 | G10 | **fixture 的体积与入库方式未定**：6 份 Shape Bundle 是二进制 PLY 与 npz，细分后可能每份数 MB 到数十 MB；Neck 真值与 Cell Properties 种子也是较大的数据文件。是否用 Git LFS 未定。 | M1.10、M3.7 | M1.10 实测体积后由用户决定 |
 | G11 | **Coupon Build 无法选择 ManufacturingProfile**：`shoegen coupon cushioning -o <dir>` 没有 Profile 参数，而 §16 要求用服务商专属 Profile 打印 Coupon；另外 DesignSpec 的 `manufacturing_profile` 若以枚举约束，新增服务商 Profile 是否需要升 DesignSpec minor 版本也未说明。 | M6.5、M7.1、M7.2 | 建议给 `coupon` 加 `--profile`，并明确 Profile 的取值不属于 DesignSpec 默认值契约（不升版本），待用户确认 |
-| G12 | **依赖清单缺 numba**：§17 的参考依赖不含 numba，而已验证的 Direction C 原型依赖它。规格允许替换，但 numba 的确定性要求（禁用 parallel 与 fastmath）应写明。 | M0.1、M5 | 建议把 numba 加入 §17 列表并注明确定性约束 |
-| G13 | **量化的舍入对象不明确**：§6.3 要求"银行家舍入"到 1e-4 mm / 1e-6，但没说是对二进制浮点的精确值舍入（Python `round(x, n)` 的语义），还是对十进制字面量舍入。两者在少数值上结果不同，会改变 plan_hash 测试向量。 | M0.3、M3.9 | 建议以 Python `round(x, n)` 为准，写入规格 |
-| G14 | **N 的取整方式未规定**：§7.1 第 8 步 N = max(1, round(P(0.5)/cell_inplane)) 中 `round` 是四舍五入还是银行家舍入，在恰为 .5 时结果不同。 | M2.8 | 建议与 G13 一致，用 Python `round` |
-| G15 | **部分错误码没有命名**：§12.4 规定了退出码 1、5、6、7 的类别，但除 `E_BUILD_VOLUME` 外，hard 检查失败（薄壁、困粉、悬挂材料、网格无效、连通分量、封闭腔）、资源预检与超时的 `code` 都没有给出（内部错误已在规格 §7.6 用 `E_INTERNAL`）；`E_SHAPE_PARAM_MISSING` 的退出码也未明写（按 class shape 推断为 4）。 | M0.2、M5、M6 | 建议在 M0.2 提出一组名称（如 `E_PRINT_THIN_WALL`、`E_PRINT_TRAPPED_POWDER`、`E_PRINT_HANGING_MATERIAL`、`E_PRINT_MESH_INVALID`、`E_PRINT_COMPONENTS`、`E_PRINT_CAVITY`、`E_RESOURCE_BUDGET`、`E_TIMEOUT`、`E_INTERNAL`），由用户确认后写入规格；**已扩展**：加入局部探测的五个错误码 `E_PROBE_THIN_WALL`、`E_PROBE_TRAPPED_POWDER`、`E_PROBE_HANGING_MATERIAL`、`E_PROBE_ISLAND`、`E_PROBE_CAVITY`（规格 §12.4） |
+| G12 | **（已解决）依赖清单缺 numba**：§17 的参考依赖不含 numba，而已验证的 Direction C 原型依赖它。规格允许替换，但 numba 的确定性要求（禁用 parallel 与 fastmath）应写明。 | M0.1、M5 | **已解决（H0）**：numba 已加入规格 §17，并注明禁用 `parallel` 与 `fastmath` |
+| G13 | **（已解决）量化的舍入对象不明确**：§6.3 要求"银行家舍入"到 1e-4 mm / 1e-6，但没说是对二进制浮点的精确值舍入（Python `round(x, n)` 的语义），还是对十进制字面量舍入。两者在少数值上结果不同，会改变 plan_hash 测试向量。 | M0.3、M3.9 | **已解决（H0）**：以 Python `round(x, n)` 为准，已写入规格 §6.3 |
+| G14 | **（已解决）N 的取整方式未规定**：§7.1 第 8 步 N = max(1, round(P(0.5)/cell_inplane)) 中 `round` 是四舍五入还是银行家舍入，在恰为 .5 时结果不同。 | M2.8 | **已解决（H0）**：与 G13 一致用 Python `round`，已写入规格 §7.1 第 8 步 |
+| G15 | **（已解决）部分错误码没有命名**：§12.4 规定了退出码 1、5、6、7 的类别，但除 `E_BUILD_VOLUME` 外，hard 检查失败（薄壁、困粉、悬挂材料、网格无效、连通分量、封闭腔）、资源预检与超时的 `code` 都没有给出（内部错误已在规格 §7.6 用 `E_INTERNAL`）；`E_SHAPE_PARAM_MISSING` 的退出码也未明写（按 class shape 推断为 4）。 | M0.2、M5、M6 | **已解决（H0）**：采用建议的名称，已写入规格 §12.4；`E_SHAPE_PARAM_MISSING` 明写为退出码 4 |
 | G16 | **Crop Build 的体素栅格是否与整鞋对齐未写明**：§12.2 只说 Crop Build 与整鞋共用 BuildPlan。若裁切件的栅格原点与整鞋不同，`heel-transition` 的 0.25 mm 黄金回归与整鞋在同一位置的结果就不可比。 | M6.4 | **已采纳**：Crop Build 与探测窗口都使用整鞋全局栅格（规格 §12.2） |
 | G17 | **Crop Build 的"实体壳数为 1"hard 检查会看到被裁切盒切下的 Lattice 碎块。** 被裁切面切下、只在 Crop Region 之外才与主体相连的 Lattice 碎块，在 Crop Build 中是独立的壳；不足 10 mm³ 的由 §8.5 Island 清理删除，> 10 mm³ 的会幸存并使该检查失败。局部探测因此采用"窗口外表面有依托"的语义，Crop Build 目前没有同样的规则。Coupon Build 的四个侧面也是裁切面（§12.3），同样会遇到，而 M6 验收第 10 条与 M7 验收第 2 条要求三块 Coupon 通过 hard 检查。 | M6.4、M6.5、M6.8 | 在 M6 做 Crop Build 之前定一条规则，例如与探测一致：触及裁切盒的碎块按有依托或外部处理，不计入实体壳数与 Island 判据；待用户确认 |
 | G18 | **Midsole 主体厚度 T 有两个定义**：§7.3 在阶段 A 沿中线按 Heel/Forefoot Stack 线性估算，§8.1 按 (x, y) 竖直实测 z_F − z_G。单一鞋底 Cell 后 T 只用来判定 T < C 的薄层孔喉级别，两者在足弓、后跟凹窝、偏离中线处与 Toe Spring 段可能给出不同级别，Resolver 与困粉检查对同一点用的孔喉下限就不一致。 | M2.7、M5.5 | 建议把欧氏约束求解移到阶段 B、统一用 §8.1 的 T，或干脆按 Zone 定级、不再用 T；待用户确认 |
