@@ -1,0 +1,21 @@
+{
+  "id": "dls-epu-generic@0",
+  "process": "digital light synthesis, EPU (photopolymer elastomer)",
+  "status": "placeholder",
+  "min_strut_diameter_mm": 1.0,
+  "min_wall_mm": 0.6,
+  "min_pore_mm": 1.0,
+  "min_fragment_volume_mm3": 0.5,
+  "build_volume_mm": [189.0, 118.0, 326.0],
+  "requires_drain_holes": true,
+  "requires_supports": true,
+  "output_formats": ["stl"],
+  "sources": {
+    "min_strut_diameter_mm": null,
+    "min_wall_mm": null,
+    "min_pore_mm": null,
+    "min_fragment_volume_mm3": null,
+    "build_volume_mm": null
+  },
+  "notes": "占位，待服务商指南核实。所有数值均未验证，不得当作工艺窗口使用。"
+}

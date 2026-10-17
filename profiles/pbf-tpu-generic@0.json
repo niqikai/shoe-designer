@@ -1,0 +1,21 @@
+{
+  "id": "pbf-tpu-generic@0",
+  "process": "powder bed fusion, TPU (MJF / SLS)",
+  "status": "placeholder",
+  "min_strut_diameter_mm": 1.5,
+  "min_wall_mm": 1.0,
+  "min_pore_mm": 1.5,
+  "min_fragment_volume_mm3": 1.0,
+  "build_volume_mm": [380.0, 284.0, 380.0],
+  "requires_drain_holes": false,
+  "requires_supports": false,
+  "output_formats": ["stl"],
+  "sources": {
+    "min_strut_diameter_mm": null,
+    "min_wall_mm": null,
+    "min_pore_mm": null,
+    "min_fragment_volume_mm3": null,
+    "build_volume_mm": null
+  },
+  "notes": "占位，待服务商指南核实。所有数值均未验证，不得当作工艺窗口使用。"
+}

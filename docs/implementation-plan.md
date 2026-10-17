@@ -21,7 +21,7 @@
 
 | 里程碑 | 目标 | 任务（模型·强度） | 依赖 | 规模 |
 |---|---|---|---|---|
-| **M0** 端到端骨架 | 一条命令：鞋楦 → 鞋底均匀杆状晶格 + 实体鞋面薄壳 → 水密 STL + 报告 | M0.1 H·medium；M0.2 S·medium；M0.3 S·high；M0.4 **O·high**；M0.5 **O·high**；M0.6a S·high；M0.6 **O·xhigh**（若改用现成库则降为 S·high）；M0.7 S·high；M0.8 **O·high**；M0.9 S·medium；M0.10 S·medium；M0.R **O·high** | H0 | L（12） |
+| **M0** 端到端骨架 | 一条命令：鞋楦 → 鞋底均匀杆状晶格 + 实体鞋面薄壳 → 水密 STL + 报告 | M0.1 H·medium；M0.2 S·medium；M0.3 S·high；M0.4 **O·high**；M0.5 **O·high**；M0.6a S·high（已完成，结论：自研）；M0.6 **O·xhigh**；M0.7 S·high；M0.8 **O·high**；M0.9 S·medium；M0.10 S·medium；M0.R **O·high** | H0 | L（12） |
 | **M1** 完善鞋底 | 杆径渐变、边界节点不留断头、外底实体与花纹；薄片检查升为 hard | 边界节点 **O·xhigh**；其余 S·high；评审 **O·high** | M0；H2 | M |
 | **M2** 鞋面 | 鞋楦表面参数化；仿针织（默认）与网眼两种 `SurfacePattern`；Rim、后跟加强条、与鞋底熔合 | 参数化 **O·high**；仿针织 **O·high**；网眼 S·high；评审 **O·high** | M0（可与 M1 并行，`CapsuleSet` 与 M1 共用）；H3 前完成即可 | L |
 | **M3** 语义层 | DesignSpec → Resolver → GeometryGraph；尺码变形；确定性回归 | Resolver **O·high**；变形 S·high；评审 **O·high** | M1、M2；H4 | L |
@@ -60,7 +60,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 |---|---|---|---|
 | 单元 | 节点 SDF、Lipschitz、哈希、分块一致性、焊接水密、杆径检查；只用合成鞋楦 | 是 | 全部 ≤ 3 分钟 |
 | 冒烟 | 合成鞋楦 1 mm 体素端到端（杆半径 2 mm） | 是 | ≤ 1 分钟 |
-| 慢测试 `@pytest.mark.slow` | 0.5 mm 端到端 | 否 | 分钟级 |
+| 慢测试 `@pytest.mark.slow` | 0.5 mm 端到端；单元层里单个超过约 5 s 的变体（每条验收至少留一个默认执行的测试） | 否 | 分钟级 |
 | 真实鞋楦 `@pytest.mark.real_last` | 需要本地授权鞋楦文件；文件不存在就 skip | 否 | 分钟级 |
 
 ### 1.4 资产与授权
@@ -80,7 +80,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 
 ### M0.1 工程脚手架与 Profile 数据 — H·medium
 - `pyproject.toml`（Python 3.11+，uv 管理）、`uv.lock`、包 `src/shoegen/`、pytest 配置（默认 `-m "not slow and not real_last"`）、ruff、`.gitignore`。
-- 依赖：numpy、scipy、numba、trimesh、manifold3d、libigl、pydantic、psutil、build123d（只用于 STEP 导入）。
+- 依赖：numpy、scipy、numba、trimesh、manifold3d、libigl、pydantic、psutil、build123d（只用于 STEP 导入）。实现时补充（M0 评审确认）：build123d 固定为 0.10.0，并需固定 `ocp-gordon==0.1.17`——0.3.x 依赖 OCP 8，与 build123d 0.10.0 要求的 cadquery-ocp < 7.9 冲突；0.1.17 是 PR #2 用过的版本。
 - `src/shoegen/profile.py`：ManufacturingProfile 的 pydantic 模型（字段见 ADR 0004）；`profiles/pbf-tpu-generic@0.json`、`profiles/dls-epu-generic@0.json`，`status = placeholder`，每个数值附"待核实"注释和留空的来源字段。放在 M0.1，是因为 M0.6、M0.7 都要读它。
 - `src/shoegen/resources.py`：RSS 看门狗。后台线程每 0.5 s 用 psutil 统计主进程及全部子进程的 RSS 总和。超限时按顺序：写失败报告（含当时的子进程 PID 列表）→ 对 `children(recursive=True)` 发 SIGTERM → 等 2 s，对仍存活的发 SIGKILL → `psutil.wait_procs` 回收 → `os._exit(6)`。只 `os._exit` 父进程不够：`ProcessPoolExecutor` 的 worker 会被 init 接管继续运行（ADR 0005）。
 - worker 侧兜底：父进程被 SIGKILL 或崩溃时来不及清理，macOS 又没有 `PR_SET_PDEATHSIG`，所以每个 worker 启动一个守护线程，每 0.5 s 检查 `os.getppid()`，与启动时不同就 `os._exit`。为了让这个线程能运行，长时间运行的 numba 内核用 `nogil=True`。
@@ -88,6 +88,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
   - 父进程以退出码 6 结束并留下失败报告；
   - 报告里列出的 worker PID 在 5 s 内全部不存在（`psutil.pid_exists`），没有 PPID 为 1 的残留进程；
   - 另测父进程被 SIGKILL 的情形：worker 在 2 s 内自行退出。
+  - 实现说明（M0 评审补齐）："没有 PPID 为 1 的残留"的检查给辅助进程设一个唯一的环境变量，它的整棵进程树都继承；结束后扫描所有 PPID 为 1 且带这个变量的存活进程，要求为空（两种情形都查）。另有一个自检先故意制造一个这样的孤儿进程，确认扫描能找到它，否则"没找到"不算证据。
 
 ### M0.2 移植鞋楦导入与报告工具 — S·medium
 - 从 `codex/3DPrintedFootwear` 移植 `last/loader.py`、`last/normalizer.py`、`reporting.py`，包名改为 `shoegen`；保留 `FILE_NAME` 头修复、显式刚体归一化、`license_status` 字段。去掉对 PR #2 其他模块的依赖。提交说明注明出处提交号。
@@ -95,9 +96,12 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 
 ### M0.3 鞋楦 → 带符号距离采样场 — S·high
 - 用 build123d 三角化（弦差 0.01 mm）；按面输出的顶点先合并，再检查水密与单连通；用 libigl `signed_distance`（winding number 定号）。
+  - 实现时改为：libigl AABB 求最近点，角度加权伪法向定号。前提是上一步已检查网格闭合、流形、取向一致、单连通（不满足退出码 4），此时伪法向定号是精确的；winding number 实测只有约 4,000 点/秒，伪法向快约 20 倍。winding number 保留为可选项（ADR 0003）。
 - 双层采样，见 ADR 0003：0.5 mm 细栅格只存 |d| ≤ 6 mm 的窄带；2 mm 粗栅格覆盖包围盒外扩 30 mm；更远处用到鞋楦包围盒的距离。
 - 同时导出两份二维数据，供 M0.8 使用：足底轮廓（鞋楦在 XY 平面的投影）和底面高度图 `h(x, y)`（每个 XY 位置上鞋楦的最低 z），都用 0.5 mm 栅格，由三角网格竖直射线求交得到。轮廓外的 h 用边界值外推，保证连续。
 - 高度曲面采样场：把 `z = h(x, y) + 偏移` 三角化成一张开曲面，用 libigl 求点到曲面的无符号距离，符号取 `z − h(x, y) − 偏移` 的符号，按与鞋楦相同的双层规则采样。这样得到的是真实毫米距离，可以直接偏置（ADR 0001 的 `exact`）。
+  - 实现说明（M0 评审记录）：三角化是自适应的——从 1 mm 点阵开始，用精确高度函数加密到法向偏差 ≤ 0.02 mm；符号取同一组三角形插值出的 `z_sheet`，与距离一致。这张曲面是有限的，只铺在足底轮廓包围盒外扩 `sheet_margin_mm` 的矩形里，场值只在矩形内精确；装配时检查矩形覆盖包络轮廓（退出码 3），CLI 取 `max(8, outline_margin_mm + 5)` mm。详见 ADR 0003。
+  - 粗栅格的误差在中轴附近最大（三线性插值跨过距离场的折痕），实测接近 1 mm，正好在验收上限；粗栅格只用于跳块和符号，不用于偏置。
 - 存为 `.npy`，键为鞋楦 sha256 + 采样参数；worker 用 `mmap_mode='r'` 打开。
 - **验收**（在解析合成鞋楦上，真值可算）：
   - 细栅格窄带内误差 ≤ 0.05 mm；粗栅格区域误差 ≤ 1 mm；更远处的值不大于真值；
@@ -107,6 +111,8 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 
 ### M0.4 GeometryGraph 核心 — O·high
 - 节点白名单：`Box`、`RoundedBox`、`Capsule`、`HalfSpace`、`SampledField`（鞋楦）、`Extrude2D`（二维 SDF 沿 Z 拉伸并截取 z 区间）、`HeightSurfaceField`（M0.3 的高度曲面采样场，`exact`）、`Union`、`Intersect`、`Subtract`、`SmoothUnion(k)`、`Offset(d)`、`ShellOutward(t)`（`max(d − t, −d)`，即向外长出厚度 t 的壳）、`StrutLattice`（M0.7 填实现）。
+  - `SmoothUnion(k)` 是二次 smin（≤ min、Lipschitz ≤ 1、偏离 ≤ k/4，计入采样场的偏置余量）；ADR 0002 的指数平滑并集只用在 `StrutLattice` 内核里给节点倒圆角，是另一个函数（M0 评审在 ADR 0002 里写明）。
+  - `Extrude2D` 的二维栅格外用"到轮廓包围盒的距离"，与采样场的远场同理；M0 评审补上了余量检查：栅格超出包围盒的距离必须大于节点自身的正 `offset` 加上方的累计偏置，否则退出码 3（ADR 0005）。
 - pydantic 模型 + 规范化 JSON（键排序、浮点用 `repr` 精确往返）→ `graph_hash`；采样场以内容哈希（源文件 sha256、采样参数、数组 sha256）计入（ADR 0001）；`graph_version = 1`。
 - 每种节点只有一条 numba 内核；批量求值只是循环调用它（ADR 0005）。
 - 每个节点带度量属性 `exact` / `bound`，按 ADR 0001 的组合规则自动推导。
@@ -121,6 +127,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 
 ### M0.5 块稀疏求值与跳块 — O·high
 - 全局栅格：原点 = 包围盒最小角向下取整到体素整数倍；坐标一律由全局整数索引算出（`origin + i × h`）；块 64³，按 (i, j, k) 字典序编号。
+  - 实现说明：坐标取 `float64(i) × h`，`i` 是相对世界原点的全局索引；区域最小角只决定分块从哪个索引开始，不进入坐标计算，所以不同区域下同一点也逐位相同（ADR 0005）。
 - 跳块判据按 ADR 0005（k = 1.5）。只对跨表面块细采样，每块实际采样 65³（含与相邻块共享的边界面）。
 - 进程池 4 worker，按块序号收集结果。
 - **验收**：
@@ -151,7 +158,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - **判定**：5 项硬性条件（安装、正确性、跨块、确定性、授权）全部满足的候选里，选性能最好的。没有候选全部满足，就按 M0.6 原方案自研。
 - **验收**：报告里的每个数字都来自实际运行，并附上运行命令。
 
-### M0.6 分块网格提取与焊接 — O·xhigh（自研方案；若 M0.6a 选定现成库，改为 S·high 的接入任务）
+### M0.6 分块网格提取与焊接 — O·xhigh（自研方案，M0.6a 评估后确认）
 - 自写 numba Marching Cubes（标准查表），顶点以全局边编号 (i, j, k, axis) 标识，按编号焊接（ADR 0005）；采样值恰为 0 按外部处理，焊接后再按坐标合并一次、删除退化三角形。
 - 焊接后用 manifold3d 校验流形与水密；删除体积 < `profile.min_fragment_volume_mm3` 的碎块，记录数量与体积。
 - 输出规范化：顶点按坐标字典序、三角形按顶点编号排序，便于比较和哈希。
@@ -161,7 +168,12 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
   - 一个跨 8 个块交点的形状，焊接后无裂缝；
   - 一个让大量采样值恰为 0 的形状（与栅格对齐的平面），网格水密且无退化三角形。
 - 这是 M0 最容易出隐蔽错误的地方，所以自研时用 O·xhigh。
-- 若 M0.6a 选定现成库：本任务改为接入该库，验收标准不变（包括单块与多块结果相同、零值退化、确定性）。
+- M0.6a 已评估（[docs/spikes/m0.6a-meshing.md](spikes/m0.6a-meshing.md)）：OpenVDB 在 PyPI 上装不上；manifold3d `level_set` 跨块不通过（时间和内存跟包围盒体积成正比，分块拼接只在体素能被二进制精确表示时才逐位相同）。所以本任务按自研做，模型和强度不变。
+- 来自 M0.6a 的实测，实现时要用到：
+  - scikit-image `marching_cubes`（未焊接，单线程）处理 108 个晶格块（80 × 80 × 40 mm，0.25 mm 体素）共 0.448 s，3,827,628 个三角形；M0.5 同一批采样要 5.9–9.1 s。Marching Cubes 的计算量不是瓶颈，难点是焊接和确定性。
+  - 同一块晶格的欧拉示性数是 −2774（亏格 1388），体积参照 46,440 mm³（中点积分），可作交叉检查（Marching Cubes 在歧义格上的拓扑可能与 manifold3d 不同，示性数不作硬性验收）。
+  - RSS 看门狗是 Python 线程：持有 GIL 的长调用会让它失效。自写内核保持 `nogil=True`；用 `Manifold(Mesh64(...))` 校验 5.3 M 个三角形要 1.03 s、RSS 增加约 2.3 GB（约 440 字节/三角形），期间同样持有 GIL，校验前先按三角形数估算内存，或放进 worker 进程。
+  - manifold3d 的 macOS wheel 静态链接 TBB，`TBB_NUM_THREADS` 无效；`spikes/m0_6a/onecpu.c` 的 DYLD 注入库可以固定线程数，用于验证线程数不影响校验结果。
 
 ### M0.7 杆状晶格节点 — S·high
 - `StrutLattice(cell_mm, radius_mm, topology="bcc", origin, fillet_k)`：在查询点所在 Cell 及其 26 邻域内按周期公式枚举杆（BCC 每个 Cell 8 根体对角杆）；节点圆角用指数平滑并集 `−k·ln Σ exp(−d_i/k)`，按固定的全局杆顺序求和（ADR 0002）。k 默认 0.15 × r。
@@ -193,8 +205,9 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - 按 ADR 0004 的三类检查实现：
   - **构建前参数检查**：已在 M0.7 实现，这里汇总进报告；
   - **hard**（退出码 5）：水密、连通分量数 = 1、构建体积；
+    - "连通分量"数的是实体，即有向体积为正的表面壳；体积为负的壳是封闭空腔的内表面，单列为 `cavity_shells`，由 soft 的封闭腔检查报告（ADR 0004）。M0 鞋底的晶格孔隙被外皮封住（ADR 0002 的开放问题），所以合格的 M0 鞋本来就有负体积壳。
   - **soft**：
-    - 薄片：在体素栅格上做距离变换，统计局部厚度 < `min_wall_mm` 的材料体积；
+    - 薄片：在体素栅格上做距离变换，统计局部厚度 < `min_wall_mm` 的材料体积；分辨率有限，厚度在 `min_wall ± 2h` 之间的壁是否被标记取决于它与栅格的相对位置，报告写出这个区间（M0 评审）；
     - 封闭腔：体素泛洪，统计从外部不可达的空腔体积；
     - 最小孔径：M0 只用 Cell 与杆径的解析值估算。
 - 所有栅格检查都按块进行，不分配整鞋稠密数组。
@@ -209,10 +222,15 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
   - 同一输入跑两次，`shoe.stl` 与 `graph.json` 的 sha256 相同；
   - 杆径低于 profile 下限时以退出码 3 结束，且不生成网格；
   - `real_last`：真实鞋楦、0.5 mm 体素、杆半径 1 mm，在 6 GB 上限内完成，报告耗时与峰值 RSS（H1 之后执行）。
+- 实现后的补充（M0 评审）：
+  - 阶段之后抛出的带退出码的错误保留自己的码：块规划的远场检查 → 3，组装前的内存估算 `MeshMemoryError` → 6（与看门狗相同），其余 → 1。
+  - 已知限制：看门狗是主进程里的线程，主进程长时间持有 GIL 时采不到样（M0.6a），所以报告另记 `rusage_peaks`（主进程与最大子进程的 `ru_maxrss`）；进程外监督不在 M0。合成鞋楦每次导出 STEP 都带时间戳，sha256 不同，采样场缓存不命中（真实鞋楦文件不变，不受影响；测试里每个模块只导出一次）。高度曲面的 `sheet_margin_mm` 在 CLI 里是 `max(8, outline_margin_mm + 5)`。
+  - `real_last` 测试可用环境变量 `SHOEGEN_REAL_LAST`（原地读取，不复制）和 `SHOEGEN_REAL_LAST_NORMALIZATION` 指定鞋楦与归一化文件；产物写在 `output/` 下，不写系统临时目录（1.4 节）。
 
 ### M0.R 里程碑评审 — O·high
 - 对照 ADR 0001–0005 和本节验收逐条核对。重点审查：稠密数组、确定性、跳块正确性、Lipschitz、焊接，以及报告里有没有未实测就写 PASS 的条目。
 - 发现的问题回到对应任务修复；正确性问题用高一级的模型重做。
+- 评审结果（2026-10-17）：[docs/reviews/m0-review.md](reviews/m0-review.md)。
 
 ---
 
@@ -226,6 +244,12 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - 外底实体与花纹。
 - 视 M0 性能决定是否换 OpenVDB 或 GPU 求值。
 - 关键任务：边界节点与显式杆图（含与 M2 共用的 `CapsuleSet`）**O·xhigh**；渐变与 round-cone S·high；外底 S·high；评审 **O·high**。
+- **开放设计问题（M0 评审，2026-10-17，细化 M1 时先定）**：
+  - **晶格孔隙被封死**：M0 的 1.2 mm 外皮与足床板把晶格完全包住，孔隙网络是一个封闭大腔（真实鞋楦上约 2.7 × 10⁵ mm³，见评审报告），粉末床会困粉、DLS 会困树脂，与 ADR 0002"开放结构易排粉"的论证相反。可选方案：侧壁局部开口、外皮上开排粉/排液孔、部分开放的外皮（例如只保留底面和足床板）。选定后把封闭腔检查改成"每个空腔都连通外部"，在 `requires_drain_holes = true` 的 profile 下升为 hard（ADR 0002、0004）。
+  - **杯口薄唇**：包络顶面、轮廓侧壁与腔体相交处有一圈薄唇（合成跟高鞋楦上实测约 0.66 mm）。M1 的边界节点与薄片检查升 hard 时一并处理。
+  - **薄片检查的分辨率**：0.5 mm 体素、`min_wall = 1.0 mm` 时，0–2 mm 厚的壁是否被标记取决于对齐，1.2 mm 外皮处在这个区间里；升为 hard 前要换更细的体素或在网格上实测厚度（ADR 0004）。
+  - **领口是水平面**：真实鞋楦上 75 mm 的水平领口在足背处开得很长（见评审报告的截面图）；领口曲线留给 M2 的 Rim。
+  - **看门狗**：进程外的 RSS 监督（不受 GIL 影响）在 M1 视需要实现；M0 先记录 `ru_maxrss`。
 
 ### M2 鞋面（ADR 0006）
 - 鞋楦表面参数化：切缝、展平、扭曲检查，把 (u, v) 和法向采样进窄带。
