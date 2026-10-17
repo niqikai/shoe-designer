@@ -544,7 +544,17 @@ def section_areas(case, h=0.25, step=2.0):
     return out
 
 
+# The EDT reference costs 8-15 s per last. The default run keeps the rounded last (one fast
+# test of the criterion, plan 1.3 time budget); the heel-rise and hemisphere variants run
+# under ``-m slow``, as do all three at 0.5 mm in ``test_example_lattice_half_mm``.
+@pytest.mark.parametrize("case", ["rounded"], indirect=True)
 def test_lattice_core_volume_and_sections(case, eval_report):
+    check_lattice_core_volume_and_sections(case, eval_report)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", ["heel_rise", "hemisphere"], indirect=True)
+def test_lattice_core_volume_and_sections_slow_variants(case, eval_report):
     check_lattice_core_volume_and_sections(case, eval_report)
 
 
