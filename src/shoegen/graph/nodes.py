@@ -196,10 +196,22 @@ class Extrude2D(_Model):
         return self
 
 
-class StrutLattice(_Model):
-    """Periodic strut lattice (ADR 0002). Evaluation is implemented in M0.7.
+LATTICE_FILLET_FACTOR = 0.15
+"""Default node-fillet length as a fraction of the strut radius (ADR 0002)."""
 
-    ``fillet_k`` is the node-fillet smoothing length; ``None`` means ``0.15 * radius_mm``.
+
+class StrutLattice(_Model):
+    """Periodic strut lattice (ADR 0002), evaluated by ``kernels._strut_lattice``.
+
+    BCC: every cell (edge ``cell_mm``, lattice anchored at ``origin``) holds 8 capsules of
+    radius ``radius_mm`` from the cell centre to its 8 corners. The value is the
+    exponential smooth union ``-k ln sum exp(-d_i / k)`` of the strut distances, so it is
+    ``<= min d_i`` (material is only added, never removed), Lipschitz <= 1, and only a
+    distance bound on both sides.
+
+    ``fillet_k`` is the node-fillet smoothing length ``k``. ``None`` is resolved to
+    ``0.15 * radius_mm`` when the node is built, so ``None`` and the explicit equal value
+    give the same ``graph_hash``.
     """
 
     type: Literal["StrutLattice"] = "StrutLattice"
@@ -208,6 +220,13 @@ class StrutLattice(_Model):
     topology: Literal["bcc"] = "bcc"
     origin: Vec3 = (0.0, 0.0, 0.0)
     fillet_k: PositiveFloat | None = None
+
+    @model_validator(mode="after")
+    def _resolve_fillet(self) -> StrutLattice:
+        if self.fillet_k is None:
+            # Frozen model: the default is resolved in place, before anything hashes it.
+            object.__setattr__(self, "fillet_k", LATTICE_FILLET_FACTOR * self.radius_mm)
+        return self
 
 
 # ---------------------------------------------------------------- operators

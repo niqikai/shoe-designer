@@ -243,12 +243,10 @@ def test_shared_node_compiles_once():
     assert prog.code.shape[0] == 3
 
 
-def test_strut_lattice_is_a_stub_until_m07():
-    node = StrutLattice(cell_mm=10.0, radius_mm=1.0)
-    g = single(node)
+def test_strut_lattice_compiles_and_is_bound_on_both_sides():
+    g = single(StrutLattice(cell_mm=10.0, radius_mm=1.0))
     assert g.metric("n") == NodeMetric(BOUND, BOUND)
-    with pytest.raises(NotImplementedError):
-        compile_graph(g)
+    assert compile_graph(g).code.shape[0] == 1
 
 
 # ---------------------------------------------------------------- sampled data integrity

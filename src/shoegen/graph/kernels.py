@@ -29,7 +29,7 @@ OP_SAMPLED3D       fo(3) fh  co(3) ch  bbmin(3) bbmax(3)            fine_f32 ind
                                                                     coarse_f32 NBx NBy NBz
                                                                     S Nx Ny Nz
 OP_EXTRUDE2D       o(2) h  bbmin(2) bbmax(2)  zc hz  offset         values_f32 Nx Ny
-OP_STRUT_LATTICE   reserved for M0.7                                reserved for M0.7
+OP_STRUT_LATTICE   ox oy oz  cell  r  k  (k already resolved)       -
 OP_UNION           -                                                children...
 OP_INTERSECT       -                                                children...
 OP_SUBTRACT        -                                                base tool
@@ -38,8 +38,8 @@ OP_OFFSET          distance                                         child
 OP_SHELL_OUTWARD   thickness                                        child
 =================  ===============================================  =====================
 
-M0.7 plugs the lattice in by filling :func:`_strut_lattice` (params at ``po``) and the
-packing in the compiler; nothing else changes.
+The lattice (:func:`_strut_lattice`) is an analytic leaf: its params are packed by the
+compiler like any other leaf and it reads no sampled data.
 """
 
 from __future__ import annotations
@@ -131,10 +131,105 @@ def _halfspace(params, po, x, y, z):
     return params[po] * x + params[po + 1] * y + params[po + 2] * z - params[po + 3]
 
 
+LATTICE_CUTOFF = 40.0
+"""Struts with ``d_i - min d > LATTICE_CUTOFF * k`` contribute ``< exp(-40) ~ 4e-18`` of the
+smooth-union sum and are skipped (also whole neighbour cells that cannot come that close)."""
+
+
+@njit(**_JIT)
+def _lattice_cell_min(x, y, z, cx, cy, cz, half, r):
+    """Min capsule distance over the 8 struts of the BCC cell centred at ``(cx, cy, cz)``."""
+    qx = x - cx
+    qy = y - cy
+    qz = z - cz
+    m = np.inf
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                # strut from the centre to the corner centre + half * (sx, sy, sz)
+                t = (qx * sx + qy * sy + qz * sz) / (3.0 * half)
+                t = min(max(t, 0.0), 1.0)
+                dx = qx - t * half * sx
+                dy = qy - t * half * sy
+                dz = qz - t * half * sz
+                m = min(m, math.sqrt(dx * dx + dy * dy + dz * dz) - r)
+    return m
+
+
+@njit(**_JIT)
+def _lattice_cell_sum(x, y, z, cx, cy, cz, half, r, m, k):
+    """``sum exp(-(d_i - m) / k)`` over the 8 struts of a cell, in the fixed strut order."""
+    qx = x - cx
+    qy = y - cy
+    qz = z - cz
+    acc = 0.0
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for sz in (-1.0, 1.0):
+                t = (qx * sx + qy * sy + qz * sz) / (3.0 * half)
+                t = min(max(t, 0.0), 1.0)
+                dx = qx - t * half * sx
+                dy = qy - t * half * sy
+                dz = qz - t * half * sz
+                e = (math.sqrt(dx * dx + dy * dy + dz * dz) - r - m) / k
+                if e <= LATTICE_CUTOFF:
+                    acc += math.exp(-e)
+    return acc
+
+
+@njit(**_JIT)
+def _lattice_box_dist(x, y, z, lx, ly, lz, a):
+    dx = max(max(lx - x, x - (lx + a)), 0.0)
+    dy = max(max(ly - y, y - (ly + a)), 0.0)
+    dz = max(max(lz - z, z - (lz + a)), 0.0)
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+
+
 @njit(**_JIT)
 def _strut_lattice(params, po, x, y, z):
-    # Placeholder for M0.7; the compiler refuses StrutLattice until then.
-    return np.nan
+    """BCC strut lattice: ``m - k ln sum exp(-(d_i - m) / k)`` over the 27 cells around the
+    query point (cells in lexicographic order, struts in the fixed order of
+    :func:`_lattice_cell_sum`), ``m = min d_i``.
+
+    Params: ``ox oy oz  a  r  k``. A neighbour cell whose box is farther than
+    ``m_own + LATTICE_CUTOFF * k + r`` cannot contribute more than ``exp(-40)``; it is
+    skipped, using a rule that depends on the query point only.
+    """
+    ox = params[po]
+    oy = params[po + 1]
+    oz = params[po + 2]
+    a = params[po + 3]
+    r = params[po + 4]
+    k = params[po + 5]
+    half = 0.5 * a
+    ci = math.floor((x - ox) / a)
+    cj = math.floor((y - oy) / a)
+    ck = math.floor((z - oz) / a)
+    m0 = _lattice_cell_min(
+        x, y, z, ox + (ci + 0.5) * a, oy + (cj + 0.5) * a, oz + (ck + 0.5) * a, half, r
+    )
+    limit = m0 + LATTICE_CUTOFF * k + r
+    m = m0
+    for di in range(-1, 2):
+        lx = ox + (ci + di) * a
+        for dj in range(-1, 2):
+            ly = oy + (cj + dj) * a
+            for dk in range(-1, 2):
+                lz = oz + (ck + dk) * a
+                if _lattice_box_dist(x, y, z, lx, ly, lz, a) > limit:
+                    continue
+                m = min(m, _lattice_cell_min(x, y, z, lx + half, ly + half, lz + half, half, r))
+    acc = 0.0
+    for di in range(-1, 2):
+        lx = ox + (ci + di) * a
+        for dj in range(-1, 2):
+            ly = oy + (cj + dj) * a
+            for dk in range(-1, 2):
+                lz = oz + (ck + dk) * a
+                if _lattice_box_dist(x, y, z, lx, ly, lz, a) > limit:
+                    continue
+                acc += _lattice_cell_sum(x, y, z, lx + half, ly + half, lz + half, half, r, m, k)
+    return m - k * math.log(acc)
 
 
 # ---------------------------------------------------------------- sampled leaves
