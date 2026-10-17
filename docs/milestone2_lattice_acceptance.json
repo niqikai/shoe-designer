@@ -1,0 +1,58 @@
+{
+  "status": "ACCEPTED",
+  "scope": "M2_lattice_appearance",
+  "accepted_at": "2026-10-16T16:13:03.502888+00:00",
+  "user_messages": [
+    "可以，接下去做什么",
+    "好，请开始"
+  ],
+  "run_id": "27bc88ca-51ed-4707-98f5-f97606958f86",
+  "source_sha256": "6dd8e7b44a97b675769280b74566b039806d9f4049ad0a5adb90bca156930247",
+  "output_directory": "output/m2_toe_complete",
+  "files": {
+    "lattice.stl": {
+      "sha256": "b20f1037c9978afcaae316785d028fa49c282b50727d0149c6be35999ce5157c",
+      "bytes": 97468384
+    },
+    "shoe_spec.json": {
+      "sha256": "77621026807792670053f1b7b579c3e1ecabec0f288e91a3ca35312cbe1ae717",
+      "bytes": 2403
+    },
+    "preview.png": {
+      "sha256": "6e4fe1e5ae68147d348b93598740ab4929b6f4c32551e7da02c7a327ed680df0",
+      "bytes": 1163852
+    },
+    "terminal_comparison.png": {
+      "sha256": "8d8b20dd84c59239660df9b4fe5450f64b8f38c4257ef95d2d7a9b66e115bf2a",
+      "bytes": 1556823
+    },
+    "domain_field.npz": {
+      "sha256": "ffc2636dd2c1c4ed07c857139b8656cbb719ad7ee14c5e95b2c14f03bc0b68b7",
+      "bytes": 2022848
+    },
+    "domain_metadata.json": {
+      "sha256": "bf0a87ff02ec6238a183894e93b4468bc7831496465cde3dbe67e413c779c339",
+      "bytes": 57066
+    },
+    "domain_provenance.json": {
+      "sha256": "71eaa1d750c765ed70fbc0951650457ed9ac63d79a943f2e74e66cce24f444e9",
+      "bytes": 74754
+    },
+    "terminal_coverage_report.json": {
+      "sha256": "31ef45330810dae7739816622232117b7d8e8ce3e4ee894084e4b4ead1f77b7d",
+      "bytes": 30569
+    },
+    "completion_report.json": {
+      "sha256": "581d022d0e528309dd7f2005cc8c2b84e7929976fabb46f613a0592101796780",
+      "bytes": 3559
+    }
+  },
+  "freeze_policy": "Preserve this appearance and accepted M1 geometry; M2 parameter completion remains a separate gate before M3.",
+  "excluded_acceptance": [
+    "all supported parameter combinations",
+    "M3 shell fusion",
+    "manufacturing qualification",
+    "physical printing",
+    "physical fit and wear"
+  ]
+}

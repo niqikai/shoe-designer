@@ -131,7 +131,13 @@ def extract_lattice_mesh(field: SampledField, *, max_memory_bytes=DEFAULT_MAX_ME
                 f"Estimated field/meshing peak {estimate} bytes exceeds budget {max_memory_bytes}; reduce domain or increase spacing", attempts)
         vertices, faces, _, _ = marching_cubes(values, level=level,
             spacing=(field.spacing_mm,) * 3, gradient_direction="descent",
-            method="lewiner", allow_degenerate=False)
+            method="lewiner", allow_degenerate=True)
+        # Preserve Lewiner's original vertex identities and connectivity.
+        # allow_degenerate=False quantizes spaced coordinates back to float32,
+        # then merges coincident vertices/removes faces inside scikit-image.
+        # Near a grid node this can turn a closed manifold into a nonmanifold
+        # edge. Keep every raw face, reject tiny triangles with the unchanged
+        # strict checks, and permit only the recorded bounded contour ladder.
         # Promote local float32 MC positions before adding physical origin.
         vertices = vertices.astype(np.float64) + np.asarray(field.origin_mm, dtype=np.float64)
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
@@ -143,6 +149,7 @@ def extract_lattice_mesh(field: SampledField, *, max_memory_bytes=DEFAULT_MAX_ME
         serialization_ok = serialized["serialized_finite_vertices"] and serialized["serialized_degenerate_triangle_count"] == 0
         passed = integrity["status"] == "PASS" and serialization_ok
         attempt = {"level": level, "inset_dimensionless": inset, "float32_eps_multiplier": multiplier,
+                   "allow_degenerate": True,
                    "status": "PASS" if passed else "FAIL", "active_cells": active,
                    "minimum_area_mm2": float(native_area.min()),
                    "degenerate_triangle_count": int(np.count_nonzero(native_area <= 1e-12)),
@@ -162,11 +169,14 @@ def extract_lattice_mesh(field: SampledField, *, max_memory_bytes=DEFAULT_MAX_ME
         gc.collect()
     threshold = field.metadata.get("threshold")
     metadata = {"method": "scikit-image Lewiner Marching Cubes", "level": level,
+                "allow_degenerate": True,
+                "connectivity_policy": "retain raw Lewiner vertex identities and every face; no scikit-image degenerate-face removal or vertex merging",
                 "target_level": 0.0, "numerical_level_inset_dimensionless": inset,
                 "effective_gyroid_threshold": float(threshold)-inset if threshold is not None else None,
                 "numerical_domain_inset_mm": field.spacing_mm*inset,
                 "numerical_field_scale": scale, "numerical_attempts": attempts,
                 "numerical_contour_reason": (
+                    "Raw Lewiner faces and vertex identities are retained, including numerical degeneracies, for strict validation. "
                     "Zero target attempted first; only strict native/STL float32 area failures with all other integrity checks passing permit bounded inward 16/128-epsilon contours. "
                     "Original scalar field and parameters are unchanged; actual negative level is a conservative numerical shrink, not the exact requested zero contour. "
                     "All components of the chosen actual level are retained; no faces, components or vertices are repaired or removed."),

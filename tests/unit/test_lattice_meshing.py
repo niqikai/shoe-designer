@@ -187,3 +187,47 @@ def test_extraction_failure_roundtrips_between_spawned_workers():
     assert type(restored) is type(error)
     assert str(restored) == str(error)
     assert restored.metadata == error.metadata
+
+
+def test_raw_lewiner_connectivity_survives_float32_grid_node_collision(tmp_path):
+    # Minimal 4x4x2 scalar patch of the actual threshold=.45 failure. Positive
+    # padding preserves its original grid indices: the x~606 float32 spacing
+    # is what makes the old degenerate-face remover merge distinct MC nodes.
+    # This fixture needs no CAD input or saved M2 artifacts.
+    from skimage.measure import marching_cubes
+
+    values = np.ones((610, 84, 42), dtype=np.float32)
+    values[605:609, 79:83, 37:41] = np.float32(1.001)
+    values[605:609, 79:83, 37:39] = [
+        [[.3710446656, 1.001], [.1526014656, 1.001],
+         [-.07674152404, 1.001], [-.1404212713, 1.001]],
+        [[.3947588503, 1.001], [.1900104731, -3.330430218e-6],
+         [-.02166867442, 1.001], [-.2310271859, 1.001]],
+        [[.3679560125, .1798629463], [.1807650328, -.03165596724],
+         [-.008268276230, -.2411113977], [-.1908822209, -.1972177476]],
+        [[.2918075621, .08668532968], [.1252691895, -.1041809767],
+         [-.03712599352, -.2869983017], [-.1882805377, -.4462233782]],
+    ]
+    field = SampledField(values, (0., 0., 0.), .4, {"threshold": .45})
+    old_vertices, old_faces, _, _ = marching_cubes(
+        values, level=0., spacing=(.4,) * 3, allow_degenerate=False)
+    old_mesh = trimesh.Trimesh(old_vertices, old_faces, process=False)
+    if old_mesh.volume < 0:
+        old_mesh.invert()
+    assert mesh_integrity(old_mesh)["nonmanifold_edges"] == 1
+
+    result = extract_lattice_mesh(field)
+    attempts = result.metadata["numerical_attempts"]
+    assert attempts[0]["status"] == "FAIL"
+    assert attempts[0]["integrity"]["checks"]["manifold_edges"]
+    assert attempts[0]["integrity"]["checks"]["manifold_vertex_links"]
+    assert attempts[0]["degenerate_triangle_count"] > 0
+    assert attempts[-1]["status"] == "PASS"
+    assert result.metadata["allow_degenerate"] is True
+    assert result.metadata["components_removed"] == 0
+    assert result.metadata["mesh_repair_applied"] is False
+    assert result.metadata["integrity"]["connected_components"] == 1
+    assert result.metadata["effective_gyroid_threshold"] < .45
+    assert result.metadata["field"]["threshold"] == .45
+    exported = export_lattice(result, tmp_path / "collision.stl")
+    assert mesh_integrity(trimesh.load_mesh(exported, process=True))["status"] == "PASS"

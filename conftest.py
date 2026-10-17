@@ -46,4 +46,5 @@ def pytest_sessionfinish(session, exitstatus):
                              "design_build_provenance": getattr(session.config, "_shoe_design_provenance", {}),
                              "lattice_build_provenance": getattr(session.config, "_shoe_lattice_provenance", {}),
                              "toe_repair_provenance": getattr(session.config, "_shoe_toe_repair_provenance", {}),
-                             "terminal_build_provenance": getattr(session.config, "_shoe_terminal_provenance", {})})
+                             "terminal_build_provenance": getattr(session.config, "_shoe_terminal_provenance", {}),
+                             "m2_closeout_provenance": getattr(session.config, "_shoe_m2_closeout_provenance", {})})
