@@ -1,0 +1,44 @@
+{
+  "schema_version": "m3-0.1",
+  "unit": "mm",
+  "m1_directory": "output/m1_toe_refine",
+  "m2_directory": "output/m2_toe_complete",
+  "m2_acceptance_report": "docs/milestone2_lattice_acceptance.json",
+  "overlap_field_mm": 0.8,
+  "overlap_definition": "offset of saved conservative domain field",
+  "numerical_volume_floor_mm3": 1e-5,
+  "numerical_area_floor_mm2": 0.0,
+  "numerical_distance_tolerance_mm": 1e-7,
+  "self_intersection_pair_budget": 2000000,
+  "maximum_core_grid_nodes": 50000000,
+  "pattern": {
+    "type": "hex",
+    "hole_flat_to_flat_mm": 4.0,
+    "pitch_mm": 8.0,
+    "region": {
+      "last_x_fraction_range": [0.67, 0.82],
+      "y_range_mm": [-20.0, 20.0],
+      "minimum_outward_normal_z": 0.8
+    },
+    "collar_keepout_mm": 4.0,
+    "sole_connection_keepout_mm": 3.0,
+    "minimum_web_mm": 2.0,
+    "cavity_overshoot_mm": 0.3,
+    "maximum_cut_depth_mm": 8.0,
+    "max_holes": 64,
+    "placement_algorithm_version": "retained-upper-hex-v1"
+  },
+  "void_access": {
+    "enabled": true,
+    "port_radius_mm": 2.0,
+    "cavity_overshoot_mm": 0.3,
+    "minimum_exterior_skin_keepout_mm": 2.0,
+    "minimum_port_web_mm": 2.0,
+    "minimum_overlap_volume_mm3": 1e-5,
+    "minimum_connection_witness_radius_mm": 0.1,
+    "max_port_count": 64,
+    "candidate_budget_per_component": 128,
+    "placement_version": "footbed-access-v1"
+  },
+  "manufacturing_rules_file": "config/manufacturing_rules.json"
+}

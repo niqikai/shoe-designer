@@ -14,8 +14,10 @@ dependencies = [
   "trimesh>=4.6,<5",
   "matplotlib>=3.9,<4",
   "networkx>=3.4,<4",
+  "manifold3d==3.5.4",
   "psutil>=7,<8",
   "scikit-image==0.26.0",
+  "lxml>=5.3,<7",
 ]
 
 [project.optional-dependencies]

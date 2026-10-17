@@ -328,6 +328,12 @@ def parser() -> argparse.ArgumentParser:
     lattice.add_argument("--max-voxels", type=int, default=10_000_000)
     lattice.add_argument("--max-field-memory-mb", type=float, default=4096.)
     lattice.add_argument("--domain-cache", type=Path, help="Reuse a hash-bound CAD domain; independent STL/CAD checks still run")
+    assembly = commands.add_parser("assemble-shoe", help="M3 core/shell prototype; requires complete M2 READY evidence")
+    assembly.add_argument("--spec", type=Path, required=True, help="Separate M3 assembly configuration JSON")
+    assembly.add_argument("--m2-source", type=Path, default=Path("output/m2_toe_complete"))
+    assembly.add_argument("--m2-closeout", type=Path, default=Path("output/m2_closeout"))
+    assembly.add_argument("--appearance-acceptance", type=Path, default=Path("docs/milestone2_lattice_acceptance.json"))
+    assembly.add_argument("--output", type=Path, default=Path("output/m3_core_shell"))
     for subcommand in commands.choices.values():
         subcommand.add_argument("--max-rss-mb", type=float, default=8192,
                                 help="Sampled process RSS budget in MiB (default 8192); exit 3 when observed exceeded")
@@ -352,6 +358,18 @@ def main(argv: list[str] | None = None) -> int:
         if (args.max_voxels <= 0 or not np.isfinite(args.max_field_memory_mb)
                 or args.max_field_memory_mb <= 0):
             parser().error("M2 voxel and allocation budgets must be positive and finite")
+    assembly_gate = None
+    if args.command == "assemble-shoe":
+        from shoe_poc.assembly.pipeline import (AssemblyGateError, validate_assembly_gate,
+                                               validate_assembly_output)
+        try:
+            _, assembly_gate = validate_assembly_gate(spec_path=args.spec,
+                m2_source=args.m2_source, m2_closeout=args.m2_closeout,
+                appearance_acceptance=args.appearance_acceptance)
+            validate_assembly_output(args.output, assembly_gate)
+        except (AssemblyGateError, FileNotFoundError, json.JSONDecodeError, ValidationError, ValueError) as error:
+            LOG.error("M3 gate refused assembly before output: %s", error)
+            return 3
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     # Native OCCT allocations are not visible to Python tracemalloc.
     from shoe_poc.resource_limits import MemoryBudget
@@ -369,6 +387,13 @@ def main(argv: list[str] | None = None) -> int:
             build_lattice(args.spec, args.output, base_directory=args.base_dir,
                 acceptance_path=args.acceptance, max_voxels=args.max_voxels,
                 max_field_memory_mb=args.max_field_memory_mb, run_id=run_id, domain_cache=args.domain_cache)
+        elif args.command == "assemble-shoe":
+            from shoe_poc.assembly.pipeline import assemble_shoe
+            report = assemble_shoe(spec_path=args.spec, m2_source=args.m2_source,
+                m2_closeout=args.m2_closeout, appearance_acceptance=args.appearance_acceptance,
+                output=args.output, gate_binding=assembly_gate)
+            LOG.info("M3 %s core/shell prototype; overall PARTIAL; manufacturing NOT_VERIFIED", report["status"])
+            return 0 if report["topology_status"] == "PASS" else 3
         elif args.command == "validate":
             from shoe_poc.validation import validate_mesh
             report = validate_mesh(args.model)
@@ -379,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("Input error: %s", error)
         if args.command in {"build-base", "run"}:
             _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
+        if args.command == "assemble-shoe":
+            return 3
         if args.command != "build-lattice" or not (args.output / "failure_report.json").is_file():
             write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
                        "type": type(error).__name__, "elapsed_seconds": time.perf_counter() - before})
@@ -387,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         LOG.error("Geometry/runtime error: %s", error)
         if args.command in {"build-base", "run"}:
             _record_build_failure(args.output, run_id, error, time.perf_counter() - before)
+        if args.command == "assemble-shoe":
+            return 3
         if args.command != "build-lattice" or not (args.output / "failure_report.json").is_file():
             write_json(args.output / "failure_report.json", {"status": "FAIL", "error": str(error),
                        "type": type(error).__name__, "traceback": traceback.format_exc(),
