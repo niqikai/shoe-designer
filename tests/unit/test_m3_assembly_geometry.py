@@ -6,6 +6,7 @@ import trimesh
 from shoe_poc.assembly.core import assemble_core_shell
 from shoe_poc.assembly.geometry import (cancel_opposite_duplicate_faces, exact_index_triangles,
                                         validate_native_mesh)
+from shoe_poc.assembly.preview import _clip_mesh_halfspace
 
 
 def _joined(*meshes):
@@ -101,6 +102,18 @@ def test_nested_void_shell_has_alternating_orientation_and_one_body():
     assert report['volume_mm3'] == pytest.approx(1000 - 64)
 
 
+def test_nesting_accelerator_budget_preserves_unverified_state_instead_of_guessing():
+    mesh = _joined(_box((10, 10, 10)), _box((4, 4, 4), inward=True))
+
+    report = validate_native_mesh(mesh, nesting_accelerator_face_budget=0,
+                                  self_intersection_pair_budget=0)
+
+    assert report['shell_nesting_status'] == 'NOT_VERIFIED'
+    assert report['physical_body_count'] is None
+    assert report['shell_nesting_unverified']
+    assert report['status'] == 'PARTIAL'
+
+
 def test_positive_island_below_total_volume_floor_is_still_retained():
     small = _box((.001, .001, .001), center=(5, 5, 5))
     report = validate_native_mesh(small, require_single_body=False)
@@ -124,6 +137,19 @@ def test_island_inside_void_is_a_second_physical_body():
     assert strict_report['status'] == 'FAIL'
 
 
+def test_cutaway_clips_crossing_triangles_to_plane_without_mutating_source():
+    source = _box((2, 2, 2))
+    original = source.triangles.copy()
+
+    cut = _clip_mesh_halfspace(source, axis=1, level=0., keep_greater=True)
+
+    assert np.array_equal(source.triangles, original)
+    assert cut.bounds[0, 1] == pytest.approx(0.)
+    assert cut.bounds[1, 1] == pytest.approx(1.)
+    assert np.all(cut.vertices[:, 1] >= 0.)
+    assert np.any(cut.vertices[:, 1] == 0.)
+
+
 def test_core_shell_volumes_follow_intersection_subtraction_and_exclude_shoe_cavity():
     # B is the 10 mm cube, C the 6 mm core-region cube, and L crosses C's
     # +X boundary. The upper/wearer cavity outside C must not enter V.
@@ -134,6 +160,8 @@ def test_core_shell_volumes_follow_intersection_subtraction_and_exclude_shoe_cav
     result = assemble_core_shell(base, lattice, core, regional_x_bins={'all': (-5, 5)})
 
     assert result.report['status'] == 'PASS'
+    assert result.report['lattice_component_participation']['single_physical_body_status'] == 'PASS'
+    assert result.report['lattice_component_participation']['assembled_physical_body_count'] == 1
     assert result.report['volumes']['core_inside_base_volume_mm3'] == pytest.approx(216)
     assert result.report['volumes']['remaining_void_volume_mm3'] == pytest.approx(216 - 1.4 * 2 * 2)
     assert result.report['volumes']['remaining_void_volume_mm3'] < 1000 - result.report['volumes']['assembled_volume_mm3']

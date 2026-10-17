@@ -238,12 +238,14 @@ def _vertex_links(faces, vertex_count, inverse):
 
 def validate_native_mesh(mesh, *, require_single_body=True, allow_empty=False,
                          area_floor_mm2=1e-12, volume_floor_mm3=1e-9,
-                         self_intersection_pair_budget=2_000_000):
+                         self_intersection_pair_budget=2_000_000,
+                         nesting_accelerator_face_budget=2_500_000):
     """Report strict native topology without modifying any vertex or triangle."""
     report = {'status': 'FAIL', 'geometry_status': 'FAIL', 'checks': {}, 'shells': [],
               'physical_body_count': None, 'repair_applied': False, 'components_removed': 0,
               'numerical_area_floor_mm2': float(area_floor_mm2),
               'numerical_volume_floor_mm3': float(volume_floor_mm3),
+              'nesting_accelerator_face_budget': int(nesting_accelerator_face_budget),
               'manufacturing_status': 'NOT_VERIFIED'}
     checks = report['checks']
     vertices, faces = np.asarray(mesh.vertices), np.asarray(mesh.faces)
@@ -318,17 +320,22 @@ def validate_native_mesh(mesh, *, require_single_body=True, allow_empty=False,
         parents = []
         for j, other in enumerate(shell_bounds):
             if i != j and np.all(bounds[0] >= other[0]) and np.all(bounds[1] <= other[1]):
-                # Large enclosing shells can contain millions of triangles.
-                # Do not turn containment checking into an unbounded all-face
-                # operation per tiny lattice component. Preserve the uncertainty
-                # explicitly; downstream geometry remains PARTIAL until resolved.
-                if len(shell_faces[j]) > 20_000:
+                # Large enclosing shells are imported once into a bounded BVH,
+                # then queried for every enclosed shell. Exceeding this explicit
+                # budget preserves uncertainty rather than silently skipping it.
+                if len(shell_faces[j]) > nesting_accelerator_face_budget:
                     nesting_unverified.append({'shell_id': i, 'candidate_parent_id': j,
                                                'candidate_parent_triangles': len(shell_faces[j]),
-                                               'reason': 'accelerated containment query skipped above 20000 faces'})
+                                               'reason': 'candidate parent exceeds the configured accelerator face budget'})
                     continue
                 if j not in containment_accelerators:
-                    containment_accelerators[j] = _shell_accelerator(vertices, faces[shell_faces[j]])
+                    try:
+                        containment_accelerators[j] = _shell_accelerator(vertices, faces[shell_faces[j]])
+                    except Exception as error:
+                        nesting_unverified.append({'shell_id': i, 'candidate_parent_id': j,
+                            'candidate_parent_triangles': len(shell_faces[j]),
+                            'reason': 'accelerator construction failed', 'error': str(error)})
+                        continue
                 inside, query = _point_inside_shell(point, containment_accelerators[j], other)
                 if inside:
                     parents.append(j)

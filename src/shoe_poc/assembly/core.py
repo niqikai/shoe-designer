@@ -253,15 +253,32 @@ def assemble_core_shell(base, lattice, core, *, area_floor_mm2=1e-12,
     lattice_shells = input_reports['lattice'].get('shells', [])
     positive_lattice_shells = sum(row.get('signed_volume_mm3', 0) > 0 for row in lattice_shells)
     assembled_mesh_validation = report['operations']['assembled_before_holes']
+    assembled_body_count = assembled_mesh_validation.get('physical_body_count')
+    assembled_nesting_status = assembled_mesh_validation.get('shell_nesting_status')
+    if assembled_nesting_status != 'PASS' or assembled_body_count is None:
+        single_body_status = 'NOT_VERIFIED'
+    else:
+        single_body_status = 'PASS' if assembled_body_count == 1 else 'FAIL'
+    positive_shells_by_depth = {}
+    for row in assembled_mesh_validation.get('shells', []):
+        if row.get('signed_volume_mm3', 0) > 0:
+            depth = str(row.get('nesting_depth'))
+            positive_shells_by_depth[depth] = positive_shells_by_depth.get(depth, 0) + 1
     report['lattice_component_participation'] = {
-        'status': 'NOT_VERIFIED',
+        'status': single_body_status,
         'input_boundary_shell_count': len(lattice_shells),
         'input_positive_orientation_shell_count': positive_lattice_shells,
         'assembled_boundary_shell_count': assembled_mesh_validation.get('boundary_shell_count'),
         'assembled_positive_orientation_shell_count': assembled_mesh_validation.get('positive_orientation_shell_count'),
-        'assembled_physical_body_count': assembled_mesh_validation.get('physical_body_count'),
+        'assembled_physical_body_count': assembled_body_count,
+        'assembled_positive_shells_by_nesting_depth': positive_shells_by_depth,
+        'single_physical_body_status': single_body_status,
         'components_removed': 0,
-        'reason': 'Aggregate overlap is measured; per-island connection is not inferred from aggregate volume.'}
+        'reason': ('Containment is fully verified; multiple positive material components remain.'
+                   if single_body_status == 'FAIL' else
+                   'Aggregate overlap is measured; physical connectivity remains unverified.'
+                   if single_body_status == 'NOT_VERIFIED' else
+                   'Containment is fully verified and the assembled material has one physical component.')}
     if regional_x_bins is None:
         edges = np.linspace(float(base.bounds[0, 0]), float(base.bounds[1, 0]), 5)
         regional_x_bins = {name: (float(edges[i]), float(edges[i+1]))
