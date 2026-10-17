@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shoegen"
+version = "0.0.1"
+description = "Generative lattice-sole and shell-upper footwear geometry pipeline"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy",
+    "scipy",
+    "numba",
+    "trimesh",
+    "manifold3d",
+    "libigl",
+    "pydantic>=2",
+    "psutil",
+    "build123d==0.10.0",
+    # ocp-gordon 0.3.x needs OCP 8.x, which conflicts with build123d 0.10.0 (cadquery-ocp<7.9).
+    # 0.1.17 is the version PR #2 used successfully.
+    "ocp-gordon==0.1.17",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shoegen"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running end-to-end tests (deselected by default)",
+    "real_last: needs a local licensed last file in input/lasts/ (skipped when absent)",
+]
+addopts = "-m 'not slow and not real_last'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
