@@ -23,6 +23,9 @@ dependencies = [
     "ocp-gordon==0.1.17",
 ]
 
+[project.scripts]
+shoegen = "shoegen.cli:entry"
+
 [dependency-groups]
 dev = [
     "pytest",
