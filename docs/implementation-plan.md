@@ -23,9 +23,9 @@
 |---|---|---|---|---|
 | **M0** 端到端骨架 | 一条命令：鞋楦 → 鞋底均匀杆状晶格 + 实体鞋面薄壳 → 水密 STL + 报告 | M0.1 H·medium；M0.2 S·medium；M0.3 S·high；M0.4 **O·high**；M0.5 **O·high**；M0.6a S·high；M0.6 **O·xhigh**（若改用现成库则降为 S·high）；M0.7 S·high；M0.8 **O·high**；M0.9 S·medium；M0.10 S·medium；M0.R **O·high** | H0 | L（12） |
 | **M1** 完善鞋底 | 杆径渐变、边界节点不留断头、外底实体与花纹；薄片检查升为 hard | 边界节点 **O·xhigh**；其余 S·high；评审 **O·high** | M0；H2 | M |
-| **M2** 鞋面 | 鞋楦表面参数化；仿针织（默认）与网眼两种 `SurfacePattern`；Rim、后跟加强条、与鞋底熔合 | 参数化 **O·high**；仿针织 **O·high**；网眼 S·high；评审 **O·high** | M0（可与 M1 并行）；H3 前完成即可 | L |
+| **M2** 鞋面 | 鞋楦表面参数化；仿针织（默认）与网眼两种 `SurfacePattern`；Rim、后跟加强条、与鞋底熔合 | 参数化 **O·high**；仿针织 **O·high**；网眼 S·high；评审 **O·high** | M0（可与 M1 并行，`CapsuleSet` 与 M1 共用）；H3 前完成即可 | L |
 | **M3** 语义层 | DesignSpec → Resolver → GeometryGraph；尺码变形；确定性回归 | Resolver **O·high**；变形 S·high；评审 **O·high** | M1、M2；H4 | L |
-| **M4** 打样与选工艺 | Coupon 与鞋面试片；两种工艺打样；校准刚度；整鞋打样与试穿 | 分析与校准 **O·high**；其余 S | M3；H5 | M（+ 外部周期） |
+| **M4** 打样与选工艺 | M4a：Coupon 与鞋面平板试片、两种工艺打样、校准刚度；M4b：换成自己的鞋楦后整鞋打样与试穿 | 分析与校准 **O·high**；其余 S | M3；H5；M4b 另需 H7 | M（+ 外部周期） |
 
 ```
 H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ──────────────────┐
@@ -82,8 +82,12 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - `pyproject.toml`（Python 3.11+，uv 管理）、`uv.lock`、包 `src/shoegen/`、pytest 配置（默认 `-m "not slow and not real_last"`）、ruff、`.gitignore`。
 - 依赖：numpy、scipy、numba、trimesh、manifold3d、libigl、pydantic、psutil、build123d（只用于 STEP 导入）。
 - `src/shoegen/profile.py`：ManufacturingProfile 的 pydantic 模型（字段见 ADR 0004）；`profiles/pbf-tpu-generic@0.json`、`profiles/dls-epu-generic@0.json`，`status = placeholder`，每个数值附"待核实"注释和留空的来源字段。放在 M0.1，是因为 M0.6、M0.7 都要读它。
-- `src/shoegen/resources.py`：RSS 看门狗。后台线程每 0.5 s 用 psutil 统计主进程及全部子进程的 RSS 总和，超限时写失败报告并 `os._exit(6)`。
-- **验收**：`uv sync && uv run pytest` 通过；看门狗测试：子进程分配超过上限的数组时，父进程以退出码 6 结束并留下失败报告。
+- `src/shoegen/resources.py`：RSS 看门狗。后台线程每 0.5 s 用 psutil 统计主进程及全部子进程的 RSS 总和。超限时按顺序：写失败报告（含当时的子进程 PID 列表）→ 对 `children(recursive=True)` 发 SIGTERM → 等 2 s，对仍存活的发 SIGKILL → `psutil.wait_procs` 回收 → `os._exit(6)`。只 `os._exit` 父进程不够：`ProcessPoolExecutor` 的 worker 会被 init 接管继续运行（ADR 0005）。
+- worker 侧兜底：父进程被 SIGKILL 或崩溃时来不及清理，macOS 又没有 `PR_SET_PDEATHSIG`，所以每个 worker 启动一个守护线程，每 0.5 s 检查 `os.getppid()`，与启动时不同就 `os._exit`。为了让这个线程能运行，长时间运行的 numba 内核用 `nogil=True`。
+- **验收**：`uv sync && uv run pytest` 通过；看门狗测试（用 `ProcessPoolExecutor`，worker 正在执行一个持续分配内存的长任务）：
+  - 父进程以退出码 6 结束并留下失败报告；
+  - 报告里列出的 worker PID 在 5 s 内全部不存在（`psutil.pid_exists`），没有 PPID 为 1 的残留进程；
+  - 另测父进程被 SIGKILL 的情形：worker 在 2 s 内自行退出。
 
 ### M0.2 移植鞋楦导入与报告工具 — S·medium
 - 从 `codex/3DPrintedFootwear` 移植 `last/loader.py`、`last/normalizer.py`、`reporting.py`，包名改为 `shoegen`；保留 `FILE_NAME` 头修复、显式刚体归一化、`license_status` 字段。去掉对 PR #2 其他模块的依赖。提交说明注明出处提交号。
@@ -92,23 +96,28 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 ### M0.3 鞋楦 → 带符号距离采样场 — S·high
 - 用 build123d 三角化（弦差 0.01 mm）；按面输出的顶点先合并，再检查水密与单连通；用 libigl `signed_distance`（winding number 定号）。
 - 双层采样，见 ADR 0003：0.5 mm 细栅格只存 |d| ≤ 6 mm 的窄带；2 mm 粗栅格覆盖包围盒外扩 30 mm；更远处用到鞋楦包围盒的距离。
-- 同时导出两份二维数据，供 M0.8 使用：足底轮廓（鞋楦在 XY 平面的投影）和底面高度图 `h(x, y)`（每个 XY 位置上鞋楦的最低 z），都用 0.5 mm 栅格，由三角网格竖直射线求交得到。
+- 同时导出两份二维数据，供 M0.8 使用：足底轮廓（鞋楦在 XY 平面的投影）和底面高度图 `h(x, y)`（每个 XY 位置上鞋楦的最低 z），都用 0.5 mm 栅格，由三角网格竖直射线求交得到。轮廓外的 h 用边界值外推，保证连续。
+- 高度曲面采样场：把 `z = h(x, y) + 偏移` 三角化成一张开曲面，用 libigl 求点到曲面的无符号距离，符号取 `z − h(x, y) − 偏移` 的符号，按与鞋楦相同的双层规则采样。这样得到的是真实毫米距离，可以直接偏置（ADR 0001 的 `exact`）。
 - 存为 `.npy`，键为鞋楦 sha256 + 采样参数；worker 用 `mmap_mode='r'` 打开。
 - **验收**（在解析合成鞋楦上，真值可算）：
   - 细栅格窄带内误差 ≤ 0.05 mm；粗栅格区域误差 ≤ 1 mm；更远处的值不大于真值；
   - 细栅格窄带内数值 Lipschitz ≤ 1.05；
-  - 高度图误差 ≤ 0.05 mm（坡度 < 60° 处）。
+  - 高度图误差 ≤ 0.05 mm（坡度 < 60° 处）；
+  - 高度曲面采样场在细栅格窄带内与解析真值的误差 ≤ 0.05 mm，包括轮廓边缘的陡坡处（用一个半球形底面的合成鞋楦检验）。
 
 ### M0.4 GeometryGraph 核心 — O·high
-- 节点白名单：`Box`、`RoundedBox`、`Capsule`、`HalfSpace`、`SampledField`（鞋楦）、`Extrude2D`（二维 SDF 沿 Z 拉伸并截取 z 区间）、`BelowHeightField`（`(z − h(x,y)) / √(1+G²)`，G 是高度图的最大坡度）、`Union`、`Intersect`、`Subtract`、`SmoothUnion(k)`、`Offset(d)`、`ShellOutward(t)`（`max(d − t, −d)`，即向外长出厚度 t 的壳）、`StrutLattice`（M0.7 填实现）。
+- 节点白名单：`Box`、`RoundedBox`、`Capsule`、`HalfSpace`、`SampledField`（鞋楦）、`Extrude2D`（二维 SDF 沿 Z 拉伸并截取 z 区间）、`HeightSurfaceField`（M0.3 的高度曲面采样场，`exact`）、`Union`、`Intersect`、`Subtract`、`SmoothUnion(k)`、`Offset(d)`、`ShellOutward(t)`（`max(d − t, −d)`，即向外长出厚度 t 的壳）、`StrutLattice`（M0.7 填实现）。
 - pydantic 模型 + 规范化 JSON（键排序、浮点用 `repr` 精确往返）→ `graph_hash`；采样场以内容哈希（源文件 sha256、采样参数、数组 sha256）计入（ADR 0001）；`graph_version = 1`。
 - 每种节点只有一条 numba 内核；批量求值只是循环调用它（ADR 0005）。
-- 构建时检查：图里对 `SampledField` 的偏置量 ≤ 窄带宽度 − 1 mm（ADR 0003）。
+- 每个节点带度量属性 `exact` / `bound`，按 ADR 0001 的组合规则自动推导。
+- 构建时检查（退出码 3）：图里对采样场的偏置量 ≤ 窄带宽度 − 1 mm（ADR 0003）；偏置和壳的子节点在所需一侧必须是 `exact`（ADR 0001）。
+- 不提供把高度图除以 √(1+G²) 的节点：G 由轮廓边缘的陡坡决定，在半径 50 mm 的半球底面上按 0.5 mm 采样就约为 14，平坦处场值被压小 14 倍，偏置 1.2 会变成约 17 mm。
 - **验收**：
   - 每种解析节点都有真值测试；
   - Lipschitz 测试：随机点对上 |Δd| / |Δx| ≤ 1 + 1e-9（`SampledField` 按 M0.3 的标准）；
   - 同一组点按不同批大小、不同顺序求值，结果逐位一致；
-  - 序列化往返后哈希不变；改任一参数哈希改变。
+  - 序列化往返后哈希不变；改任一参数哈希改变；
+  - 度量属性：对 `bound` 节点做偏置时以退出码 3 拒绝；对 `exact` 节点及其 `Intersect`/`Subtract` 做向内偏置，结果与解析真值一致。
 
 ### M0.5 块稀疏求值与跳块 — O·high
 - 全局栅格：原点 = 包围盒最小角向下取整到体素整数倍；坐标一律由全局整数索引算出（`origin + i × h`）；块 64³，按 (i, j, k) 字典序编号。
@@ -166,7 +175,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 ### M0.8 鞋体装配 — O·high
 记 `cavity = Offset(鞋楦, clearance=1.0)`，`h(x, y)` 是鞋楦底面高度图，`z_ground = z_min − H_fore`（`z_min` 是鞋楦最低点，`H_fore` 默认 12 mm）。地面是水平面；鞋楦有跟高，所以后跟处鞋底自然更厚。
 
-- **鞋底包络** = `Extrude2D(足底轮廓外扩 3 mm, z ∈ [z_ground, z_top])` ∩ `BelowHeightField(h + 3 mm)`，再减去 cavity。`z_top` 取鞋楦最高的底面点再加 3 mm，保证有跟高的后跟和翘起的鞋头也被包住。
+- **鞋底包络** = `Extrude2D(足底轮廓外扩 3 mm, z ∈ [z_ground, z_top])` ∩ `HeightSurfaceField(h + 3 mm)` 的下方，再减去 cavity。三个叶子都是 `exact`（二维轮廓场用精确的距离变换），包络是交与差，所以内侧是 `exact`，可以向内收缩（ADR 0001）。`z_top` 取鞋楦最高的底面点再加 3 mm，保证有跟高的后跟和翘起的鞋头也被包住。
 - **鞋底** = (包络向内收缩 1.2 mm ∩ 晶格) ∪ 包络外皮（1.2 mm）∪ 足床板（`ShellOutward(cavity, 1.5)` ∩ 包络）。被裁切的杆都并入外皮或足床板，不留悬空断头。
 - **鞋面** = `ShellOutward(cavity, 2.0)` ∩ `z ≤ 领口高度`。
 - **整鞋** = 鞋底 ∪ 鞋面，最后再减一次 cavity。因为两种壳都是向外长的，这一步不会削薄它们。
@@ -175,7 +184,10 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
   - 整鞋网格水密、单连通；
   - 鞋楦内部的采样点处没有材料；
   - 领口真的开着：在领口高度的鞋楦截面内布一个射线网格，沿 −Z 向下发射，≥ 90% 的射线在到达足床板之前不穿过任何材料；
-  - 后跟和鞋头处，鞋楦底面以下都有鞋底材料（沿 −Z 的射线在到达 `z_ground` 前穿过材料）。
+  - 后跟和鞋头处，鞋楦底面以下都有鞋底材料（沿 −Z 的射线在到达 `z_ground` 前穿过材料）；
+  - 外皮厚度是实测的：在包络表面上均匀取点，沿内法向测到晶格芯部边界的距离，全部落在 1.2 mm ± 1 个体素内；
+  - 晶格芯部确实存在：芯部体积与独立参考值相差 ≤ 5%（参考值：把包络体素化后用 scipy 的欧氏距离变换收缩 1.2 mm 求得；合成鞋楦尺寸小，可以用稠密栅格）；沿鞋楦中线的每个截面上，晶格芯部面积都 > 0，防止某段鞋底被外皮填成实心而水密、连通检查照样通过；
+  - 回归用例：半球形底面（R = 50 mm）的合成鞋楦，正是全局坡度缩放会把芯部吃掉的情形。
 
 ### M0.9 检查与报告 — S·medium
 - 按 ADR 0004 的三类检查实现：
@@ -213,27 +225,35 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - 在鞋底包络表面布置边界节点，让杆终止在节点或外皮上，消除裁切出的薄片；网格薄片检查升为 hard（ADR 0004）。
 - 外底实体与花纹。
 - 视 M0 性能决定是否换 OpenVDB 或 GPU 求值。
-- 关键任务：边界节点与显式杆图 **O·xhigh**；渐变与 round-cone S·high；外底 S·high；评审 **O·high**。
+- 关键任务：边界节点与显式杆图（含与 M2 共用的 `CapsuleSet`）**O·xhigh**；渐变与 round-cone S·high；外底 S·high；评审 **O·high**。
 
 ### M2 鞋面（ADR 0006）
 - 鞋楦表面参数化：切缝、展平、扭曲检查，把 (u, v) 和法向采样进窄带。
-- `SurfacePattern` 节点：先做仿针织（默认方案，Q5），再做网眼（可选方案）。
+- `SurfacePattern` 节点：先做仿针织（默认方案，Q5），再做网眼（可选方案）。距离场按 ADR 0006：仿针织是世界坐标里的胶囊链（`CapsuleSet`，与 M1 共用，谁先开始谁实现），网眼按 Lipschitz 上界 L 缩放、按世界坐标筋宽下界检查。
+- 验收包括 ADR 0006 列出的回归：斜纱线、坡度 2 的起伏、高扭曲区和内凹区上实测截面直径、Lipschitz 与跳块一致性。
 - 后跟加强条、领口 Rim、鞋面底边与鞋底的熔合带。
 - 输出两种鞋面的渲染图，供 H4 目视检查。
 - 关键任务：表面参数化 **O·high**；仿针织节点 **O·high**（纱线几何与 Lipschitz 处理）；网眼节点 S·high；接缝与熔合带 S·high；评审 **O·high**。
 
 ### M3 语义层
 - DesignSpec（尺码、缓震档位、鞋面图案与开孔率等，鞋面默认仿针织）→ Resolver → GeometryGraph。Resolver 先用相对密度估算把缓震档位翻译成杆径（Q7 已接受），校准表留到 M4。
-- 尺码变形节点（ADR 0003）：接口按通用鞋楦设计，只在开发用鞋楦上做本地测试。你自行设计的鞋楦（STEP）在本路线测试全部完成后才提供（Q6），届时只需换输入文件和归一化配置。
+- 尺码变形节点（ADR 0003）：接口按通用鞋楦设计，只在开发用鞋楦上做本地测试。你自行设计的鞋楦（STEP）最迟在 M4 的外部整鞋打样之前提供（Q6、H7），届时只需换输入文件和归一化配置。
 - 黄金回归：若干 DesignSpec 的 `graph_hash` 与网格指标。
 - 关键任务：DesignSpec 与 Resolver **O·high**；变形节点 S·high；schema 与 CLI S·medium；评审 **O·high**。
 
 ### M4 打样与选工艺（最后进行）
-- `shoegen coupon`：40 × 40 × 20 mm 的鞋底试块，参数网格 = Cell {8, 10, 12} mm × 杆径 3–4 档；另出鞋面图案的平板试片。
+开发用鞋楦及其派生几何不能发给服务商（ADR 0003）。所以 M4 分两段：不含鞋楦几何的试样先打，整鞋等换成你自己的鞋楦后再打。
+
+**M4a 试样与选工艺**（可以外发）
+- `shoegen coupon`：40 × 40 × 20 mm 的鞋底试块，参数网格 = Cell {8, 10, 12} mm × 杆径 3–4 档；另出鞋面图案的平板试片（图案铺在平面上，不用鞋楦参数化）。这两类都由独立的 Graph 生成，不引用鞋楦采样场；`coupon` 命令在构建时检查这一点，引用了就以退出码 3 拒绝。
 - 选两种工艺（例如 MJF TPU、DLS 弹性体）各打一批：压缩试验得到刚度–相对密度曲线，弯折试验评估鞋面试片。
 - 选定工艺；对应 profile 升级为 `vendor_guideline` 或 `measured`；建立 `stiffness.v1` 校准表，替换 M3 的估算；工艺相关检查按需升为 hard。
-- 整鞋打样与试穿。用的是开发用鞋楦，打样件仅作内部开发测试，不商用、不对外展示（Q1）。
-- 关键任务：Coupon 命令 S·medium；试验数据分析与校准 **O·high**；profile 升级 S·medium。
+
+**M4b 整鞋打样与试穿**（前置条件：H7）
+- 用你自行设计的鞋楦重跑全部回归，再出整鞋打样与试穿。
+- 如果你有自己控制的打印设备，可以在 H7 之前用开发用鞋楦在本地打一只内部测试件，文件不离开本机；外发服务商的整鞋只用自己的鞋楦。
+
+- 关键任务：Coupon 命令 S·medium；试验数据分析与校准 **O·high**；profile 升级 S·medium；换楦回归 S·medium。
 
 ---
 
@@ -246,9 +266,9 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 | H2 | M0 合并后 | 目视检查 M0 鞋（STL） |
 | H3 | M1 合并后 | 目视检查鞋底：渐变、外底、边界 |
 | H4 | M2 合并后 | 目视检查仿针织鞋面（默认）与网眼鞋面 |
-| H5 | M4 开始 | 选定打样服务商；下单与付款由你本人完成 |
-| H6 | M4 试验后 | 选定工艺；批准 profile 与 `stiffness.v1`；整鞋打样与试穿 |
-| H7 | 本路线测试全部完成后 | 提供自行设计的鞋楦（STEP），换楦后重跑回归 |
+| H5 | M4a 开始 | 选定打样服务商；下单与付款由你本人完成 |
+| H6 | M4a 试验后 | 选定工艺；批准 profile 与 `stiffness.v1` |
+| H7 | M4b 之前（外部整鞋打样之前） | 提供自行设计的鞋楦（STEP），换楦后重跑回归；之后进行整鞋打样与试穿 |
 
 ---
 
@@ -262,7 +282,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 | Q3 | 鞋面结构 | 柔性网眼（Mesh）或仿针织结构 | ADR 0006；M2 |
 | Q4 | PR #1、PR #2 的处置 | 暂时保留，由你自行处理 | 本计划不对它们做任何操作 |
 | Q5 | 鞋面默认用网眼还是仿针织？ | 默认仿针织；网眼保留为可选 | ADR 0006；M2 先做仿针织；M3 DesignSpec 默认值 |
-| Q6 | 自行设计的鞋楦的格式与时间 | 暂定 STEP；本路线测试全部完成后提供 | 只需支持 STEP 导入；M0–M4 全程用开发用鞋楦；H7 |
+| Q6 | 自行设计的鞋楦的格式与时间 | 暂定 STEP；原定本路线测试全部完成后提供。2026-10-17 审阅指出：开发用鞋楦的派生几何不能外发，外部整鞋打样因此需要你自己的鞋楦，时间改为最迟在 M4b 之前 | 只需支持 STEP 导入；M0–M4a 用开发用鞋楦；H7 在 M4b 之前 |
 | Q7 | 打印前缓震档位只能用估算值，是否接受？ | 接受 | M3 Resolver 用相对密度估算，M4 再校准 |
 
 目前没有待定问题。
