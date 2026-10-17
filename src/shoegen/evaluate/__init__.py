@@ -12,7 +12,8 @@ Typical use::
     stream.summary.to_dict()            # counts, timings, peak RSS
 
 Skipped blocks are not yielded; ``plan.status`` records whether each is inside or
-outside. Modules: ``blocks`` (lattice, layout, skip rule), ``sampling`` (in-process and
+outside. ``iter_block_results(plan, fn, args)`` runs ``fn(vals, start, *args)`` where each
+block is sampled and yields its result instead (used by :mod:`shoegen.mesh`). Modules: ``blocks`` (lattice, layout, skip rule), ``sampling`` (in-process and
 pooled sampling, summary).
 """
 
@@ -38,6 +39,7 @@ from shoegen.evaluate.sampling import (
     SAMPLE_DTYPE,
     BlockSampleStream,
     EvalSummary,
+    iter_block_results,
     iter_block_samples,
 )
 
@@ -57,6 +59,7 @@ __all__ = [
     "check_far_field_margins",
     "far_field_margin",
     "half_diagonal",
+    "iter_block_results",
     "iter_block_samples",
     "lattice_points",
     "plan_blocks",
