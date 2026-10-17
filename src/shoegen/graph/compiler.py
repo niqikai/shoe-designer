@@ -177,7 +177,9 @@ def _pack(node: AnyNode, nid: str, reg: dict[str, int], pk: _Packer) -> tuple[in
         p.extend([*f.origin, f.h, *f.bbox_min, *f.bbox_max, zc, hz, node.offset])
         return K.OP_EXTRUDE2D, [slot, *vals.shape]
     if isinstance(node, StrutLattice):
-        raise NotImplementedError("StrutLattice evaluation is implemented in M0.7")
+        assert node.fillet_k is not None  # resolved by StrutLattice's validator
+        p.extend([*node.origin, node.cell_mm, node.radius_mm, node.fillet_k])
+        return K.OP_STRUT_LATTICE, []
     if isinstance(node, Union):
         return K.OP_UNION, [reg[c] for c in node.children]
     if isinstance(node, Intersect):
