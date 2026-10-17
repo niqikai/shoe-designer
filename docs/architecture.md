@@ -98,7 +98,7 @@ DesignSpec ─► Resolver ─► GeometryGraph（可序列化的 SDF DAG = Buil
 - 块大小、遍历顺序、合并顺序固定；栅格坐标一律由全局整数索引算出（`origin + i × h`）；并行只在块之间，结果按块序号合并。
 - 确定性的范围：同一台机器、同一份 `uv.lock` 下，`shoe.stl` 与 `graph.json` 逐位一致。`report.json`、`manifest.json` 中的耗时、RSS、run_id 不在此列。
 - 进程 RSS 有上限（默认 6 GB），超出即中止并报告。开发机为 16 GB 内存。
-- 先用自研块稀疏网格。OpenVDB 的 Python 绑定在 macOS arm64 上安装不便，留到 M1 视性能再评估；网格提取是否用现成库由 M0.6a 决定。
+- 先用自研块稀疏网格。OpenVDB 在 PyPI 上没有可用的 Python wheel，`uv` 装不上，留到 M1 视需要再评估；网格提取经 M0.6a 评估后确定自写 numba Marching Cubes（manifold3d `level_set` 的时间和内存跟包围盒体积成正比，不满足跨块条件），见 [spikes/m0.6a-meshing.md](spikes/m0.6a-meshing.md)。
 
 ## 4. 从两份旧 PR 继承什么
 

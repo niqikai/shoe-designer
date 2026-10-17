@@ -21,7 +21,7 @@
 
 | 里程碑 | 目标 | 任务（模型·强度） | 依赖 | 规模 |
 |---|---|---|---|---|
-| **M0** 端到端骨架 | 一条命令：鞋楦 → 鞋底均匀杆状晶格 + 实体鞋面薄壳 → 水密 STL + 报告 | M0.1 H·medium；M0.2 S·medium；M0.3 S·high；M0.4 **O·high**；M0.5 **O·high**；M0.6a S·high；M0.6 **O·xhigh**（若改用现成库则降为 S·high）；M0.7 S·high；M0.8 **O·high**；M0.9 S·medium；M0.10 S·medium；M0.R **O·high** | H0 | L（12） |
+| **M0** 端到端骨架 | 一条命令：鞋楦 → 鞋底均匀杆状晶格 + 实体鞋面薄壳 → 水密 STL + 报告 | M0.1 H·medium；M0.2 S·medium；M0.3 S·high；M0.4 **O·high**；M0.5 **O·high**；M0.6a S·high（已完成，结论：自研）；M0.6 **O·xhigh**；M0.7 S·high；M0.8 **O·high**；M0.9 S·medium；M0.10 S·medium；M0.R **O·high** | H0 | L（12） |
 | **M1** 完善鞋底 | 杆径渐变、边界节点不留断头、外底实体与花纹；薄片检查升为 hard | 边界节点 **O·xhigh**；其余 S·high；评审 **O·high** | M0；H2 | M |
 | **M2** 鞋面 | 鞋楦表面参数化；仿针织（默认）与网眼两种 `SurfacePattern`；Rim、后跟加强条、与鞋底熔合 | 参数化 **O·high**；仿针织 **O·high**；网眼 S·high；评审 **O·high** | M0（可与 M1 并行，`CapsuleSet` 与 M1 共用）；H3 前完成即可 | L |
 | **M3** 语义层 | DesignSpec → Resolver → GeometryGraph；尺码变形；确定性回归 | Resolver **O·high**；变形 S·high；评审 **O·high** | M1、M2；H4 | L |
@@ -151,7 +151,7 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
 - **判定**：5 项硬性条件（安装、正确性、跨块、确定性、授权）全部满足的候选里，选性能最好的。没有候选全部满足，就按 M0.6 原方案自研。
 - **验收**：报告里的每个数字都来自实际运行，并附上运行命令。
 
-### M0.6 分块网格提取与焊接 — O·xhigh（自研方案；若 M0.6a 选定现成库，改为 S·high 的接入任务）
+### M0.6 分块网格提取与焊接 — O·xhigh（自研方案，M0.6a 评估后确认）
 - 自写 numba Marching Cubes（标准查表），顶点以全局边编号 (i, j, k, axis) 标识，按编号焊接（ADR 0005）；采样值恰为 0 按外部处理，焊接后再按坐标合并一次、删除退化三角形。
 - 焊接后用 manifold3d 校验流形与水密；删除体积 < `profile.min_fragment_volume_mm3` 的碎块，记录数量与体积。
 - 输出规范化：顶点按坐标字典序、三角形按顶点编号排序，便于比较和哈希。
@@ -161,7 +161,12 @@ H0 ─► M0.1 ─┬─► M0.2 ─► M0.3 ───────────�
   - 一个跨 8 个块交点的形状，焊接后无裂缝；
   - 一个让大量采样值恰为 0 的形状（与栅格对齐的平面），网格水密且无退化三角形。
 - 这是 M0 最容易出隐蔽错误的地方，所以自研时用 O·xhigh。
-- 若 M0.6a 选定现成库：本任务改为接入该库，验收标准不变（包括单块与多块结果相同、零值退化、确定性）。
+- M0.6a 已评估（[docs/spikes/m0.6a-meshing.md](spikes/m0.6a-meshing.md)）：OpenVDB 在 PyPI 上装不上；manifold3d `level_set` 跨块不通过（时间和内存跟包围盒体积成正比，分块拼接只在体素能被二进制精确表示时才逐位相同）。所以本任务按自研做，模型和强度不变。
+- 来自 M0.6a 的实测，实现时要用到：
+  - scikit-image `marching_cubes`（未焊接，单线程）处理 108 个晶格块（80 × 80 × 40 mm，0.25 mm 体素）共 0.448 s，3,827,628 个三角形；M0.5 同一批采样要 5.9–9.1 s。Marching Cubes 的计算量不是瓶颈，难点是焊接和确定性。
+  - 同一块晶格的欧拉示性数是 −2774（亏格 1388），体积参照 46,440 mm³（中点积分），可作交叉检查（Marching Cubes 在歧义格上的拓扑可能与 manifold3d 不同，示性数不作硬性验收）。
+  - RSS 看门狗是 Python 线程：持有 GIL 的长调用会让它失效。自写内核保持 `nogil=True`；用 `Manifold(Mesh64(...))` 校验 5.3 M 个三角形要 1.03 s、RSS 增加约 2.3 GB（约 440 字节/三角形），期间同样持有 GIL，校验前先按三角形数估算内存，或放进 worker 进程。
+  - manifold3d 的 macOS wheel 静态链接 TBB，`TBB_NUM_THREADS` 无效；`spikes/m0_6a/onecpu.c` 的 DYLD 注入库可以固定线程数，用于验证线程数不影响校验结果。
 
 ### M0.7 杆状晶格节点 — S·high
 - `StrutLattice(cell_mm, radius_mm, topology="bcc", origin, fillet_k)`：在查询点所在 Cell 及其 26 邻域内按周期公式枚举杆（BCC 每个 Cell 8 根体对角杆）；节点圆角用指数平滑并集 `−k·ln Σ exp(−d_i/k)`，按固定的全局杆顺序求和（ADR 0002）。k 默认 0.15 × r。
