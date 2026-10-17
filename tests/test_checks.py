@@ -71,6 +71,9 @@ def test_plate_below_min_wall_is_thin_above_is_not():
     thick = thin_wall_check(m_thick, PROFILE.min_wall_mm)
     assert thick["thin_samples"] == 0
     assert thick["thin_volume_mm3"] == 0.0
+    # the report states the resolution band: min_wall -/+ 2h
+    assert thin["flagged_reliably_below_mm"] == pytest.approx(0.5)
+    assert thin["not_flagged_above_mm"] == pytest.approx(1.5)
     analytic = 30 * 30 * thin_t
     assert thin["thin_volume_mm3"] == pytest.approx(analytic, rel=0.35)
     assert thin["affected_blocks"] >= 1
@@ -227,6 +230,10 @@ def test_pore_estimate():
     assert pore["threshold"]["min_pore_mm"] == PROFILE.min_pore_mm
     assert pore["finding"] is False
     assert pore["source"]["profile_status"] == "placeholder"
+    # ADR 0004 soft checks that M0 does not implement are listed as not_run, never pass
+    soft = by_id(report["checks"]["soft"])
+    assert soft["drainage"]["result"] == soft["supports"]["result"] == "not_run"
+    assert report["summary"]["soft_not_run"] == ["drainage", "supports"]
 
 
 def test_report_json_is_deterministic_sorted_and_not_verified(tmp_path):
@@ -262,5 +269,7 @@ def test_report_json_is_deterministic_sorted_and_not_verified(tmp_path):
 def test_report_never_passes_unrun_checks():
     report, code = build_report(PROFILE, [], None, None, include_environment=False)
     assert code == 0
+    # nothing measured: neither group may be summarised as "pass" (M0 review)
+    assert report["summary"]["prebuild"] == "not_applicable"
     assert report["summary"]["hard"] == "not_run"
     assert report["checks"]["hard"] == []

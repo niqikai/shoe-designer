@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import resource
 import sys
 import time
@@ -23,11 +24,15 @@ from shoegen.cli import main
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "m0.json"
 PROFILE = "pbf-tpu-generic@0"
-REAL_LASTS = sorted(
-    p
-    for pat in ("*.stp", "*.step")
-    for p in (Path(__file__).resolve().parents[1] / "input" / "lasts").glob(pat)
+ROOT = Path(__file__).resolve().parents[1]
+# ``SHOEGEN_REAL_LAST`` points at a last read in place (it is never copied);
+# ``SHOEGEN_REAL_LAST_NORMALIZATION`` at its --normalization JSON (plan H1).
+REAL_LASTS = (
+    [Path(os.environ["SHOEGEN_REAL_LAST"])]
+    if os.environ.get("SHOEGEN_REAL_LAST")
+    else sorted(p for pat in ("*.stp", "*.step") for p in (ROOT / "input" / "lasts").glob(pat))
 )
+REAL_LAST_NORMALIZATION = os.environ.get("SHOEGEN_REAL_LAST_NORMALIZATION")
 
 
 def sha(path: Path) -> str:
@@ -100,6 +105,16 @@ def test_smoke_outputs_and_mesh(smoke, eval_report):
     assert report["run"]["normalization"]["orientation_status"] == (
         "PROVISIONAL_REQUIRES_USER_CONFIRMATION"
     )
+    assert report["run"]["last"]["usage_policy"] == "DEVELOPMENT_ONLY_LOCAL_ONLY"
+    # The skin and footbed seal the lattice pores (ADR 0002 open issue, M0 review): the
+    # enclosed-cavity soft check must report it as a finding, the hard checks still pass.
+    soft = {r["id"]: r for r in report["checks"]["soft"]}
+    cav = soft["enclosed_cavities"]
+    assert cav["result"] == "report_only" and cav["finding"] is True
+    assert cav["measured"]["cavity_count"] >= 1
+    assert cav["measured"]["largest_cavity_volumes_mm3"][0] > 1000.0
+    assert "enclosed_cavities" in report["summary"]["soft_findings"]
+    assert report["rusage_peaks"]["parent_max_rss_bytes"] > 0
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["files"]["shoe.stl"]["sha256"] == sha(out / "shoe.stl")
     assert manifest["files"]["graph.json"]["sha256"] == sha(out / "graph.json")
@@ -187,11 +202,30 @@ def test_hard_failure_exit_5_writes_no_stl(work, last_step, params_file, monkeyp
     assert (out / "graph.json").is_file()
 
 
+def test_typed_errors_keep_their_exit_code():
+    """Errors raised after the graph stage carry their own exit code (M0 review): the
+    far-field check of the block planner -> 3, a last mesh error -> 4, the assembly
+    memory estimate -> 6 (same as the watchdog); anything else -> 1."""
+    from shoegen.cli import _code_of
+    from shoegen.graph import GraphValidationError
+    from shoegen.last import LastMeshError
+    from shoegen.mesh import MeshMemoryError
+
+    assert _code_of(GraphValidationError("x")) == (3, "input_failed")
+    assert _code_of(LastMeshError("x")) == (4, "last_import_failed")
+    assert _code_of(MeshMemoryError("x")) == (6, "resource_limit")
+    assert _code_of(RuntimeError("x")) == (1, "internal_error")
+
+
 @pytest.mark.real_last
 @pytest.mark.skipif(not REAL_LASTS, reason="no input/lasts/*.stp|*.step")
-def test_real_last(tmp_path, eval_report):
-    params = write_params(tmp_path / "p.json", radius=1.0, cell=10.0, collar=75.0)
-    out = tmp_path / "real"
+def test_real_last(eval_report):
+    # Derived geometry of a licensed last stays under output/ (gitignored; plan 1.4),
+    # not in the system temp directory.
+    out = ROOT / "output" / "pytest_real_last"
+    out.mkdir(parents=True, exist_ok=True)
+    params = write_params(out / "params.json", radius=1.0, cell=10.0, collar=75.0)
+    norm = ["--normalization", REAL_LAST_NORMALIZATION] if REAL_LAST_NORMALIZATION else []
     t0 = time.perf_counter()
     code = main(
         [
@@ -199,13 +233,15 @@ def test_real_last(tmp_path, eval_report):
             "--graph", str(params),
             "--last", str(REAL_LASTS[0]),
             "--profile", PROFILE,
-            "-o", str(out),
+            "-o", str(out / "build"),
             "--voxel-mm", "0.5",
             "--max-rss-gb", "6",
+            "--cache-dir", str(ROOT / "output" / "cache" / "fields"),
+            *norm,
         ]
     )  # fmt: skip
     seconds = time.perf_counter() - t0
-    manifest = json.loads((out / "manifest.json").read_text())
+    manifest = json.loads((out / "build" / "manifest.json").read_text())
     eval_report(
         f"real last {REAL_LASTS[0].name}: exit {code}, {seconds:.0f}s, watchdog peak RSS "
         f"{manifest['peak_rss_bytes'] / 1024**3:.2f} GB, triangles {manifest.get('triangles')}"

@@ -46,6 +46,10 @@ Why this is safe for the fields of the graph (ADR 0001/0003; tested in
     The coarse box is convex, so a segment between two coarse-domain points never crosses
     the far region. :func:`check_far_field_margins` enforces ``m > reach`` for every sampled
     leaf (``GraphValidationError``, exit 3).
+* ``Extrude2D`` has the same structure in XY: bilinear inside its 2D grid, the distance to
+  the outline bbox (a lower bound with the sign of the clamped grid) outside. The same
+  argument holds with ``m`` = grid margin and reach = offsets above the node plus its own
+  positive ``offset``; :func:`check_far_field_margins` enforces it too (M0 review).
 * A min/max composition changes sign between ``c`` and ``p`` only if some single term does
   (write it as max of mins), so the per-leaf arguments above carry over to the graph.
   ``SmoothUnion`` deviates from min by at most ``k/4``, which is part of ``reach``.
@@ -67,7 +71,7 @@ from shoegen.graph.arrays import ArrayStore
 from shoegen.graph.compiler import Program, compile_graph
 from shoegen.graph.errors import GraphValidationError
 from shoegen.graph.model import Graph
-from shoegen.graph.nodes import HeightSurfaceField, SampledField
+from shoegen.graph.nodes import Extrude2D, HeightSurfaceField, SampledField
 
 BLOCK_CELLS = 64
 """Cells per block edge (ADR 0005)."""
@@ -134,12 +138,44 @@ def far_field_margin(grid, store: ArrayStore) -> float:
     return m
 
 
+def grid2d_margin(field, store: ArrayStore) -> float:
+    """Smallest XY distance from a 2D grid's source bbox to the grid boundary.
+
+    Outside the grid ``Extrude2D`` uses ``sign * dist(p_xy, bbox2d)``, so every such point
+    has ``|d2| >=`` this value.
+    """
+    vals = store.get(field.values_sha256)
+    m = math.inf
+    for a in range(2):
+        lo = field.origin[a]
+        hi = field.origin[a] + (vals.shape[a] - 1) * field.h
+        m = min(m, field.bbox_min[a] - lo, hi - field.bbox_max[a])
+    return m
+
+
 def check_far_field_margins(graph: Graph, store: ArrayStore | None) -> dict[str, float]:
-    """Require ``far_field_margin > offset reach`` for every sampled leaf (see module doc).
+    """Require ``far_field_margin > offset reach`` for every sampled leaf (see module doc),
+    and ``grid2d_margin > reach + max(offset, 0)`` for every ``Extrude2D`` leaf (its own
+    ``offset`` grows the outline into the far field just like an ``Offset`` above it).
 
     Returns ``{leaf_id: margin}``. Raises :class:`GraphValidationError` (exit 3) otherwise.
     """
     margins: dict[str, float] = {}
+    for leaf, reach in graph.analysis.extrude_reach.items():
+        node = graph.nodes[leaf]
+        assert isinstance(node, Extrude2D)
+        if store is None:
+            raise GraphValidationError("graph has sampled fields but no array store", node_id=leaf)
+        m = grid2d_margin(node.field, store)
+        need = reach + max(node.offset, 0.0)
+        if not m > need:
+            raise GraphValidationError(
+                f"2D grid extends only {m!r} mm past the outline bbox, not more than the "
+                f"offset reach {need!r} mm (Extrude2D offset {node.offset!r} + {reach!r} "
+                "above it); block skipping could miss the surface (ADR 0005)",
+                node_id=leaf,
+            )
+        margins[leaf] = m
     for leaf, reach in graph.analysis.sampled_reach.items():
         node = graph.nodes[leaf]
         assert isinstance(node, SampledField | HeightSurfaceField)

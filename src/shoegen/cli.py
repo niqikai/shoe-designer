@@ -50,6 +50,9 @@ Known limitation (M0.6a spike): the watchdog is an in-process thread. While the 
 process holds the GIL in a long native call or numba kernel, the thread is starved and
 cannot sample RSS, so the limit can be overshot (it is reliable for the worker pool, whose
 memory is sampled while the parent waits). An external supervisor is not built in M0.
+``report.json`` / ``manifest.json`` therefore also carry ``rusage_peaks`` (kernel
+high-water marks of the parent and of the largest child), which do not depend on the
+thread; the M0 review measured the tree total with an external sampler as well.
 """
 
 from __future__ import annotations
@@ -160,10 +163,48 @@ def _load_normalization(path: Path | None):
         raise CliError(EXIT_INPUT, "normalization", f"bad --normalization {path}: {exc}") from exc
 
 
+def _rusage_peaks() -> dict:
+    """Kernel high-water marks, independent of the watchdog thread (which a long call that
+    holds the GIL can starve): the parent's own peak RSS and the largest peak of any
+    terminated, waited-for child (the pool workers). Neither is the sum over the process
+    tree that the watchdog limits; they are lower bounds for it."""
+    import resource
+
+    scale = 1 if sys.platform == "darwin" else 1024  # Darwin: bytes; Linux: KiB
+    return {
+        "parent_max_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * scale,
+        "largest_child_max_rss_bytes": (
+            resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * scale
+        ),
+        "scope": "per-process kernel maxima (getrusage); not the tree sum",
+    }
+
+
 def _clean_outputs(out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for name in OUTPUT_NAMES:
         (out / name).unlink(missing_ok=True)
+
+
+_TYPED_EXIT = {
+    EXIT_INPUT: "input_failed",
+    EXIT_LAST: "last_import_failed",
+    EXIT_RESOURCE: "resource_limit",
+}
+
+
+def _code_of(exc: BaseException) -> tuple[int, str]:
+    """Exit code and status of an exception that escaped the stages.
+
+    Errors that carry an ``exit_code`` keep it (``GraphValidationError`` raised by the block
+    planner's far-field check -> 3, ``LastMeshError`` -> 4, ``MeshMemoryError`` from the
+    assembly memory estimate -> 6, the same code as the RSS watchdog); anything else is an
+    internal error (1).
+    """
+    code = getattr(exc, "exit_code", None)
+    if isinstance(code, int) and code in _TYPED_EXIT:
+        return code, _TYPED_EXIT[code]
+    return EXIT_INTERNAL, "internal_error"
 
 
 def _failure_report(code: int, status: str, stage: str, message: str, extra: dict) -> dict:
@@ -238,6 +279,10 @@ def _run_build(args, out: Path, wd, run: dict, timings: dict) -> tuple[int, dict
         "sha256": loaded.source["sha256"],
         "size_bytes": loaded.source["size_bytes"],
         "header_repaired_in_temporary_copy": loaded.source["header_repaired_in_temporary_copy"],
+        "license_declared": loaded.source["license_declared"],
+        "license_status": loaded.source["license_status"],
+        "usage_policy": loaded.source["usage_policy"],
+        "local_only": loaded.source["local_only"],
         "mesh_sha256": mesh.mesh_sha256,
         "n_vertices": len(mesh.vertices),
         "n_faces": len(mesh.faces),
@@ -336,20 +381,17 @@ def run_build(args) -> int:
             code, report, extra = _run_build(args, out, wd, run, timings)
         except CliError as exc:
             code = exc.code
-            status = {EXIT_INPUT: "input_failed", EXIT_LAST: "last_import_failed"}.get(
-                code, "failed"
-            )
+            status = _TYPED_EXIT.get(code, "failed")
             report = _failure_report(code, status, exc.stage, str(exc), run)
             extra = {"status": status, "shoe_stl": None}
-        except Exception as exc:  # noqa: BLE001 - exit 1 by contract
-            code = EXIT_INTERNAL
-            report = _failure_report(
-                code, "internal_error", "unknown", f"{type(exc).__name__}: {exc}", run
-            )
-            extra = {"status": "internal_error", "shoe_stl": None}
+        except Exception as exc:  # noqa: BLE001 - exit 1 unless the error carries a code
+            code, status = _code_of(exc)
+            report = _failure_report(code, status, "unknown", f"{type(exc).__name__}: {exc}", run)
+            extra = {"status": status, "shoe_stl": None}
     timings["total"] = time.perf_counter() - t_start
     report["timings_s"] = {**report.get("timings_s", {}), **timings}
     report["peak_rss_bytes"] = wd.peak_bytes
+    report["rusage_peaks"] = _rusage_peaks()
     write_json(out / "report.json", report)
     manifest = {
         "schema": "shoegen.manifest/0",
@@ -359,6 +401,7 @@ def run_build(args) -> int:
         "environment": environment(),
         "timings_s": report["timings_s"],
         "peak_rss_bytes": wd.peak_bytes,
+        "rusage_peaks": report["rusage_peaks"],
         "deterministic_files": ["graph.json", "shoe.stl"],
         **extra,
     }

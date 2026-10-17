@@ -40,13 +40,16 @@ def test_import_rounded_box(box_step):
     assert src["sha256"] == hashlib.sha256(box_step.read_bytes()).hexdigest()
     assert src["header_repaired_in_temporary_copy"] is False
     assert src["working_unit"] == "mm"
-    assert src["license_status"] == "REQUIRES_PURCHASE_AUTHORIZATION_REVIEW"
+    assert src["license_status"] == "NOT_DECLARED_IN_FILE_HEADER"
+    assert src["license_declared"] is None and src["license_notice"] is None
+    assert src["usage_policy"] == "DEVELOPMENT_ONLY_LOCAL_ONLY"  # ADR 0003
     assert src["local_only"] is True
 
 
 def test_broken_file_name_header_is_repaired_in_temp_copy(box_step):
     text = box_step.read_text(encoding="utf-8")
-    record = "FILE_NAME(License: synthetic test asset; redistribution prohibited);"
+    # same shape as the development last's header record (ADR 0003), synthetic file
+    record = "FILE_NAME(License:  CC BY-NC-ND 4.0 Statement: synthetic test asset);"
     broken = re.sub(r"FILE_NAME\s*\((.*?)\);", record, text, count=1, flags=re.DOTALL)
     assert broken != text
     box_step.write_text(broken, encoding="utf-8")
@@ -57,7 +60,24 @@ def test_broken_file_name_header_is_repaired_in_temp_copy(box_step):
     assert loaded.source["header_repaired_in_temporary_copy"] is True
     assert loaded.source["original_file_name_record"] == record
     assert loaded.source["license_notice"] == record
-    assert loaded.source["license_status"] == "REQUIRES_PURCHASE_AUTHORIZATION_REVIEW"
+    assert loaded.source["license_declared"] == "CC BY-NC-ND 4.0"
+    assert loaded.source["license_status"] == "DECLARED_IN_FILE_HEADER"
+    assert loaded.source["usage_policy"] == "DEVELOPMENT_ONLY_LOCAL_ONLY"
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [
+        ("FILE_NAME(License:  CC BY-NC-ND 4.0 Statement: ...);", "CC BY-NC-ND 4.0"),
+        ("FILE_NAME(license cc-by-sa-4.0);", "CC BY-SA 4.0"),
+        ("FILE_NAME('x','',(''),(''),'','','');", None),
+        (None, None),
+    ],
+)
+def test_declared_license(record, expected):
+    from shoegen.last.loader import declared_license
+
+    assert declared_license(record) == expected
 
 
 def test_nonstep_input_is_rejected(tmp_path):
@@ -98,9 +118,7 @@ def test_normalization_matches_direct_vertex_transform(box_step):
 
 
 def test_normalization_rejects_non_rigid_rotation():
-    coords = CoordinateSystem(
-        rotation=((2, 0, 0), (0, 1, 0), (0, 0, 1)), translation_mm=(0, 0, 0)
-    )
+    coords = CoordinateSystem(rotation=((2, 0, 0), (0, 1, 0), (0, 0, 1)), translation_mm=(0, 0, 0))
     with pytest.raises(ValueError, match="orthonormal"):
         normalize_last(Box(1, 1, 1), coords)
     mirror = CoordinateSystem(rotation=((-1, 0, 0), (0, 1, 0), (0, 0, 1)), translation_mm=(0, 0, 0))

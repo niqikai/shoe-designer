@@ -196,6 +196,12 @@ def thin_wall_check(masks: BlockMasks, min_wall_mm: float) -> dict:
         "halo_samples": halo,
         "method": "max-inscribed-ball proxy on the sample lattice (EDT), per block with halo",
         "resolution_mm": h,
+        # Walls between these two thicknesses may or may not be flagged, depending on how
+        # they sit on the lattice (module doc). At h = 0.5 mm and min_wall = 1 mm that is
+        # 0..2 mm, which contains the 1.2 mm skin and 1.5 mm footbed: a finding there is at
+        # the resolution limit, not a measured thickness below min_wall (M0 review).
+        "flagged_reliably_below_mm": max(0.0, min_wall_mm - 2.0 * h),
+        "not_flagged_above_mm": min_wall_mm + 2.0 * h,
     }
 
 

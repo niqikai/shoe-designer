@@ -8,6 +8,7 @@ checks are marked ``slow``.
 from __future__ import annotations
 
 import json
+import os
 import resource
 import sys
 import time
@@ -441,14 +442,18 @@ def _peak_rss_mb() -> float:
 
 
 @pytest.mark.real_last
-def test_real_last_report(tmp_path):
-    files = sorted(Path("input/lasts").glob("*.st*p"))
+def test_real_last_report():
+    root = Path(__file__).resolve().parents[1]
+    env = os.environ.get("SHOEGEN_REAL_LAST")  # read in place, never copied
+    files = [Path(env)] if env else sorted((root / "input" / "lasts").glob("*.st*p"))
     if not files:
-        pytest.skip("no real last in input/lasts/")
+        pytest.skip("no real last in input/lasts/ and SHOEGEN_REAL_LAST not set")
+    # derived arrays stay under output/ (gitignored; plan 1.4), not in the temp directory
+    cache = root / "output" / "pytest_real_last_fields"
     loaded = LastLoader().load(files[0])
     t0 = time.perf_counter()
     mesh = last_to_mesh(loaded.shape, source_sha256=loaded.source["sha256"])
-    lf = build_last_fields(mesh, tmp_path / "cache")
+    lf = build_last_fields(mesh, cache)
     elapsed = time.perf_counter() - t0
     g = lf.sampled_field.grid
     bricks = lf.store.get(g.fine_bricks_sha256)

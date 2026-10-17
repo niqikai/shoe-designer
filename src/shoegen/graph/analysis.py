@@ -32,6 +32,12 @@ accurate, so the total offset applied above any sampled leaf, summed along every
 the root, must be <= ``narrow_band_mm - 1``. ``Offset`` contributes ``|d|``,
 ``ShellOutward`` contributes ``t`` and ``SmoothUnion`` contributes ``k / 4`` (the blended
 surface lies up to ``k/4`` outside ``min(a, b) = 0``).
+
+The same accumulated reach is recorded for every ``Extrude2D`` leaf (``extrude_reach``,
+not counting the node's own ``offset``). Its 2D grid is dense, so there is no narrow-band
+limit, but outside the grid the field falls back to a distance-to-bbox lower bound; the
+block planner checks that the grid margin exceeds ``reach + max(offset, 0)``
+(:func:`shoegen.evaluate.check_far_field_margins`, added in the M0 review).
 """
 
 from __future__ import annotations
@@ -79,6 +85,8 @@ class GraphAnalysis:
     metrics: dict[str, NodeMetric]
     sampled_reach: dict[str, float]
     """Largest accumulated offset (mm) applied above each sampled leaf, from the root."""
+    extrude_reach: dict[str, float]
+    """Same for each ``Extrude2D`` leaf (its own ``offset`` not included)."""
 
 
 def _both(m: Metric) -> bool:
@@ -185,7 +193,7 @@ def analyze(nodes: dict[str, AnyNode], root: str) -> GraphAnalysis:
     for nid in order:
         node = nodes[nid]
         metrics[nid] = _metric(nid, node, metrics)
-        if isinstance(node, SampledField | HeightSurfaceField):
+        if isinstance(node, SampledField | HeightSurfaceField | Extrude2D):
             reach[nid] = {nid: 0.0}
             continue
         own = _own_reach(node)
@@ -194,7 +202,12 @@ def analyze(nodes: dict[str, AnyNode], root: str) -> GraphAnalysis:
             for leaf, r in reach[kid].items():
                 acc[leaf] = max(acc.get(leaf, 0.0), r + own)
         reach[nid] = acc
-    sampled_reach = dict(sorted(reach[root].items()))
+    sampled_reach = {
+        k: v for k, v in sorted(reach[root].items()) if not isinstance(nodes[k], Extrude2D)
+    }
+    extrude_reach = {
+        k: v for k, v in sorted(reach[root].items()) if isinstance(nodes[k], Extrude2D)
+    }
     for leaf, r in sampled_reach.items():
         node = nodes[leaf]
         assert isinstance(node, SampledField | HeightSurfaceField)
@@ -206,4 +219,6 @@ def analyze(nodes: dict[str, AnyNode], root: str) -> GraphAnalysis:
                 "(ADR 0003)",
                 node_id=leaf,
             )
-    return GraphAnalysis(order=order, metrics=metrics, sampled_reach=sampled_reach)
+    return GraphAnalysis(
+        order=order, metrics=metrics, sampled_reach=sampled_reach, extrude_reach=extrude_reach
+    )

@@ -8,7 +8,7 @@ import math
 import numpy as np
 import psutil
 import pytest
-from graph_testutil import rng, sphere_field
+from graph_testutil import disk_grid, rng, sphere_field
 
 from shoegen.evaluate import (
     BLOCK_CELLS,
@@ -17,6 +17,7 @@ from shoegen.evaluate import (
     INSIDE,
     OUTSIDE,
     SKIP_SAFETY_K,
+    grid2d_margin,
     half_diagonal,
     iter_block_samples,
     lattice_points,
@@ -26,6 +27,7 @@ from shoegen.evaluate import (
 from shoegen.graph import (
     Box,
     Capsule,
+    Extrude2D,
     GraphBuilder,
     GraphValidationError,
     MemoryArrayStore,
@@ -376,3 +378,24 @@ def test_far_field_margin_must_exceed_offset_reach():
     ok = b.build(b.add(Offset(child=last, distance=m - 0.5), "ok"), prune=True)
     plan = plan_blocks(ok, store, (-10, -10, -10), (10, 10, 10), 0.5)
     assert plan.far_field_margins["last"] == pytest.approx(m)
+
+
+def test_extrude2d_far_field_margin_must_exceed_offset_reach():
+    """``Extrude2D`` outside its 2D grid is ``dist(p_xy, bbox)``: a grid margin of 10 mm
+    allows outline growth (own ``offset`` + offsets above) below 10 mm only (M0 review)."""
+    store = MemoryArrayStore()
+    grid = disk_grid(store)  # margin_mm=10
+    m = grid2d_margin(grid, store)
+    assert 10.0 <= m < 10.5
+    b = GraphBuilder()
+    ok = b.add(Extrude2D(field=grid, z_min=-1.0, z_max=1.0, offset=3.0), "ok")
+    ok_graph = b.build(b.add(Offset(child=ok, distance=m - 3.5), "ok_grown"), prune=True)
+    assert ok_graph.analysis.extrude_reach == {"ok": pytest.approx(m - 3.5)}
+    plan = plan_blocks(ok_graph, store, (-30, -30, -5), (30, 30, 5), 1.0)
+    assert plan.far_field_margins["ok"] == pytest.approx(m)
+    big = b.add(Extrude2D(field=grid, z_min=-1.0, z_max=1.0, offset=m), "big")
+    with pytest.raises(GraphValidationError, match="2D grid extends only"):
+        plan_blocks(b.build(big, prune=True), store, (-30, -30, -5), (30, 30, 5), 1.0)
+    grown = b.add(Offset(child=ok, distance=m - 2.9), "grown")
+    with pytest.raises(GraphValidationError, match="2D grid extends only"):
+        plan_blocks(b.build(grown, prune=True), store, (-30, -30, -5), (30, 30, 5), 1.0)

@@ -45,7 +45,7 @@ _MIN_AREA_MM2 = 0.25
 # --------------------------------------------------------------------------- numba kernels
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _bucket_counts(bx0, by0, bx1, by1, nx, ny, counts):
     for t in range(bx0.shape[0]):
         for ix in range(bx0[t], bx1[t] + 1):
@@ -53,7 +53,7 @@ def _bucket_counts(bx0, by0, bx1, by1, nx, ny, counts):
                 counts[ix * ny + iy] += 1
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _bucket_fill(bx0, by0, bx1, by1, ny, start, cursor, items):
     for t in range(bx0.shape[0]):
         for ix in range(bx0[t], bx1[t] + 1):
@@ -63,7 +63,7 @@ def _bucket_fill(bx0, by0, bx1, by1, ny, start, cursor, items):
                 cursor[c] += 1
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def _zmin_kernel(px, py, tx, ty, tz, tinv, start, items, ox, oy, inv_cell, nx, ny, tol, out):
     for q in range(px.shape[0]):
         fx = (px[q] - ox) * inv_cell

@@ -14,8 +14,12 @@ from shoegen.checks.records import (
     EXIT_OK,
     EXIT_PREBUILD,
     FAIL,
+    NOT_APPLICABLE,
     NOT_RUN,
+    PASS,
     jsonable,
+    record,
+    source,
 )
 from shoegen.evaluate import DEFAULT_WORKERS, BlockPlan
 from shoegen.graph import Graph
@@ -39,6 +43,16 @@ def exit_code(prebuild: list[dict], hard: list[dict] | None) -> int:
     if hard and any(r["result"] == FAIL for r in hard):
         return EXIT_HARD
     return EXIT_OK
+
+
+def _group_summary(records: list[dict]) -> str:
+    """``fail`` if any record failed, ``pass`` if at least one passed (a measured value),
+    else ``not_applicable``: a group with nothing measured is never summarised as pass."""
+    if any(r["result"] == FAIL for r in records):
+        return FAIL
+    if any(r["result"] == PASS for r in records):
+        return PASS
+    return NOT_APPLICABLE
 
 
 def build_report(
@@ -86,14 +100,8 @@ def build_report(
             ),
         },
         "summary": {
-            "prebuild": "fail" if any(r["result"] == FAIL for r in prebuild) else "pass",
-            "hard": (
-                "not_run"
-                if hard is None
-                else "fail"
-                if any(r["result"] == FAIL for r in hard)
-                else "pass"
-            ),
+            "prebuild": _group_summary(prebuild),
+            "hard": "not_run" if hard is None else _group_summary(hard),
             "soft_findings": [r["id"] for r in soft if r.get("finding")],
             "soft_not_run": [r["id"] for r in soft if r["result"] == NOT_RUN],
         },
@@ -116,6 +124,34 @@ def build_report(
 def write_report(path: Path | str, report: dict) -> None:
     """Write ``report.json`` with sorted keys (:func:`shoegen.reporting.write_json`)."""
     write_json(Path(path), report)
+
+
+def _not_implemented_soft(profile: ManufacturingProfile) -> list[dict]:
+    """ADR 0004 lists drainage and supports among the soft checks; M0 implements neither
+    (plan M0.9 scope). They are listed as ``not_run`` so their absence is explicit in the
+    report instead of silent (M0 review)."""
+    return [
+        record(
+            "drainage",
+            "soft",
+            NOT_RUN,
+            measured={},
+            threshold={"requires_drain_holes": profile.requires_drain_holes},
+            src=source(profile, None),
+            detail="not implemented in M0; sealed voids are reported by enclosed_cavities",
+            finding=False,
+        ),
+        record(
+            "supports",
+            "soft",
+            NOT_RUN,
+            measured={},
+            threshold={"requires_supports": profile.requires_supports},
+            src=source(profile, None),
+            detail="not implemented in M0",
+            finding=False,
+        ),
+    ]
 
 
 def run_checks(
@@ -147,6 +183,7 @@ def run_checks(
     if plan is not None:
         soft.extend(run_grid_checks(plan, profile, workers=workers, watchdog=watchdog))
         soft.append(run_pore_check(graph, profile))
+        soft.extend(_not_implemented_soft(profile))
     t3 = time.perf_counter()
     timings = dict(timings_s or {})
     timings["checks_prebuild"] = t1 - t0

@@ -2,6 +2,14 @@
 
 Ported from codex/3DPrintedFootwear@5ef9038f8ac5134fba14dfc8db0162f4c8e9f957
 (src/shoe_poc/last/loader.py).
+
+Licence metadata (ADR 0003, changed in the M0 review): PR #2 recorded
+``license_status = "REQUIRES_PURCHASE_AUTHORIZATION_REVIEW"``. The project decision is in
+ADR 0003: the development last's header declares CC BY-NC-ND 4.0, it is used for
+development only, and the file and everything derived from it stay local. The loader now
+reports what the header *declares* (``license_declared``, verbatim record in
+``license_notice``) and the project's ``usage_policy`` from ADR 0003. It makes no legal
+assessment of its own.
 """
 
 from __future__ import annotations
@@ -11,6 +19,26 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+USAGE_POLICY = "DEVELOPMENT_ONLY_LOCAL_ONLY"
+USAGE_POLICY_NOTE = (
+    "Project policy (ADR 0003), not a legal assessment: the last file and all geometry "
+    "derived from it stay on this machine; no commit, upload, publication, commercial use "
+    "or vendor printing."
+)
+_CC_RE = re.compile(r"\bCC[ -]BY(?:[- ](?:NC|ND|SA))*[ -]\d\.\d\b", flags=re.IGNORECASE)
+
+
+def declared_license(header_record: str | None) -> str | None:
+    """Creative Commons licence named in the STEP ``FILE_NAME`` record, normalised
+    (``"CC BY-NC-ND 4.0"``), or ``None`` if the record names none."""
+    if not header_record:
+        return None
+    m = _CC_RE.search(header_record)
+    if not m:
+        return None
+    tokens = re.split(r"[ -]", m.group(0).upper())
+    return "CC " + "-".join(tokens[1:-1]) + " " + tokens[-1]
 
 
 @dataclass
@@ -67,12 +95,19 @@ class LastLoader:
                 "units_note": (
                     "OpenCascade STEP reader converts input length units to millimetres."
                 ),
-                "license_status": "REQUIRES_PURCHASE_AUTHORIZATION_REVIEW",
+                "license_declared": declared_license(original_header),
+                "license_status": (
+                    "DECLARED_IN_FILE_HEADER"
+                    if declared_license(original_header)
+                    else "NOT_DECLARED_IN_FILE_HEADER"
+                ),
                 "license_notice": (
                     original_header
-                    if original_header and "License" in original_header
-                    else "Source/license to be confirmed"
+                    if original_header and "license" in original_header.lower()
+                    else None
                 ),
+                "usage_policy": USAGE_POLICY,
+                "usage_policy_note": USAGE_POLICY_NOTE,
                 "local_only": True,
             },
         )
