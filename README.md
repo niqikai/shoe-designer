@@ -12,8 +12,16 @@ from `$SHOE_ASSETS_ROOT`.
 export SHOE_ASSETS_ROOT=~/Downloads
 uv run shoe-assets list                    # catalogue + which files are present
 uv run shoe-assets inspect sneaker_last    # load into the canonical frame and report
+uv run shoe-assets audit                   # JSON report (reports/audit.json) + summary table
 uv run pytest
 ```
+
+## Audit (issue #7)
+
+`shoe-assets audit` measures every catalogued mesh: size/bodies/watertight; sampled wall thickness
+(share below 1.2 mm); overhang area (faces steeper than 45° off the bed), split into *open* (nothing
+below) and *enclosed* (model material below); and for shoes, a rigid fit of the last into the cavity.
+Limits are listed at the top of `src/shoe_designer/audit.py`.
 
 Canonical frame: millimetres, +X heel→toe, +Z up, +Y = up×toe, origin at the toe-axis start / lateral
 centre / lowest point of the asset. Region files (`frame_of`) reuse their last's transform so they stay
