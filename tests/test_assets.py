@@ -106,7 +106,7 @@ def test_missing_root_env(monkeypatch):
 
 def test_shipped_manifest_is_valid():
     cat = load_catalog()
-    assert {"sneaker_last", "slide_last"} <= set(cat)
+    assert "sneaker_last" in cat and "slide_last" not in cat
     assert cat["sneaker_last"].commercial_use is False
 
 

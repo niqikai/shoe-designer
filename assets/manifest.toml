@@ -15,17 +15,6 @@ up = "+Z"
 notes = "276.7 mm long; heel at x=0, lifted 26 mm off the ground plane in source frame."
 
 [[asset]]
-id = "slide_last"
-role = "last"
-path = "Slide - Zellerfeld - Template Files/slide_last_highpoly.stl"
-source = "Zellerfeld template files (Apr 2025)"
-license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
-commercial_use = false
-toe = "+X"
-up = "+Z"
-notes = "276.7 mm long; heel at x=0, lifted 26 mm off the ground plane in source frame."
-
-[[asset]]
 id = "sneaker_reference_thickness"
 role = "region"
 path = "Sneaker - Zellerfeld - Template Files/sneaker_reference_thickness.stl"
