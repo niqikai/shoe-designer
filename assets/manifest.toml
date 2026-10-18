@@ -1,0 +1,80 @@
+# Asset catalog. Paths are relative to $SHOE_ASSETS_ROOT; the meshes themselves are not in git.
+# toe/up: which SOURCE axes point toward the toe and up. Verified from per-quartile height
+# profiles (the heel/collar end is taller than the toe end).
+# commercial_use: true/false once the licence is read; leave out (unknown) until then. See issue #8.
+
+[[asset]]
+id = "sneaker_last"
+role = "last"
+path = "Sneaker - Zellerfeld - Template Files/sneaker_last_highpoly.stl"
+source = "Zellerfeld template files (Apr 2025)"
+license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
+commercial_use = false
+toe = "+X"
+up = "+Z"
+notes = "276.7 mm long; heel at x=0, lifted 26 mm off the ground plane in source frame."
+
+[[asset]]
+id = "slide_last"
+role = "last"
+path = "Slide - Zellerfeld - Template Files/slide_last_highpoly.stl"
+source = "Zellerfeld template files (Apr 2025)"
+license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
+commercial_use = false
+toe = "+X"
+up = "+Z"
+notes = "276.7 mm long; heel at x=0, lifted 26 mm off the ground plane in source frame."
+
+[[asset]]
+id = "sneaker_reference_thickness"
+role = "region"
+path = "Sneaker - Zellerfeld - Template Files/sneaker_reference_thickness.stl"
+source = "Zellerfeld template files (Apr 2025)"
+license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
+commercial_use = false
+frame_of = "sneaker_last"
+notes = "Shares the sneaker last's coordinate frame."
+
+[[asset]]
+id = "sneaker_sole_thickness_region"
+role = "region"
+path = "Sneaker - Zellerfeld - Template Files/sneaker_sole_thickness_region.stl"
+source = "Zellerfeld template files (Apr 2025)"
+license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
+commercial_use = false
+frame_of = "sneaker_last"
+notes = "Shares the sneaker last's coordinate frame."
+
+[[asset]]
+id = "sneaker_ankle_height"
+role = "region"
+path = "Sneaker - Zellerfeld - Template Files/sneaker_ankle_height.stl"
+source = "Zellerfeld template files (Apr 2025)"
+license = "CC BY-NC-ND 4.0 (Zellerfeld Last Family License)"
+commercial_use = false
+frame_of = "sneaker_last"
+notes = "Shares the sneaker last's coordinate frame."
+
+[[asset]]
+id = "dlp_hollow_40_right"
+role = "shoe"
+path = "3D (2)/DLP-镂空鞋34~45码/40码/右.stl"
+source = "unknown (needs confirming)"
+license = "unknown"
+toe = "+Y"
+up = "+Z"
+side = "right"
+size_eu = 40.0
+notes = "Perforated DLP shoe; toe is +Y in source."
+
+[[asset]]
+id = "dlp_solid_40_right"
+role = "shoe"
+path = "3D (2)/DLP-3D打印34~45码/40码/Shoe_right.stl"
+source = "unknown (needs confirming)"
+license = "unknown"
+toe = "-Y"
+up = "+Z"
+side = "right"
+size_eu = 40.0
+notes = "Solid DLP shoe; toe is -Y in source."
