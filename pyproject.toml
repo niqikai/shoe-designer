@@ -7,8 +7,12 @@ dependencies = [
     "numpy>=1.26",
     "trimesh>=4.4",
     "scipy>=1.11",
-    "embreex>=4.4.0",
+    "rtree>=1.2",
 ]
+
+[project.optional-dependencies]
+# Fast ray queries (needed for 1M-face audits). No wheels on Linux aarch64 or macOS < 13, so optional.
+fast = ["embreex>=4.4.0"]
 
 [project.scripts]
 shoe-assets = "shoe_designer.cli:main"
@@ -25,3 +29,4 @@ packages = ["src/shoe_designer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
