@@ -54,6 +54,7 @@ license = "unknown"
 toe = "+Y"
 up = "+Z"
 side = "right"
+series = "dlp_hollow"
 size_eu = 43.0
 notes = "Perforated DLP shoe; toe is +Y in source. Closest size that encloses the sneaker last (+4.3 mm length)."
 [[asset]]
@@ -65,6 +66,7 @@ license = "unknown"
 toe = "-Y"
 up = "+Z"
 side = "right"
+series = "dlp_solid"
 size_eu = 43.0
 notes = "Solid DLP shoe; toe is -Y in source."
 [[asset]]
@@ -76,6 +78,7 @@ license = "unknown"
 toe = "+Y"
 up = "+Z"
 side = "right"
+series = "dlp_hollow"
 size_eu = 44.0
 notes = "Perforated DLP shoe; toe is +Y in source. Roomier comparison size (+10.3 mm length)."
 [[asset]]
@@ -87,5 +90,6 @@ license = "unknown"
 toe = "-Y"
 up = "+Z"
 side = "right"
+series = "dlp_solid"
 size_eu = 44.0
 notes = "Solid DLP shoe; toe is -Y in source."
