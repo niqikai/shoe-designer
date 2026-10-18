@@ -8,7 +8,9 @@ Known limits (v0):
 - "enclosed" overhang means "other model material lies below the face" (first-hit ray test, so it
   does not need a watertight mesh), not "inside a closed cavity";
 - fit is a rigid search over lengthwise, lateral and vertical offsets (no rotation, no scaling) and
-  needs watertight meshes, because it relies on inside/outside tests;
+  needs watertight meshes, because it relies on inside/outside tests. The search grid is coarse
+  (dx about 3.5 mm for a 10 mm slack, dy 3 mm, dz 3 mm); the seat height is then refined to 1 mm,
+  but dx/dy stay coarse, so a tight fit can be missed by up to half a grid step;
 - clearance is a nearest-neighbour distance to a dense point cloud of the shoe, so it is
   over-estimated by up to ``clearance_resolution_mm`` (reported).
 """
@@ -27,6 +29,8 @@ LOW_SEAT_MM = 30.0  # deepest the last can plausibly sit above the shoe's z=0
 RAY_OFFSET_MM = 0.05  # rays start this far inside the surface so they do not re-hit it
 FIT_DY_MM = (-6.0, -3.0, 0.0, 3.0, 6.0)
 FIT_DZ_STEP_MM = 3.0
+FIT_DZ_REFINE_MM = 1.0
+MAX_VOLUME_ROUNDS = 25  # rejection-sampling rounds before giving up on a mesh
 
 
 def _pct(a: np.ndarray, qs=(1, 5, 50, 95)) -> dict:
@@ -113,12 +117,14 @@ def _volume_points(mesh: trimesh.Trimesh, count: int, rng) -> np.ndarray:
     lo, hi = mesh.bounds
     got: list[np.ndarray] = []
     total = 0
-    while total < count:
+    for _ in range(MAX_VOLUME_ROUNDS):
         cand = rng.uniform(lo, hi, size=(4 * count, 3))
         keep = cand[mesh.contains(cand)]
         got.append(keep)
         total += len(keep)
-    return np.vstack(got)[:count]
+        if total >= count:
+            return np.vstack(got)[:count]
+    raise ValueError(f"only {total} of {count} points found inside the mesh after {MAX_VOLUME_ROUNDS} rounds")
 
 
 def fit_to_last(last: trimesh.Trimesh, shoe: trimesh.Trimesh, n: int = 4000, tol: float = 0.005) -> dict:
@@ -139,7 +145,10 @@ def fit_to_last(last: trimesh.Trimesh, shoe: trimesh.Trimesh, n: int = 4000, tol
     pts, _ = sample_surface(last, n)
     spts, _ = sample_surface(shoe, 5 * n)
     rng = np.random.default_rng(SEED)
-    vol = _volume_points(last, n // 2, rng)
+    try:
+        vol = _volume_points(last, n // 2, rng)
+    except ValueError as e:  # contains() never says "inside": degenerate or inconsistent mesh
+        return {**out, "seats": None, "reason": f"cannot sample inside the last: {e}"}
 
     def collide(dx, dy, dz):
         off = np.array([dx, dy, dz])
@@ -162,6 +171,11 @@ def fit_to_last(last: trimesh.Trimesh, shoe: trimesh.Trimesh, n: int = 4000, tol
                     break
     if seats:
         dz, _, dx, dy, a, b = min(seats)
+        for fine in np.arange(max(dz - FIT_DZ_STEP_MM, 0.0) + FIT_DZ_REFINE_MM, dz, FIT_DZ_REFINE_MM):
+            fa, fb = collide(dx, dy, fine)  # the coarse step can overshoot the lowest free height by < 3 mm
+            if max(fa, fb) <= tol:
+                dz, a, b = float(fine), fa, fb
+                break
         placement = {"dx_mm": round(dx, 2), "dy_mm": round(dy, 2), "dz_mm": round(dz, 2)}
     else:
         _, dx, dy, dz, a, b = low
@@ -189,7 +203,8 @@ def fit_to_last(last: trimesh.Trimesh, shoe: trimesh.Trimesh, n: int = 4000, tol
     signed = np.where(inside, -dist, dist)
     zone = moved[:, 2] < shoe.extents[2] * 0.6
     d = signed[zone]
-    resolution = float(np.median(tree.query(cloud[:2000], k=2)[0][:, 1])) / 2.0
+    sample = cloud[rng.choice(len(cloud), min(2000, len(cloud)), replace=False)]  # not the first vertices
+    resolution = float(np.median(tree.query(sample, k=2)[0][:, 1])) / 2.0
     return {
         **out,
         "seats": True,

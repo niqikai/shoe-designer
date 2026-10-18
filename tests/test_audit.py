@@ -142,3 +142,29 @@ def test_size_inference_needs_two_sizes_and_flags_extrapolation():
     assert audit.infer_last_size(last, [row("a", 43, 281.0, 2.6)])["range_eu"] is None
     far = audit.infer_last_size(last, [row("a", 36, 245.0, 2.6), row("a", 37, 251.0, 2.6)])
     assert far["series"][0]["extrapolated"]
+
+
+def test_unsamplable_last_is_reported_not_looped_forever(monkeypatch):
+    shoe = hollow((140, 80, 60), 3.0)
+    last = trimesh.creation.box(extents=(120, 60, 30))
+    monkeypatch.setattr(audit, "MAX_VOLUME_ROUNDS", 2)
+    monkeypatch.setattr(trimesh.Trimesh, "contains", lambda self, pts: np.zeros(len(pts), bool))
+    f = audit.fit_to_last(last, shoe, n=200)
+    assert f["seats"] is None and "cannot sample" in f["reason"]
+
+
+def test_seat_height_is_refined_below_the_coarse_step():
+    shoe = hollow((140, 80, 60), 4.0)  # 4 mm floor: coarse grid (3 mm steps) lands on 6, refinement finds 4 or 5
+    last = trimesh.creation.box(extents=(120, 60, 30))
+    last.apply_translation([60, 0, 15])
+    f = audit.fit_to_last(last, shoe, n=1500)
+    assert f["seats"] and f["dz_mm"] < 6.0
+
+
+def test_resolution_is_estimated_from_a_random_sample_of_the_cloud():
+    shoe = hollow((140, 80, 60), 3.0)
+    last = trimesh.creation.box(extents=(120, 60, 30))
+    last.apply_translation([60, 0, 15])
+    f = audit.fit_to_last(last, shoe, n=1500)
+    # shoe samples dominate the cloud (box vertices are 16 points), so the estimate follows their spacing
+    assert 0.2 < f["clearance_resolution_mm"] < 10
