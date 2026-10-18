@@ -3,7 +3,16 @@ name = "shoe-designer"
 version = "0.1.0"
 description = "Text/image to 3D-printable (FDM + TPU) shoe STL system"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26", "trimesh>=4.4", "scipy>=1.11"]
+dependencies = [
+    "numpy>=1.26",
+    "trimesh>=4.4",
+    "scipy>=1.11",
+    "rtree>=1.2",
+]
+
+[project.optional-dependencies]
+# Fast ray queries (needed for 1M-face audits). No wheels on Linux aarch64 or macOS < 13, so optional.
+fast = ["embreex>=4.4.0"]
 
 [project.scripts]
 shoe-assets = "shoe_designer.cli:main"
@@ -20,3 +29,4 @@ packages = ["src/shoe_designer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]

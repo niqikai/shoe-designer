@@ -53,6 +53,7 @@ class Asset:
     commercial_use: bool | None = None  # None = not yet determined
     side: str | None = None
     size_eu: float | None = None
+    series: str | None = None  # shoes of one series share a size grading
     notes: str = ""
 
 
