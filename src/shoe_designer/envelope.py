@@ -425,6 +425,11 @@ def exposed_inner_area(
 
     Only probes below the cap count (M_below): just under the crest, the step along a face normal leaves
     the envelope through the cap, which says nothing about leaks.
+
+    Known blind spot: a leak confined to the wall crest is mostly invisible (probes above the cap are
+    skipped); measured on a synthetic saddle shoe, crest-only patches under about 28 mm^2 stay below
+    ``LEAK_WARN_MM2``. A real barrier leak floods past the crest and down the wall, where it is caught, and
+    a small crest dent lies within the rounding zone of the collar cut anyway.
     """
     delta = max(grid.h, grid.dz) if delta is None else delta
     pts = mesh.triangles_center[inner] + delta * mesh.face_normals[inner]
