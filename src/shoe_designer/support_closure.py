@@ -99,6 +99,7 @@ def closure(
     grid: Grid,
     t: float = WALL_MM,
     phi_e: np.ndarray | None = None,
+    region: np.ndarray | None = None,
     heel_frac: float = HEEL_FRAC,
 ) -> ClosureResult:
     """Self-supporting closure of the cavity field ``phi_c`` (phi < 0 inside the cavity).
@@ -107,11 +108,17 @@ def closure(
     With the outer envelope ``phi_e`` on the same grid the report also holds how far the closure
     shell sticks out of it and the bridge width ``b_req = 2 * stick_out * tan(alpha_b)`` that
     truncating the ridge there would leave (§3, D3). Nothing here depends on how ``phi_c`` was made.
+
+    ``region`` (bool, same grid, normally M_below) limits the report to where the closure matters:
+    closure added above the collar is cut away by the collar trim, so it is not counted. The fields
+    ``phi_a`` / ``phi_c_star`` are never masked.
     """
     if phi_c.shape != tuple(grid.shape):
         raise SDFError(f"phi_c shape {phi_c.shape} does not match grid {grid.shape}")
     if phi_e is not None and phi_e.shape != phi_c.shape:
         raise SDFError("phi_e must be on the same grid as phi_c")
+    if region is not None and region.shape != phi_c.shape:
+        raise SDFError("region must be on the same grid as phi_c")
     h, dz = grid.h, grid.dz
     alpha = alpha_of(grid)
     tan_a = h / dz
@@ -124,6 +131,8 @@ def closure(
     v = close_overhangs(c)
     a = v & ~c
     n_a = int(a.sum())
+    a_rep = a if region is None else a & region  # what the report counts
+    n_rep = int(a_rep.sum())
 
     pad = np.ceil(t / sp).astype(int) + 1
     far = float((pad * sp).min())
@@ -132,6 +141,7 @@ def closure(
         "alpha_b_deg": round(alpha, 3),
         "cavity_volume_mm3": round(float(c.sum() * voxel), 0),
         "added_volume_mm3": round(n_a * voxel, 0),
+        "added_volume_in_region_mm3": round(n_rep * voxel, 0),
         "added_frac_of_cavity": round(n_a / int(c.sum()), 4),
     }
     if n_a == 0:
@@ -149,8 +159,8 @@ def closure(
     phi_star = np.minimum(phi_c, phi_a)
 
     # --- ceiling raise: top of V over top of C per column
-    top_v, top_c = _top_index(v), _top_index(c)
-    raise_mm = np.where(a.any(axis=2), (top_v - top_c) * dz, 0.0)
+    top_v, top_c = _top_index(c | a_rep), _top_index(c)
+    raise_mm = np.where(a_rep.any(axis=2), (top_v - top_c) * dz, 0.0)
     cols = raise_mm[raise_mm > 0]
     report["ceiling_raise_max_mm"] = round(float(raise_mm.max()), 2)
     report["ceiling_raise_p95_mm"] = round(float(np.percentile(cols, 95)) if len(cols) else 0.0, 2)
@@ -161,7 +171,7 @@ def closure(
     x_lo, x_hi = grid.origin[0] + cx[0] * h, grid.origin[0] + cx[-1] * h
     heel_x = x_lo + heel_frac * (x_hi - x_lo)
     xs = grid.origin[0] + np.arange(grid.shape[0]) * h
-    heel = a & (xs <= heel_x)[:, None, None]
+    heel = a_rep & (xs <= heel_x)[:, None, None]
     report["heel_zone_x_mm"] = [round(float(x_lo), 1), round(float(heel_x), 1)]
     report["heel_loss_volume_mm3"] = round(float(heel.sum() * voxel), 0)
     report["heel_loss_depth_mm"] = round(float(phi_c[heel].max()) if heel.any() else 0.0, 2)
@@ -170,6 +180,8 @@ def closure(
     report["shell_clipped"] = clipped
     if phi_e is not None:
         shell = phi_a[box] < t
+        if region is not None:
+            shell &= region[box]
         top_s = np.full(phi_c.shape[:2], -1)
         ts = _top_index(shell)
         top_s[box[0], box[1]] = np.where(ts >= 0, ts + box[2].start, -1)
@@ -179,7 +191,7 @@ def closure(
         report["shell_columns_outside_envelope"] = int(((top_s >= 0) & (top_e < 0)).sum())
         report["shell_protrusion_max_mm"] = round(float(stick.max()), 2)
         report["shell_protrusion_by_x"] = _by_x(stick, grid.origin[0], h)
-        report["shell_out_of_envelope_max_mm"] = round(float(max(phi_e[box][shell].max(), 0.0)), 2)
+        report["shell_out_of_envelope_max_mm"] = round(float(max(phi_e[box][shell].max(), 0.0)) if shell.any() else 0.0, 2)
         b_req = 2.0 * stick * tan_a
         report["b_req_max_mm"] = round(float(b_req.max()), 1)
         report["b_req_by_x"] = _by_x(b_req, grid.origin[0], h)

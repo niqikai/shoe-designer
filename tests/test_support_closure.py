@@ -131,3 +131,16 @@ def test_shell_protrusion_and_b_req():
     assert rep["shell_protrusion_max_mm"] == pytest.approx(ridge + 2.0 - 3.0, abs=2 * grid.dz)
     assert rep["b_req_max_mm"] == pytest.approx(2 * rep["shell_protrusion_max_mm"] * math.tan(math.radians(43)), rel=0.02)
     assert rep["shell_out_of_envelope_max_mm"] > 0
+
+
+def test_region_limits_the_report_not_the_fields():
+    grid, phi_c = slab(41, 43.0)
+    full = closure(phi_c, grid)
+    z = grid.origin[2] + np.arange(grid.shape[2]) * grid.dz
+    below = np.broadcast_to((z < 40.0)[None, None, :], phi_c.shape)  # ridge starts at 30; cut it at 40
+    cut = closure(phi_c, grid, region=below)
+    assert np.array_equal(cut.phi_c_star, full.phi_c_star)
+    assert 0 < cut.report["added_volume_in_region_mm3"] < full.report["added_volume_in_region_mm3"]
+    assert cut.report["ceiling_raise_max_mm"] <= 10.0 + grid.dz
+    none = closure(phi_c, grid, region=np.zeros(phi_c.shape, bool))
+    assert none.report["added_volume_in_region_mm3"] == 0 and none.report["ceiling_raise_max_mm"] == 0
