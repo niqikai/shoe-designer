@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import trimesh
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 from skimage import measure
 
@@ -31,7 +33,7 @@ from .sdf import Grid, SDFError, sample, sdf_to_mesh
 WALL_MM = 2.0  # t
 T_FILL_MM = 1.5  # hard fill thickness
 T_MIN_MM = 1.2  # audit threshold
-SIGMA_MM = 8.0  # push smoothing sigma (design doc: 6-10)
+SIGMA_MM = 6.0  # push smoothing sigma (design doc: 6-10); real 44 sweep 4/6/8/10 in the S6 report
 ROUND_R_MM = 1.0
 SOLE_MIN_MM = 6.0  # D4
 BED_Z_MM = 0.0
@@ -40,7 +42,6 @@ BED_FIX_Z_MM = 0.5  # bed-contact surface: z < this and nz < BED_FIX_NZ
 BED_FIX_NZ = -0.9
 POOL_MM = 2.0  # surface samples are pooled to this spacing before smoothing (keeps pair counts bounded)
 PHI_E_BAND_MM = 8.0  # envelope() default band: phi_E is exact within this distance of the skin
-P_CAP_MM = PHI_E_BAND_MM - 1.5  # largest push the banded phi_E can carry
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ class SkinSamples:
 
 def skin_samples(phi_e: np.ndarray, phi_c: np.ndarray, grid: Grid, collar, wall: float = WALL_MM) -> SkinSamples:
     """Raw fit gap on the outer skin (design §2: ``need_fit(q) = max(0, t - phi_C(q))``, q in M_below)."""
-    padded = np.pad(phi_e, 1, mode="constant", constant_values=PHI_E_BAND_MM)
+    padded = np.pad(phi_e, 1, mode="constant", constant_values=float(np.abs(phi_e).max()))
     verts, faces, _, _ = measure.marching_cubes(padded, level=0.0, spacing=grid.spacing)
     verts = verts + np.asarray(grid.origin) - np.asarray(grid.spacing)
     mesh = trimesh.Trimesh(verts, faces, process=False)
@@ -134,18 +135,18 @@ def smooth_push(pooled: SkinSamples, sigma: float = SIGMA_MM) -> np.ndarray:
     return p
 
 
-def push_field(phi_e: np.ndarray, grid: Grid, pooled: SkinSamples, p: np.ndarray, k: int = 6) -> tuple[np.ndarray, np.ndarray]:
+def push_field(phi_e: np.ndarray, grid: Grid, pooled: SkinSamples, p: np.ndarray, band_mm: float = PHI_E_BAND_MM, k: int = 6) -> tuple[np.ndarray, np.ndarray]:
     """Extend P from the skin to the band around it (inverse-distance mix of the ``k`` nearest samples).
 
     Returns ``(P, idx)`` with P a float32 field that is zero beyond ``max(p) + 1.5`` mm of the skin; ``idx`` are
-    the flat indices of the band voxels (for reporting). Needs ``max(p) <= P_CAP_MM``.
+    the flat indices of the band voxels (for reporting). Needs ``max(p) + 1.5 <= band_mm`` (the band in which phi_E is an exact distance).
     """
     out = np.zeros(phi_e.shape, np.float32)
     if p.max() <= 0:
         return out, np.empty(0, np.int64)
     band = float(p.max()) + 1.5
-    if band > PHI_E_BAND_MM:
-        raise SDFError(f"push {p.max():.1f} mm exceeds what the banded phi_E can carry ({P_CAP_MM} mm)")
+    if band > band_mm:
+        raise SDFError(f"push {p.max():.1f} mm exceeds what the banded phi_E can carry ({band_mm - 1.5:g} mm): build envelope(band=...) wider")
     idx = np.flatnonzero(np.abs(phi_e.ravel()) < band)
     ijk = np.stack(np.unravel_index(idx, phi_e.shape), axis=1)
     pts = grid.coords(ijk)
@@ -187,6 +188,37 @@ def _wmax(a, w, q):
     return float(a[o][np.searchsorted(c, q / 100.0 * c[-1])])
 
 
+def hotspots(s: SkinSamples, threshold: float, link_mm: float = 3.0, top: int = 8) -> list[dict]:
+    """Connected clusters of raw need above ``threshold`` (skin samples linked within ``link_mm``), largest first."""
+    sel = np.flatnonzero(s.below & ~s.bed & (s.need > threshold))
+    if not len(sel):
+        return []
+    pts = s.pts[sel]
+    pairs = cKDTree(pts).query_pairs(link_mm, output_type="ndarray")
+    n = len(sel)
+    g = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(n, n))
+    _, lab = connected_components(g, directed=False)
+    out = []
+    for c in np.unique(lab):
+        m = lab == c
+        w = s.need[sel][m]
+        k = int(np.argmax(w))
+        out.append({"area_mm2": round(float(s.area[sel][m].sum())), "max_mm": round(float(w.max()), 2),
+                    "max_at": [round(float(v), 1) for v in pts[m][k]],
+                    "centre": [round(float(v), 1) for v in pts[m].mean(axis=0)]})
+    return sorted(out, key=lambda d: -d["area_mm2"])[:top]
+
+
+def push_slope(pooled: SkinSamples, p: np.ndarray, max_d: float = 3.5) -> float:
+    """Largest |dP / d| between neighbouring skin samples with similar normals (how steep the bulge is)."""
+    pairs = cKDTree(pooled.pts).query_pairs(max_d, output_type="ndarray")
+    i, j = pairs[:, 0], pairs[:, 1]
+    ok = (np.einsum("ij,ij->i", pooled.normals[i], pooled.normals[j]) > 0.9) & pooled.below[i] & pooled.below[j] & ~pooled.bed[i] & ~pooled.bed[j]
+    d = np.linalg.norm(pooled.pts[i] - pooled.pts[j], axis=1)
+    ok &= d > 0.5
+    return float(np.max(np.abs(p[i] - p[j])[ok] / d[ok])) if ok.any() else 0.0
+
+
 def gate_metrics(s: SkinSamples, wall: float, t_fill: float) -> dict:
     """§2 Gate metrics from the raw skin samples (area weighted, M_below, bed-contact excluded)."""
     sel = s.below & ~s.bed
@@ -204,6 +236,8 @@ def gate_metrics(s: SkinSamples, wall: float, t_fill: float) -> dict:
         "need_fit_area_over_2_frac": round(float(a[need > 2.0].sum() / total), 4),
         "need_fit_area_over_4_frac": round(float(a[need > 4.0].sum() / total), 4),
         "hard_fill_only_area_frac": round(float(a[fill_need > 0].sum() / total), 4),
+        "hotspots_over_4mm": hotspots(s, 4.0),
+        "hotspots_over_2mm": hotspots(s, 2.0),
     }
 
 
@@ -230,6 +264,17 @@ def gate_verdict(m: dict, residual_fill_frac: float | None = None, th: GateThres
             "thresholds": th.__dict__, "note": "area thresholds are provisional (D8)"}
 
 
+def _push_by_x(pooled: SkinSamples, p: np.ndarray, step: float = 20.0) -> list[dict]:
+    keep = pooled.below & ~pooled.bed
+    b = np.floor(pooled.pts[:, 0] / step).astype(int)
+    out = []
+    for k in np.unique(b[keep]):
+        m = keep & (b == k)
+        out.append({"x_mm": float(k * step), "max_mm": round(float(p[m].max()), 2),
+                    "area_over_0p5_frac": round(float(pooled.area[m & (p > 0.5)].sum() / pooled.area[m].sum()), 3)})
+    return out
+
+
 def compose(
     phi_e: np.ndarray,
     phi_c: np.ndarray,
@@ -244,12 +289,14 @@ def compose(
     round_r: float = ROUND_R_MM,
     sole_min: float | None = SOLE_MIN_MM,
     bed_z: float = BED_Z_MM,
+    band_mm: float = PHI_E_BAND_MM,
     reach: float = 10.0,
     push: bool = True,
     keep_p: bool = False,
 ) -> Composed:
     """phi_shoe from phi_E (S2), phi_C (S4), phi_A / phi_C* (S5), all on ``grid`` (see the module docstring).
 
+    ``band_mm``: half width in which ``phi_e`` is exact (``envelope(band=...)``); a push needs max P + 1.5 <= band.
     ``push=False`` skips level 2 (only hard fill), used to measure what the push buys.
     ``sole_min``: the envelope below ``bed_z + sole_min`` stays solid under the cavity (None = off); the report
     gives the volume it had to add, which is 0 when the pose already honours the sole thickness.
@@ -269,11 +316,11 @@ def compose(
     i_max = int(np.argmax(p))
 
     # level 2
-    pf, band_idx = push_field(phi_e, grid, pooled, p)
+    pf, band_idx = push_field(phi_e, grid, pooled, p, band_mm)
     phi_1 = phi_e - pf
     # level 3 (only inside M_below): min(phi_1, phi_c - t_fill)
     fill = phi_c - np.float32(t_fill)
-    fill[~below] = np.float32(PHI_E_BAND_MM + 8.0)
+    fill[~below] = np.float32(band_mm + 8.0)
     phi_2 = np.minimum(phi_1, fill)
     # closure shell
     shell = phi_a - np.float32(wall)
@@ -300,6 +347,8 @@ def compose(
     cut_vox = before - int((sub < 0).sum())
     # print bed
     np.maximum(phi, (bed_z - z)[None, None, :], out=phi)
+    # Nodes exactly on the cut plane (value 0) make marching cubes emit degenerate, non-manifold faces: nudge them out.
+    phi[phi == 0] = np.float32(1e-3)
 
     inside = phi < 0
     in1 = phi_1 < 0
@@ -324,6 +373,8 @@ def compose(
             "area_over_0p5_mm2": round(float(pooled.area[p > 0.5].sum())),
             "area_over_2_mm2": round(float(pooled.area[p > 2.0].sum())),
             "area_over_0p5_frac": round(float(pooled.area[p > 0.5].sum() / pooled.area[pooled.below & ~pooled.bed].sum()), 4),
+            "max_slope": round(push_slope(pooled, p), 3),
+            "by_x": _push_by_x(pooled, p),
             "min_margin_p_minus_need_mm": round(float((p - pooled.need)[pooled.below & ~pooled.bed].min()), 4),
         },
     }

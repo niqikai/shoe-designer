@@ -43,9 +43,9 @@ def rect_collar(x0, x1, y0, y1, z):
     return build_cap(np.column_stack([xy, np.full(len(xy), z)]), interior_step=2.0)
 
 
-def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box"):
+def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box", z0=-4.0):
     """Template with a thin wall at x = 0 (``wall_x0`` mm), a floor at ``floor`` mm and a chimney through the collar."""
-    grid = Grid.from_bounds((-6, -40, -4), (106, 40, 80), h, alpha_deg=alpha)
+    grid = Grid.from_bounds((-6, -40, z0), (106, 40, 80), h, alpha_deg=alpha)
     if kind == "box":
         phi_e = box_phi(grid, (0, -30, 0), (100, 30, Z_COLLAR))
         main = box_phi(grid, (wall_x0, -12, floor), (92, 12, 30))
@@ -69,7 +69,7 @@ def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box"):
 
 
 def build(**kw):
-    sc = {k: kw.pop(k) for k in ("wall_x0", "floor", "alpha", "h", "kind") if k in kw}
+    sc = {k: kw.pop(k) for k in ("wall_x0", "floor", "alpha", "h", "kind", "z0") if k in kw}
     grid, phi_e, phi_c, cl, collar = scene(**sc)
     comp = compose(phi_e, phi_c, cl.phi_a, cl.phi_c_star, grid, collar, **kw)
     mesh, rep = export(comp)
@@ -112,6 +112,15 @@ def test_thin_wall_is_patched(box):
     assert hits[1] - hits[0] >= T_FILL - 0.1  # was 0.8 mm
     assert comp.report["push"]["max_mm"] > 1.0  # the push did it
     assert comp.gate["need_fit_max_mm"] == pytest.approx(T - 0.8, abs=0.15)
+
+
+def test_bed_plane_on_grid_nodes_stays_manifold():
+    # nodes exactly at z = 0 (the cut plane) used to make marching cubes emit non-manifold edges
+    *_, comp, mesh = build(z0=0.0)
+    assert mesh.is_watertight and mesh.body_count == 1
+    _, counts = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
+    assert (counts == 2).all()
+    assert mesh.bounds[0, 2] == pytest.approx(0.0, abs=0.05)
 
 
 def test_hard_fill_alone_reaches_t_fill():
