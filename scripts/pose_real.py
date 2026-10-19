@@ -17,7 +17,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--h", type=float, default=1.0)
     ap.add_argument("--shoe", default="dlp_solid_43_right")
-    ap.add_argument("--closing", type=float, default=0.0, help="closing radius for perforated templates")
+    ap.add_argument("--closing", type=float, default=12.0, help="closing radius (mm) for perforated templates; 12 for dlp_solid_43_right")
     ap.add_argument("--weight-mode", default="fixed", choices=["fixed", "pose"])
     ap.add_argument("--pitch-max", type=float, default=5.0)
     ap.add_argument("--s-min", type=float, default=6.0)
