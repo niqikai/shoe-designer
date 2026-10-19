@@ -297,8 +297,8 @@ def fit_pose(
     ``ease`` / ``wall`` are mm, scalars or ``f(points_last, normals_last) -> array``.
     The envelope interior is centred in xy by its ``phi_e < 0`` bounding box unless ``xy_center``
     is given. ``max_lift`` caps how far above ``s_min`` the lowest point of the last may sit
-    (guards against floating the last out through the mouth; 4 mm is about half of Zellerfeld's
-    ~8 mm sole over ``s_min`` = 6). ``weight_mode``: ``"fixed"`` or ``"pose"`` (see module docstring).
+    (guards against floating the last out through the mouth; 4 mm is an empirical value,
+    about half of Zellerfeld's ~8 mm sole thickness; ``flags["lift_at_cap"]`` reports when it binds). ``weight_mode``: ``"fixed"`` or ``"pose"`` (see module docstring).
     """
     t_all = time.perf_counter()
     prob = _Problem(phi_e, grid, m_below, last, ease, wall, s_min, bed_z, n_points, seed, xy_center, weight_mode)

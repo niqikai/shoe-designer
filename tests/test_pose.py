@@ -144,17 +144,23 @@ def test_shape_mismatch_rejected():
 
 
 def test_fixed_weights_do_not_let_deficit_escape_the_mask():
-    # The envelope top is 2 mm too low in the middle of the last (a dent); with the mask only
-    # covering the lower half, pose-sampled weights let a pitch/lift hide points above the mouth.
+    # The envelope top has a 2 mm dent over the middle of the last, and the mouth plane sits just
+    # above the nominal top face. With weights sampled at the posed point, lifting the last
+    # takes the dented top face out of the score; fixed weights keep it in.
     last = last_box()
     env, grid, phi, _ = envelope(last, pz.Pose(0, 0, 0, 0, 0))
+    top = env.bounds[1, 2]
+    cutter = box([30.0, 60.0, 4.0], center=(env.bounds.mean(axis=0)[0], 0.0, top))  # removes the top 2 mm
+    phi_dent = np.maximum(phi, -sdf_from_mesh(cutter, grid)).astype(np.float32)
     z = grid.origin[2] + np.arange(grid.shape[2]) * grid.dz
-    mask = np.broadcast_to(z < 6.0 + LAST_EXT[2] - 1.0, grid.shape)  # mouth 1 mm under the block top
-    kw = dict(xy_center=env.bounds.mean(axis=0)[:2], n_points=6000, n_refine_points=3000, pitch_max_deg=6.0)
-    fixed = pz.fit_pose(phi, grid, mask, last, weight_mode="fixed", **kw)
-    pose_w = pz.fit_pose(phi, grid, mask, last, weight_mode="pose", **kw)
-    assert fixed.flags["posed_mask_area_drop"] < 0.02 and not fixed.flags["mask_escape"]
+    mask = np.broadcast_to(z < 6.0 + LAST_EXT[2] + 1.5, grid.shape)
+    kw = dict(xy_center=env.bounds.mean(axis=0)[:2], n_points=6000, n_refine_points=3000, max_lift=4.0)
+    fixed = pz.fit_pose(phi_dent, grid, mask, last, weight_mode="fixed", **kw)
+    pose_w = pz.fit_pose(phi_dent, grid, mask, last, weight_mode="pose", **kw)
+    assert pose_w.flags["mask_escape"] and pose_w.flags["posed_mask_area_drop"] > 0.02
+    assert pose_w.flags["posed_mask_area_drop"] > fixed.flags["posed_mask_area_drop"]
+    assert not fixed.flags["mask_escape"]
     assert fixed.flags["counted_area_frac"] == pytest.approx(fixed.flags["baseline_counted_area_frac"])
-    assert "mask_escape" in pose_w.flags  # reported in both modes
+    assert fixed.gap.summary()["top"]["max"] > 1.0  # the dent is still scored
     with pytest.raises(ValueError):
         pz.fit_pose(phi, grid, mask, last, weight_mode="nope", **kw)
