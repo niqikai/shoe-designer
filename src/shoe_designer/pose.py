@@ -187,7 +187,7 @@ class PoseResult:
 class _Problem:
     def __init__(self, phi_e, grid: Grid, m_below, last: trimesh.Trimesh, ease: Field, wall: Field,
                  s_min: float, bed_z: float, n_points: int, seed: int, xy_center,
-                 weight_mode: str = "pose"):
+                 weight_mode: str = "fixed"):
         if weight_mode not in ("fixed", "pose"):
             raise ValueError("weight_mode must be 'fixed' or 'pose'")
         if phi_e.shape != grid.shape or np.shape(m_below) != grid.shape:
@@ -259,13 +259,18 @@ def _eval_field(f: Field, pts, normals) -> np.ndarray:
 
 
 def gap_map(phi_e, grid: Grid, m_below, last: trimesh.Trimesh, transform: np.ndarray, ease: Field = 1.0,
-            wall: Field = 2.0, n_points: int = 20000, seed: int = 0) -> GapMap:
-    """Gap map of ``last`` placed by an arbitrary rigid ``transform`` (4x4, last -> template frame)."""
+            wall: Field = 2.0, n_points: int = 20000, seed: int = 0, weight: np.ndarray | None = None) -> GapMap:
+    """Gap map of ``last`` placed by an arbitrary rigid ``transform`` (4x4, last -> template frame).
+
+    The M_below weight is sampled at the *posed* points unless ``weight`` is given. ``fit_pose``
+    defaults to weights fixed at the nominal pose, so to reproduce ``result.gap`` for the same
+    ``n_points``/``seed`` pass ``weight=result.gap.weight``.
+    """
     prob = _Problem(phi_e, grid, m_below, last, ease, wall, 0.0, 0.0, n_points, seed, (0.0, 0.0), "pose")
     p = prob.pts @ transform[:3, :3].T + transform[:3, 3]
     s = sample(phi_e, grid, p)
     d = np.maximum(0.0, s + prob.need)
-    w = np.clip(sample(prob.mask, grid, p), 0.0, 1.0)
+    w = np.clip(sample(prob.mask, grid, p), 0.0, 1.0) if weight is None else np.asarray(weight)
     return GapMap(prob.pts, prob.normals, p, d, -(s + prob.need), w, prob.area, prob.x_range, prob.y_mid)
 
 
@@ -298,7 +303,8 @@ def fit_pose(
     The envelope interior is centred in xy by its ``phi_e < 0`` bounding box unless ``xy_center``
     is given. ``max_lift`` caps how far above ``s_min`` the lowest point of the last may sit
     (guards against floating the last out through the mouth; 4 mm is an empirical value,
-    about half of Zellerfeld's ~8 mm sole thickness; ``flags["lift_at_cap"]`` reports when it binds). ``weight_mode``: ``"fixed"`` or ``"pose"`` (see module docstring).
+    about half of Zellerfeld's ~8 mm sole thickness; ``flags["lift_at_cap"]`` reports when it binds).
+    ``weight_mode``: ``"fixed"`` or ``"pose"`` (see module docstring).
     """
     t_all = time.perf_counter()
     prob = _Problem(phi_e, grid, m_below, last, ease, wall, s_min, bed_z, n_points, seed, xy_center, weight_mode)

@@ -164,3 +164,13 @@ def test_fixed_weights_do_not_let_deficit_escape_the_mask():
     assert fixed.gap.summary()["top"]["max"] > 1.0  # the dent is still scored
     with pytest.raises(ValueError):
         pz.fit_pose(phi, grid, mask, last, weight_mode="nope", **kw)
+
+
+def test_gap_map_reproduces_fit_gap_with_its_weights():
+    last = last_box()
+    env, grid, phi, _ = envelope(last, pz.Pose(0, 0, 1.0, 0, 0))
+    mask = np.ones(grid.shape, bool)
+    res = pz.fit_pose(phi, grid, mask, last, xy_center=env.bounds.mean(axis=0)[:2], n_points=3000, n_refine_points=2000)
+    g = pz.gap_map(phi, grid, mask, last, res.transform, n_points=3000, weight=res.gap.weight)
+    assert np.allclose(g.deficit, res.gap.deficit, atol=1e-6)
+    assert g.summary()["all"] == res.gap.summary()["all"]
