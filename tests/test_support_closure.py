@@ -19,9 +19,12 @@ def box_phi(grid, lo, hi):
     return (np.linalg.norm(np.maximum(q, 0), axis=0) + np.minimum(q.max(axis=0), 0)).astype(np.float32)
 
 
-def slab(n_y, alpha, h=1.0, n_x=60, height=30.0):
+N_X = 60  # slab length in voxels
+
+
+def slab(n_y, alpha, h=1.0, n_x=N_X, height=30.0, headroom=60.0):
     """Cavity with a flat ceiling: exactly ``n_x`` x ``n_y`` voxel centres in plan (n_y odd or even)."""
-    grid = Grid.from_bounds((-5, -n_y / 2 - 5, -5), (n_x + 5, n_y / 2 + 5, height + 60), h, alpha_deg=alpha)
+    grid = Grid.from_bounds((-5, -n_y / 2 - 5, -5), (n_x + 5, n_y / 2 + 5, height + headroom), h, alpha_deg=alpha)
     ox, oy = grid.origin[0], grid.origin[1]
     kx, ky = math.ceil((0 - ox) / h), math.ceil((-n_y / 2 - oy) / h)
     lo = (ox + (kx - 0.5) * h, oy + (ky - 0.5) * h, 0.0)
@@ -60,14 +63,14 @@ def test_no_overhang_faces_after_marching_cubes(alpha, n_y):
     assert mesh.is_watertight
     up = mesh.face_normals[:, 2]  # cavity-mesh normal up == material above faces down
     # Flat treads/apex (nz ~ 1): the <= 1-voxel-wide apex and marching-cubes slivers, about 1 mm^2 per layer.
-    assert mesh.area_faces[up > 0.9].sum() <= 2 * grid.h * 60
+    assert mesh.area_faces[up > 0.9].sum() <= 2 * grid.h * N_X
     # Rim facets where the ridge leaves the exact wall are ~41 deg from horizontal (nz ~ 0.75) at worst:
     # one voxel high, along the footprint perimeter only.
-    assert mesh.area_faces[up > 0.80].sum() <= 2 * grid.h * 60
-    assert overhang_area(mesh) <= 1.5 * grid.h * 2 * (60 + n_y) + 2 * grid.h * 60
+    assert mesh.area_faces[up > 0.80].sum() <= 2 * grid.h * N_X
+    assert overhang_area(mesh) <= 1.5 * grid.h * 2 * (60 + n_y) + 2 * grid.h * N_X
     # control: without the closure the whole ceiling is an overhang
     flat, _ = sdf_to_mesh(phi_c, grid)
-    assert overhang_area(flat) >= 0.9 * 60 * n_y * grid.h
+    assert overhang_area(flat) >= 0.9 * N_X * n_y * grid.h
 
 
 def test_ridge_slope_is_alpha_b():
@@ -144,3 +147,25 @@ def test_region_limits_the_report_not_the_fields():
     assert cut.report["ceiling_raise_max_mm"] <= 10.0 + grid.dz
     none = closure(phi_c, grid, region=np.zeros(phi_c.shape, bool))
     assert none.report["added_volume_in_region_mm3"] == 0 and none.report["ceiling_raise_max_mm"] == 0
+
+
+def test_flat_ceiling_ridge_is_not_heel_loss():
+    grid, phi_c = slab(41, 43.0)  # ridge grows over the whole slab, including the heel-zone x range
+    rep = closure(phi_c, grid).report
+    assert rep["added_volume_in_region_mm3"] > 0
+    assert rep["heel_loss_volume_mm3"] == 0 and rep["heel_loss_depth_mm"] == 0
+
+
+def test_clip_flags_when_headroom_is_too_small():
+    grid, phi_c = slab(41, 43.0, headroom=12.0)  # ridge is ~22 mm high
+    rep = closure(phi_c, grid).report
+    assert rep["ridge_hit_grid_top"] and rep["shell_clipped"]
+    g2, p2 = slab(41, 43.0)
+    ok = closure(p2, g2).report
+    assert not ok["ridge_hit_grid_top"] and not ok["shell_clipped"]
+
+
+def test_no_envelope_keys_without_phi_e():
+    grid, phi_c = slab(41, 43.0)
+    rep = closure(phi_c, grid, region=np.ones(phi_c.shape, bool)).report
+    assert not any(k.startswith(("shell_protrusion", "b_req")) for k in rep)
