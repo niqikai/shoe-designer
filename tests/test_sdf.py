@@ -139,15 +139,18 @@ def test_nan_field_errors():
         sdf.sdf_to_mesh(phi, grid)
 
 
-def test_band_far_cells_need_consistent_sign():
-    # an open (non-watertight) box: the winding number is fuzzy near the hole, but the banded
-    # field must still equal the exact one wherever |phi| < band
-    box = trimesh.creation.box(extents=[20, 20, 20])
-    open_box = trimesh.Trimesh(box.vertices, box.faces[2:], process=False)
-    grid = Grid.for_mesh(open_box, 1.0, margin_voxels=8)
-    exact = sdf.sdf_from_mesh(open_box, grid)
-    banded = sdf.sdf_from_mesh(open_box, grid, band=3.0, coarse=4)
-    near = np.abs(exact) < 3.0
+@pytest.mark.parametrize("cut", [0.0, 0.3])
+def test_band_far_cells_need_consistent_sign(cut):
+    # Open bowl: the fast winding number hovers around 0.5 in the cavity, so far-field corners
+    # of one coarse cell can disagree in sign. The banded field must match the exact one
+    # (checked to fail if far cells just copy corner 0's sign).
+    ball = trimesh.creation.icosphere(subdivisions=3, radius=20.0)
+    bowl = trimesh.Trimesh(ball.vertices, ball.faces[ball.triangles_center[:, 2] < 20 * cut], process=False)
+    grid = Grid.for_mesh(bowl, 1.0, margin_voxels=6)
+    exact = sdf.sdf_from_mesh(bowl, grid)
+    banded = sdf.sdf_from_mesh(bowl, grid, band=2.0, coarse=4)
+    assert np.array_equal(np.sign(banded), np.sign(exact))
+    near = np.abs(exact) < 2.0
     assert np.allclose(banded[near], exact[near], atol=1e-4)
 
 

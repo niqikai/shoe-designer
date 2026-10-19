@@ -85,8 +85,7 @@ class MeshQuery:
     def __init__(self, mesh: trimesh.Trimesh):
         self.v = np.ascontiguousarray(mesh.vertices, dtype=np.float64)
         self.f = np.ascontiguousarray(mesh.faces, dtype=np.int64)
-        self._aabb = igl.AABB()
-        self._aabb.init(self.v, self.f)
+        self._aabb = None  # built on first distance query; winding-only users skip it
         self._bvh = igl.FastWindingNumberBVH()
         self._bvh.init(self.v, self.f)
 
@@ -95,6 +94,9 @@ class MeshQuery:
 
     def signed_distance(self, points: np.ndarray, chunk: int = CHUNK_POINTS) -> np.ndarray:
         """Distance to the surface (AABB), negative where the fast winding number is > 0.5. float32."""
+        if self._aabb is None:
+            self._aabb = igl.AABB()
+            self._aabb.init(self.v, self.f)
         points = np.asarray(points, float)
         out = np.empty(len(points), np.float32)
         for s in range(0, len(points), chunk):
