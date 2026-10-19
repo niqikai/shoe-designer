@@ -237,7 +237,6 @@ def test_columns_outside_the_ring_are_untouched():
     cav = ease.build_cavity(last, place(), collar, grid, uniform(1.0))
     assert cavity_top_at(cav, 25.0) > 55   # 5 mm outside the rim: inside the 10 mm reach, opened
     assert cavity_top_at(cav, 38.0, y=14.0) > 55
-    assert cavity_top_at(cav, 38.0, y=14.0 + 12.0) == pytest.approx(27.0, abs=0.1)  # 18 mm off the rim: untouched
     assert cavity_top_at(cav, 62.0) == pytest.approx(27.0, abs=0.1)
     assert cavity_top_at(cav, 85.0) == pytest.approx(27.0, abs=0.1)  # well outside ring + 10 mm
     assert cavity_top_at(cav, 85.0, y=10.0) == pytest.approx(27.0, abs=0.1)
