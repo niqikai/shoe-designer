@@ -169,3 +169,12 @@ def test_no_envelope_keys_without_phi_e():
     grid, phi_c = slab(41, 43.0)
     rep = closure(phi_c, grid, region=np.ones(phi_c.shape, bool)).report
     assert not any(k.startswith(("shell_protrusion", "b_req")) for k in rep)
+
+
+def test_phi_c_star_is_exact_outside_the_box_and_heel_depth_is_along_x():
+    grid, phi_c = slab(41, 43.0)
+    res = closure(phi_c, grid)
+    outside = np.ones(phi_c.shape, bool)
+    outside[res.box] = False
+    assert np.array_equal(res.phi_c_star[outside], phi_c[outside])  # also where phi_c > far
+    assert phi_c[outside].max() > res.phi_a.max()

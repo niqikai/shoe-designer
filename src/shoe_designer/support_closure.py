@@ -37,11 +37,11 @@ def close_overhangs(cavity: np.ndarray) -> np.ndarray:
     c = np.ascontiguousarray(np.asarray(cavity, bool).transpose(2, 0, 1))  # layers first
     v = np.empty_like(c)
     prev_any = False
-    # border_value=0: material is assumed outside the grid in x/y, so a cavity touching the x/y border
-    # gets a lower ridge (conservative direction is more closure; callers should keep a margin).
+    # border_value=1: the cavity is assumed to continue outside the grid in x/y, so the erosion never starts
+    # at the grid faces. This errs toward more closure (printable side); callers should still keep a margin.
     for k in range(c.shape[0]):
         if prev_any:
-            v[k] = c[k] | ndimage.binary_erosion(v[k - 1], _CROSS2, border_value=0)
+            v[k] = c[k] | ndimage.binary_erosion(v[k - 1], _CROSS2, border_value=1)
         else:
             v[k] = c[k]
         prev_any = bool(v[k].any())
@@ -75,7 +75,7 @@ def _top_index(mask: np.ndarray) -> np.ndarray:
 
 
 def _by_x(col_value: np.ndarray, x0: float, h: float, step_mm: float = 10.0) -> list[dict]:
-    """Max over y of a per-column value, per ``step_mm`` bin of x (columns with value > 0 only)."""
+    """Max over y of a per-column value, per ``step_mm`` bin of absolute x (bin edges do not depend on the grid origin)."""
     ix = np.flatnonzero((col_value > 0).any(axis=1))
     if not len(ix):
         return []
@@ -113,7 +113,8 @@ def closure(
 
     ``region`` (bool, same grid, normally M_below) limits the report to where the closure matters:
     closure added above the collar is cut away by the collar trim, so it is not counted. The fields
-    ``phi_a`` / ``phi_c_star`` are never masked.
+    ``phi_a`` / ``phi_c_star`` are never masked. ``phi_c_star`` equals ``phi_c`` exactly outside A's padded
+    box; ``phi_a`` there is the constant lower bound ``far`` (> t), not a distance.
     """
     if phi_c.shape != tuple(grid.shape):
         raise SDFError(f"phi_c shape {phi_c.shape} does not match grid {grid.shape}")
@@ -160,7 +161,8 @@ def closure(
     box = tuple(slice(int(l), int(u)) for l, u in zip(lo, hi))
     a_box = a[box]
     phi_a[box] = _signed_edt(_grow_overlap(a_box), sp)
-    phi_star = np.minimum(phi_c, phi_a)
+    phi_star = phi_c.copy()  # exact phi_c everywhere outside the box; the min only happens inside it
+    phi_star[box] = np.minimum(phi_c[box], phi_a[box])
 
     # --- ceiling raise: top of V over top of C per column
     # with a region, A outside it is ignored: a ridge that starts below the region cut gets a partial raise
@@ -176,18 +178,23 @@ def closure(
     x_lo, x_hi = grid.origin[0] + cx[0] * h, grid.origin[0] + cx[-1] * h
     heel_x = x_lo + heel_frac * (x_hi - x_lo)
     xs = grid.origin[0] + np.arange(grid.shape[0]) * h
-    # Heel wrap lost = A lying between the heel wall and the cavity: C exists further toe-ward in the same
-    # (y, z) row. Ridge over a flat ceiling has no C beside it at its height, so it is not counted here.
-    c_ahead = np.logical_or.accumulate(c[::-1], axis=0)[::-1]
-    c_ahead = np.concatenate([c_ahead[1:], np.zeros_like(c_ahead[:1])])  # strictly ahead
-    heel = a_rep & c_ahead & (xs <= heel_x)[:, None, None]
+    # Heel loss = A in the heel zone with cavity further toe-ward in the same (y, z) row, i.e. A sitting
+    # between the heel wall and the cavity. A ceiling that rises toward the toe is geometrically the same
+    # thing (a leaning wall under 47 deg from horizontal is a ceiling), so this is an upper bound on wrap
+    # actually lost; a flat ceiling has no cavity beside it at ridge height and is not counted.
+    ix = np.arange(grid.shape[0], dtype=np.int32)[:, None, None]
+    nxt = np.minimum.accumulate(np.where(c, ix, np.int32(2**30))[::-1], axis=0)[::-1]
+    nxt = np.concatenate([nxt[1:], np.full_like(nxt[:1], 2**30)])  # strictly toe-ward
+    heel = a_rep & (nxt < 2**30) & (xs <= heel_x)[:, None, None]
     report["heel_zone_x_mm"] = [round(float(x_lo), 1), round(float(heel_x), 1)]
     report["heel_loss_volume_mm3"] = round(float(heel.sum() * voxel), 0)
-    report["heel_loss_depth_mm"] = round(float(phi_c[heel].max()) if heel.any() else 0.0, 2)
+    # depth along x: from the heel-side voxel of A to the next cavity voxel toe-ward in its row
+    report["heel_loss_depth_mm"] = round(float(((nxt - ix)[heel]).max() * h) if heel.any() else 0.0, 2)
 
     # --- closure shell vs the outer envelope
     # clipped: A's padded box was cut by a grid face on any axis, so the closure shell may be truncated.
-    # ridge_hit_grid_top: the closure itself reached the top layer (the ridge is cut by the grid, not by geometry).
+    # ridge_hit_grid_top: the closure itself reached the top layer (the ridge is cut by the grid, not by geometry);
+    # it implies shell_clipped.
     report["shell_clipped"] = clipped
     report["ridge_hit_grid_top"] = bool((v[:, :, -1] & ~c[:, :, -1]).any())
     if phi_e is not None:
