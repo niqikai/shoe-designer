@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pytest
 import trimesh
@@ -121,7 +123,7 @@ def test_closing_fills_perforated_walls():
     # holes of radius 3 in a 3 mm wall need r ~ 8: dilation only fills a lens of thickness t + 2*sqrt(r^2 - a^2),
     # and the erosion removes it again unless that is >= 2r
     out = env.envelope(shoe, h=1.0, closing_radius=8.0)
-    assert out.report["closing_radius_mm"] == 8.0
+    assert out.report["closing"]["radius_mm"] == 8.0
     assert (phi_at(out, [[0, 0, 15], [-20, 0, 12], [20, 4, 18]]) < 0).all()
     mesh, _ = out.to_mesh()
     assert mesh.is_watertight
@@ -137,3 +139,93 @@ def test_open_mesh_is_rejected():
     m.update_faces(np.arange(len(m.faces)) != 0)
     with pytest.raises(EnvelopeError, match="watertight"):
         env.envelope(m)
+
+
+def kidney_rim(n=240):
+    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    r = 30 - 24 * np.exp(-((np.angle(np.exp(1j * t))) / 0.5) ** 2)  # deep notch at t = 0
+    x, y = r * np.cos(t), r * np.sin(t)
+    return np.column_stack([x, y, 50 + 0.1 * x + 0.05 * y])
+
+
+def test_z_t_outside_a_concave_collar_is_nearest_collar_height():
+    rim = kidney_rim()
+    collar = env.build_cap(rim)
+    # inside the notch: outside the loop but inside its convex hull
+    probe = np.array([[20.0, 0.7], [15.0, 1.3], [22.0, -2.1]])  # off the symmetry axis: no ties
+    assert not collar.inside(probe).any()
+    d = np.linalg.norm(probe[:, None, :] - rim[None, :, :2], axis=2)
+    assert collar.z_t(probe) == pytest.approx(rim[d.argmin(axis=1), 2])
+    inside = np.array([[0.0, 0.0], [-10.0, 5.0]])
+    assert collar.inside(inside).all()
+    assert collar.z_t(inside) == pytest.approx(50 + 0.1 * inside[:, 0] + 0.05 * inside[:, 1], abs=0.5)
+
+
+def test_manual_rim_keeps_a_simple_input_order_and_rejects_degenerate_input():
+    ts = np.linspace(0, 2 * np.pi, 8, endpoint=False)
+    pts = np.column_stack([30 * np.cos(ts), 20 * np.sin(ts), np.full(8, 10.0)])
+    cw = env._manual_rim(pts[::-1])  # clockwise but simple: order kept, no resorting
+    assert np.allclose(cw[0, :2], pts[-1, :2], atol=1e-6)
+    with pytest.raises(EnvelopeError, match="at least 4"):
+        env._manual_rim(pts[:3])
+    dup = np.vstack([pts, pts[:1], pts[:1]])
+    assert len(env._manual_rim(dup)) == 400
+
+
+def test_grid_must_cover_the_template(shoe):
+    small = Grid.from_bounds([-10, -10, 0], [10, 10, 10], 1.0)
+    with pytest.raises(EnvelopeError, match="cover"):
+        env.envelope(shoe, grid=small)
+
+
+def test_report_has_no_warnings_on_a_clean_template(result):
+    assert result.report["warnings"] == []
+    assert result.report["inner_area_exposed_frac"] < 0.01
+    assert result.report["collar"]["pinch_vertices"] == 0
+    assert result.report["material_above_cap_mm"] < 1.0
+
+
+def test_closing_report_is_kept():
+    out = env.envelope(saddle_shoe(holes=True), h=1.0, closing_radius=8.0)
+    c = out.report["closing"]
+    assert c["components"] >= 1 and c["dropped_volume_mm3"] == 0 and c["added_volume_mm3"] > 0
+
+
+def _has_embree():
+    try:
+        import embreex  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+needs_real = pytest.mark.skipif(
+    not os.environ.get("SHOE_ASSETS_ROOT") or not _has_embree(),
+    reason="needs SHOE_ASSETS_ROOT and embreex (428k-face ray queries)",
+)
+
+
+@needs_real
+def test_real_template_dlp_solid_43_right():
+    from shoe_designer.assets import load_asset, load_catalog
+
+    mesh = load_asset("dlp_solid_43_right", load_catalog()).mesh
+    out = env.envelope(mesh, h=1.0, closing_radius=12.0)
+    rep = out.report
+    rim = out.collar.rim
+    assert rep["warnings"] == []
+    # collar height per 10 mm of x against the highest mesh vertex of the same slab (design doc 0, solid 43):
+    # heel 107-108, sides 82-83, front 101-104. The two steep flanks (x 40-50, x 110-120) read ~1 mm low
+    # because the slab maximum is taken at its steep edge; everything else is within 0.25 mm.
+    for x0 in range(10, 130, 10):
+        s = (mesh.vertices[:, 0] >= x0) & (mesh.vertices[:, 0] < x0 + 10)
+        r = (rim[:, 0] >= x0) & (rim[:, 0] < x0 + 10)
+        assert abs(rim[r, 2].max() - mesh.vertices[s, 2].max()) <= (1.3 if x0 in (40, 110) else 0.25), x0
+    assert rep["collar"]["z_min"] == pytest.approx(81.3, abs=1.0)
+    assert rep["collar"]["z_max"] == pytest.approx(107.6, abs=1.0)
+    assert rep["collar"]["length_mm"] == pytest.approx(294.5, rel=0.03)
+    assert rep["collar"]["max_overshoot_mm"] <= 0.5  # design doc 1.4: roundI must not cut the template
+    assert rep["material_above_cap_mm"] <= 0.8
+    assert rep["volume_mm3"] == pytest.approx(1.5405e6, rel=0.02)
+    mesh_out, export = out.to_mesh()
+    assert mesh_out.is_watertight and export.n_components == 1 and export.dropped_volume_mm3 == 0

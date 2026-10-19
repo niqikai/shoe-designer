@@ -31,7 +31,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.spatial import Delaunay, cKDTree
 from skimage.measure import points_in_poly
 
-from .sdf import Grid, sdf_from_mesh, sdf_to_mesh
+from .sdf import ExportReport, Grid, sample, sdf_from_mesh, sdf_to_mesh
 
 RAY_OFFSET_MM = 0.05
 RAY_CHUNK = 500_000
@@ -53,7 +53,10 @@ class CollarSurface:
     def z_t(self, xy: np.ndarray) -> np.ndarray:
         """z_T at world (x, y) (N, 2): the cap inside the collar, the nearest collar point's z outside."""
         xy = np.asarray(xy, float)
-        z = self._interp(xy)
+        z = np.full(len(xy), np.nan)
+        inside = self.inside(xy)  # the interpolator spans the convex hull, so it must not see outside points
+        if inside.any():
+            z[inside] = self._interp(xy[inside])
         out = np.isnan(z)
         if out.any():
             z[out] = self.rim[self._tree.query(xy[out])[1], 2]
@@ -85,7 +88,7 @@ class Envelope:
     def mask_below(self) -> np.ndarray:
         return self.collar.mask_below(self.grid)
 
-    def to_mesh(self) -> tuple[trimesh.Trimesh, object]:
+    def to_mesh(self) -> tuple[trimesh.Trimesh, ExportReport]:
         return sdf_to_mesh(self.phi, self.grid)
 
 
@@ -202,8 +205,9 @@ def fill_face_holes(mesh: trimesh.Trimesh, inner: np.ndarray) -> np.ndarray:
     return inner | (out & (label != int(np.argmax(area))))
 
 
-def _boundary_loops(mesh: trimesh.Trimesh, face_mask: np.ndarray) -> list[np.ndarray]:
-    """Closed boundary polylines (vertex index arrays) of a face set, by walking boundary edges."""
+def _boundary_loops(mesh: trimesh.Trimesh, face_mask: np.ndarray) -> tuple[list[tuple[np.ndarray, bool]], int]:
+    """Boundary polylines of a face set, by walking boundary edges: ``[(vertex indices, closed)]`` and
+    the number of pinch vertices (more than two boundary edges), where the walk picks an arbitrary branch."""
     f = mesh.faces[face_mask]
     e = np.sort(np.vstack([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]), axis=1)
     uniq, cnt = np.unique(e, axis=0, return_counts=True)
@@ -229,8 +233,8 @@ def _boundary_loops(mesh: trimesh.Trimesh, face_mask: np.ndarray) -> list[np.nda
             prev, cur = cur, nxt[0]
             seen.add(tuple(sorted((prev, cur))))
         if len(loop) >= 8:
-            loops.append(np.array(loop))
-    return loops
+            loops.append((np.array(loop), cur == start[0]))
+    return loops, sum(1 for v in nbrs.values() if len(v) > 2)
 
 
 def _coarse_rim(mesh: trimesh.Trimesh, inner: np.ndarray) -> tuple[np.ndarray, dict]:
@@ -240,10 +244,11 @@ def _coarse_rim(mesh: trimesh.Trimesh, inner: np.ndarray) -> tuple[np.ndarray, d
     within the wall in plan, which is all the crest snap needs.
     """
     filled = fill_face_holes(mesh, inner)
-    loops = _boundary_loops(mesh, filled)
+    all_loops, pinch = _boundary_loops(mesh, filled)
+    loops = [v for v, closed in all_loops if closed]  # an open polyline is a failed walk, not a collar
     if not loops:
-        raise EnvelopeError("the inner skin has no boundary loop (closed or no cavity?); "
-                            "pass manual_rim=<8-12 points on the collar crest>")
+        raise EnvelopeError("the inner skin has no closed boundary loop (closed surface, no cavity, or a pinched "
+                            "boundary); pass manual_rim=<8-12 points on the collar crest>")
 
     def plan_area(v):
         xy = mesh.vertices[v, :2]
@@ -251,19 +256,44 @@ def _coarse_rim(mesh: trimesh.Trimesh, inner: np.ndarray) -> tuple[np.ndarray, d
 
     areas = [plan_area(v) for v in loops]
     best = int(np.argmax(areas))
-    return mesh.vertices[loops[best]], {"boundary_loops": len(loops), "coarse_loop_points": int(len(loops[best]))}
+    info = {"boundary_loops": len(loops), "unclosed_loops": len(all_loops) - len(loops), "pinch_vertices": int(pinch),
+            "coarse_loop_points": int(len(loops[best]))}
+    return mesh.vertices[loops[best]], info
+
+
+def _segments_cross(p: np.ndarray) -> bool:
+    """True when the closed polygon ``p`` (K, 2) is not simple (some pair of non-adjacent edges crosses)."""
+    a, b = p, np.roll(p, -1, axis=0)
+    k = len(p)
+
+    def ccw(x, y, z):
+        return (z[..., 1] - x[..., 1]) * (y[..., 0] - x[..., 0]) > (y[..., 1] - x[..., 1]) * (z[..., 0] - x[..., 0])
+
+    for i in range(k):
+        for j in range(i + 2, k):
+            if i == 0 and j == k - 1:
+                continue
+            if ccw(a[i], a[j], b[j]) != ccw(b[i], a[j], b[j]) and ccw(a[i], b[i], a[j]) != ccw(a[i], b[i], b[j]):
+                return True
+    return False
 
 
 def _manual_rim(points: np.ndarray) -> np.ndarray:
+    """Periodic spline through user points. The given order is kept when it already is a simple polygon,
+    otherwise the points are ordered by polar angle around their centroid."""
     pts = np.asarray(points, float)
     if pts.ndim != 2 or pts.shape[1] != 3 or len(pts) < 4:
         raise EnvelopeError("manual_rim must be an array of at least 4 points, shape (K, 3)")
-    c = pts[:, :2].mean(axis=0)
-    pts = pts[np.argsort(np.arctan2(pts[:, 1] - c[1], pts[:, 0] - c[0]))]
+    if _segments_cross(pts[:, :2]):
+        c = pts[:, :2].mean(axis=0)
+        pts = pts[np.argsort(np.arctan2(pts[:, 1] - c[1], pts[:, 0] - c[0]))]
+    keep = np.linalg.norm(np.diff(np.vstack([pts, pts[:1]])[:, :2], axis=0), axis=1) > 1e-6  # drop repeated points
+    pts = pts[keep]
+    if len(pts) < 4:
+        raise EnvelopeError("manual_rim needs at least 4 distinct points in plan")
     closed = np.vstack([pts, pts[:1]])
     s = _arclength(pts)
-    spline = CubicSpline(s, closed, bc_type="periodic")
-    return spline(np.linspace(0.0, s[-1], 400, endpoint=False))
+    return CubicSpline(s, closed, bc_type="periodic")(np.linspace(0.0, s[-1], 400, endpoint=False))
 
 
 def _height_field(mesh: trimesh.Trimesh, xy: np.ndarray, z_top: float) -> np.ndarray:
@@ -277,10 +307,10 @@ def _height_field(mesh: trimesh.Trimesh, xy: np.ndarray, z_top: float) -> np.nda
     return out
 
 
-def _snap_to_crest(mesh: trimesh.Trimesh, p: np.ndarray, snap_mm: float, step: float) -> tuple[np.ndarray, np.ndarray]:
+def _snap_to_crest(mesh: trimesh.Trimesh, p: np.ndarray, snap_mm: float) -> np.ndarray:
     """Move curve points along their horizontal normal to the crest of H(x, y) within +-snap_mm.
 
-    Returns the moved xy and the signed offsets. A flat crest is centred (middle of the run that is
+    Returns the signed offsets (positive = outward). A flat crest is centred (middle of the run that is
     within 0.15 mm of the maximum, around the argmax).
     """
     n = _outward_normals(p)
@@ -303,7 +333,7 @@ def _snap_to_crest(mesh: trimesh.Trimesh, p: np.ndarray, snap_mm: float, step: f
         hi = hi + step_hi
     s = 0.5 * (offs[lo] + offs[hi])
     s[~np.isfinite(hmax)] = 0.0
-    return p[:, :2] + s[:, None] * n, s
+    return s
 
 
 def extract_collar(
@@ -319,7 +349,7 @@ def extract_collar(
     else:
         coarse, loop_info = _coarse_rim(mesh, inner)
     p = _ccw(_smooth_closed(_resample_closed(coarse, rim_step), 4.0 / rim_step))
-    xy, s = _snap_to_crest(mesh, p, snap_mm, rim_step)
+    s = _snap_to_crest(mesh, p, snap_mm)
     # outliers in the offsets (a ridge elsewhere within reach) are removed before smoothing
     s_med = ndimage.median_filter(s, size=9, mode="wrap")
     xy = p[:, :2] + s_med[:, None] * _outward_normals(p)
@@ -372,7 +402,7 @@ def flood_inner_skin(mesh: trimesh.Trimesh, rim: np.ndarray, vote: np.ndarray, b
     if mesh.area_faces[inner].sum() > 0.75 * mesh.area_faces.sum():
         raise EnvelopeError("the collar cut leaks: the inner region covers most of the surface; "
                             "increase barrier_mm or pass manual_rim=...")
-    return inner | barrier & vote  # barrier faces the vote called inner go with the cavity
+    return inner | (barrier & vote)  # barrier faces the vote called inner go with the cavity
 
 
 # --------------------------------------------------------------------------- cap
@@ -422,7 +452,7 @@ def build_cap(rim: np.ndarray, interior_step: float = 2.0) -> CollarSurface:
 # --------------------------------------------------------------------------- optional closing
 
 
-def close_mesh(mesh: trimesh.Trimesh, radius: float, h: float) -> trimesh.Trimesh:
+def close_mesh(mesh: trimesh.Trimesh, radius: float, h: float) -> tuple[trimesh.Trimesh, ExportReport]:
     """Morphological closing (dilate then erode by ``radius`` mm) of the solid, for perforated templates.
 
     A hole of radius ``a`` through a wall of thickness ``t`` is only closed when
@@ -446,8 +476,7 @@ def close_mesh(mesh: trimesh.Trimesh, radius: float, h: float) -> trimesh.Trimes
     # keep the exact field where the original surface is untouched
     keep = (phi < 0) == closed
     field_[keep] = phi[keep]
-    out, _ = sdf_to_mesh(field_, grid)
-    return out
+    return sdf_to_mesh(field_, grid)
 
 
 # --------------------------------------------------------------------------- public entry point
@@ -472,7 +501,12 @@ def envelope(
     ``mesh``: template in the canonical frame (mm, +x toe, +z up), watertight, with an old cavity
     open through the collar. ``h``: horizontal voxel size; z spacing follows ``Grid.dz_for``.
     ``grid``: reuse a shared grid instead of ``Grid.for_mesh(mesh, h)``. ``band``: half width (mm)
-    in which phi_E is an exact distance; beyond it phi_E holds +-band.
+    in which phi_E is an exact distance; beyond it phi_E holds +-band. A given ``grid`` must cover the
+    template bounds (``EnvelopeError`` otherwise); ``h`` is then only used for the optional closing.
+
+    Assumption: nothing overhangs above the collar (tongue flap, pull tab, folded cuff). The collar
+    is snapped to the crest of the top-down height field H(x, y), so an overhanging part would be
+    taken for the wall crest.
 
     ``closing_radius`` > 0 first closes perforations (hollow/lattice templates, radius about 2-3 times the
     largest hole radius, see :func:`close_mesh`) and runs everything on the closed surface. ``manual_rim`` (K >= 4 points on
@@ -486,7 +520,14 @@ def envelope(
     """
     if not mesh.is_watertight:
         raise EnvelopeError("template mesh is not watertight")
-    src = close_mesh(mesh, closing_radius, h) if closing_radius > 0 else mesh
+    closing = None
+    if closing_radius > 0:
+        src, rep = close_mesh(mesh, closing_radius, h)
+        closing = {"radius_mm": float(closing_radius), "components": rep.n_components, "faces": rep.n_faces,
+                   "volume_mm3": rep.kept_volume_mm3, "dropped_volume_mm3": rep.dropped_volume_mm3,
+                   "added_volume_mm3": float(rep.kept_volume_mm3 - mesh.volume)}
+    else:
+        src = mesh
 
     vote = majority_filter(src, vote_inner_faces(src, n_rays, cone_deg))
     inner0 = largest_face_component(src, vote)
@@ -502,6 +543,9 @@ def envelope(
     surface = trimesh.util.concatenate([skin, collar.cap])
 
     grid = grid or Grid.for_mesh(src, h)
+    hi = np.asarray(grid.origin) + (np.asarray(grid.shape) - 1) * np.asarray(grid.spacing)
+    if (src.bounds[0] < np.asarray(grid.origin)).any() or (src.bounds[1] > hi).any():
+        raise EnvelopeError("grid does not cover the template bounds")
     phi = sdf_from_mesh(surface, grid, band=band)
 
     # overshoot: how far the material rises above z_T within 2 mm of the collar (roundI must not cut it)
@@ -511,6 +555,21 @@ def envelope(
                        float(src.bounds[1, 2]) + 1.0).reshape(len(rim), len(offs))
     overshoot = np.nanmax(hh, axis=1) - rim[:, 2]
     voxel = grid.h * grid.h * grid.dz
+    # material standing above the cap inside the collar (roundI at z_T would cut it)
+    vin = collar.inside(src.vertices[:, :2])
+    above = src.vertices[vin, 2] - collar.z_t(src.vertices[vin, :2])
+    # inner faces must lie inside the envelope; a patch of outer skin wrongly flooded into the inner skin
+    # leaves a hole in phi_E and shows up here (the cavity floor and walls are >= 1 mm deep)
+    cen = src.triangles_center[inner]
+    exposed = sample(phi, grid, cen) > -0.3
+    exposed_frac = float(src.area_faces[inner][exposed].sum() / max(src.area_faces[inner].sum(), 1e-9))
+    warnings = []
+    if exposed_frac > 0.01:
+        warnings.append(f"{exposed_frac:.1%} of the inner skin area is not inside the envelope: a patch of outer skin "
+                        "may have leaked into the inner skin (check barrier_mm / closing_radius)")
+    if diag.get("unclosed_loops") or diag.get("pinch_vertices"):
+        warnings.append(f"collar boundary has {diag.get('pinch_vertices', 0)} pinch vertices and "
+                        f"{diag.get('unclosed_loops', 0)} unclosed loops; verify the collar curve or pass manual_rim")
     report = {
         "faces": int(len(src.faces)),
         "inner_faces": int(inner.sum()),
@@ -531,7 +590,10 @@ def envelope(
         "cap": {"faces": int(len(collar.cap.faces)), "area_mm2": float(collar.cap.area)},
         "grid": {"shape": list(grid.shape), "h": grid.h, "dz": grid.dz},
         "volume_mm3": float((phi < 0).sum() * voxel),
-        "closing_radius_mm": float(closing_radius),
+        "closing": closing,
         "manual_rim": manual_rim is not None,
+        "material_above_cap_mm": float(above.max()) if above.size else 0.0,
+        "inner_area_exposed_frac": exposed_frac,
+        "warnings": warnings,
     }
     return Envelope(grid=grid, phi=phi, collar=collar, inner_faces=inner, source=src, surface=surface, report=report)
