@@ -256,3 +256,16 @@ def test_extend_grid_is_aligned():
     assert g2.h == g.h and g2.dz == g.dz
     hi = np.asarray(g2.origin) + (np.asarray(g2.shape) - 1) * np.asarray(g2.spacing)
     assert (hi >= [60, 41, 70]).all() and (np.asarray(g2.origin) <= [-3.2, -1, -5]).all()
+
+
+def test_config_rejects_malformed_ramp():
+    with pytest.raises(ease.EaseError):
+        EaseConfig.from_dict({"base": {"value": 1}, "normals": {"up": [0.5]}})
+
+
+def test_cavity_volume_is_independent_of_grid_height():
+    last = box_last()
+    collar = rect_collar(30, 70, -12, 12, 28.0)
+    v = [ease.build_cavity(last, place(), collar, grid_for(top), uniform(1.0)).report["cavity_volume_below_collar_mm3"]
+         for top in (60, 90)]
+    assert v[0] == pytest.approx(v[1], rel=1e-6)

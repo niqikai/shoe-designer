@@ -87,6 +87,8 @@ class EaseConfig:
         if "base" not in raw:
             raise EaseError("config needs a [base] value")
         up, down = (tuple(float(v) for v in n.get(k, (0.5, 0.8))) for k in ("up", "down"))
+        if len(up) != 2 or len(down) != 2:
+            raise EaseError("[normals] up/down must be [lo, hi]")
         if not (0.0 <= up[0] < up[1] <= 1.0 and 0.0 <= down[0] < down[1] <= 1.0) or up[0] < 0.5 or down[0] < 0.5:
             raise EaseError("normal ramps need 0.5 <= lo < hi <= 1 so that up and down never overlap")
         return cls(float(raw["base"]["value"]), tuple(zones), float(g.get("fdm_shrink_mm", 0.0)),
@@ -216,6 +218,8 @@ def open_collar(phi_c: np.ndarray, grid: Grid, collar, t_fill: float = T_FILL_MM
     out = phi_c.copy()
     if opened.any():
         def footprint_sdf(foot):
+            if foot.all():  # no background voxel for the EDT: a constant field
+                return np.full(foot.shape, -0.5 * grid.h * foot.shape[0], np.float32)
             d = np.where(foot, -(ndimage.distance_transform_edt(foot, sampling=grid.h) - 0.5 * grid.h),
                          ndimage.distance_transform_edt(~foot, sampling=grid.h) - 0.5 * grid.h)
             return d.astype(np.float32)
@@ -229,7 +233,9 @@ def open_collar(phi_c: np.ndarray, grid: Grid, collar, t_fill: float = T_FILL_MM
     through = opened & through
     rep = CollarReport(
         ring_columns=int(ring.sum()), extruded_columns=int(opened.sum()),
-        film_columns=int((opened & ~through & (gap > grid.dz)).sum()), through_columns=int(through.sum()),  # film: gap > 1 voxel = a real sliver, not the voxel step
+        # film: gap > 1 voxel = a real sliver, not just the voxel step
+        film_columns=int((opened & ~through & (gap > grid.dz)).sum()),
+        through_columns=int(through.sum()),
         z_top_min=float(zs[kc[opened]].min()) if opened.any() else None,
         max_gap_extruded=float(gap[opened].max()) if opened.any() else 0.0,
         min_gap_kept=float(gap[kept].min()) if kept.any() else None,
@@ -348,6 +354,8 @@ def build_cavity(
     # phi_L is +-(band+2) beyond the band; e is at most e_max there, so the sign survives.
     phi_c = (phi_l - e).astype(np.float32)
     phi_open, crep = open_collar(phi_c, grid, collar, t_fill, reach)
+    zs = grid.origin[2] + np.arange(grid.shape[2]) * grid.dz
+    zt = collar.z_t(_column_xy(grid)).reshape(grid.shape[:2])
 
     inside_e = e[tuple(ijk[np.abs(phi_l[tuple(ijk.T)]) < cfg.e_max + 1.0].T)]
     report = {
@@ -359,6 +367,8 @@ def build_cavity(
         "zones": {z.name: {"u": list(z.u), "faces": list(z.faces), "value": z.value} for z in cfg.zones} | {
             "base": {"value": cfg.base}},
         "collar": crep.to_dict(),
-        "cavity_volume_mm3": float((phi_open < 0).sum() * grid.h * grid.h * grid.dz),
+        # below z_T only: the opened chimneys run to the top of the grid, so the full count would depend on grid height
+        "cavity_volume_below_collar_mm3": float(
+            ((phi_open < 0) & (zs[None, None, :] < zt[:, :, None])).sum() * grid.h * grid.h * grid.dz),
     }
     return Cavity(phi_open, grid, ease, e, phi_l, crep, report)
