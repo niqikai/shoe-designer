@@ -169,10 +169,11 @@ class CollarReport:
     z_top_min: float  # lowest height from which a column was opened upward
     max_gap_extruded: float  # largest (z_T - z_c) among extruded columns, < t_fill by construction
     min_gap_kept: float | None  # smallest gap among ring columns that keep a roof (>= t_fill)
+    kept_gap_hist: dict = field(default_factory=dict)  # roof thickness bins (mm) of the kept ring columns
 
     def to_dict(self) -> dict:
         return {k: (None if v is None else (round(v, 3) if isinstance(v, float) else v))
-                for k, v in self.__dict__.items()}
+                for k, v in self.__dict__.items()}  # nan stays nan
 
 
 def _column_xy(grid: Grid) -> np.ndarray:
@@ -227,6 +228,8 @@ def open_collar(phi_c: np.ndarray, grid: Grid, collar, t_fill: float = T_FILL_MM
         z_top_min=float(zs[kc[opened]].min()) if opened.any() else float("nan"),
         max_gap_extruded=float(gap[opened].max()) if opened.any() else 0.0,
         min_gap_kept=float(gap[kept].min()) if kept.any() else None,
+        kept_gap_hist={f"{a}-{b}": int(((gap[kept] >= a) & (gap[kept] < b)).sum())
+                       for a, b in ((t_fill, 2.0), (2.0, 3.0), (3.0, 5.0), (5.0, 10.0), (10.0, 1e9))},
     )
     return out, rep
 
