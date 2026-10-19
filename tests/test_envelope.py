@@ -6,8 +6,8 @@ from shoe_designer import envelope as env
 from shoe_designer.envelope import EnvelopeError
 from shoe_designer.sdf import Grid, sample, sdf_to_mesh
 
-A, B, WALL, FLOOR = 60.0, 28.0, 3.0, 4.0
-Z_SIDE, Z_RISE = 30.0, 14.0  # collar height: 30 at the sides, 44 at the heel and the toe (saddle)
+A, B, WALL, FLOOR = 40.0, 20.0, 3.0, 4.0
+Z_SIDE, Z_RISE = 22.0, 10.0  # collar height: 22 at the sides, 32 at the heel and the toe (saddle)
 
 
 def zrim(x, y):
@@ -15,7 +15,7 @@ def zrim(x, y):
     return Z_SIDE + Z_RISE * np.cos(t) ** 2
 
 
-def saddle_shoe(holes=False, h=0.7):
+def saddle_shoe(holes=False, h=1.0):
     """Elliptical hollow 'shoe' whose collar is a saddle: high at both ends, low at the sides."""
     grid = Grid.from_bounds([-A - 4, -B - 4, -3], [A + 4, B + 4, Z_SIDE + Z_RISE + 4], h, 43.0)
     ax = [grid.origin[i] + np.arange(n) * s for i, (n, s) in enumerate(zip(grid.shape, grid.spacing))]
@@ -25,8 +25,8 @@ def saddle_shoe(holes=False, h=0.7):
     cavity = np.maximum(ell(A - WALL, B - WALL), FLOOR - z)
     phi = np.maximum(body, -cavity)
     if holes:  # perforations through both side walls
-        for hx in (-30.0, 0.0, 30.0):
-            hole = np.maximum(np.sqrt((x - hx) ** 2 + (z - 15.0) ** 2) - 3.0, -1e3 + 0 * y)
+        for hx in (-20.0, 0.0, 20.0):
+            hole = np.maximum(np.sqrt((x - hx) ** 2 + (z - 12.0) ** 2) - 3.0, -1e3 + 0 * y)
             phi = np.maximum(phi, -hole)
     mesh, _ = sdf_to_mesh(phi.astype(np.float32), grid)
     return mesh
@@ -48,12 +48,12 @@ def phi_at(r, pts):
 
 def test_old_cavity_is_filled_including_saddle_ends(result):
     # centre of the cavity, and cavity points at the heel/toe that are above the lowest collar point
-    pts = [[0, 0, 12], [0, 0, 25], [-50, 0, 36], [50, 0, 38], [20, 10, 20]]
-    for x, y in [(-45, 5), (45, -5), (-30, 0)]:  # just under the seal, above the lowest collar point
+    pts = [[0, 0, 10], [0, 0, 18], [-34, 0, 26], [34, 0, 28], [14, 6, 14]]
+    for x, y in [(-30, 4), (30, -4), (-22, 0)]:  # just under the seal, above the lowest collar point
         pts.append([x, y, float(result.collar.z_t(np.array([[x, y]]))[0]) - 2.0])
     assert (phi_at(result, pts) < 0).all()
-    assert pts[-2][2] > Z_SIDE + 3  # the seal really is higher than the side collar there
-    assert (phi_at(result, [[0, 0, 60], [55, 0, 52], [0, 0, -6], [0, 45, 10]]) > 0).all()
+    assert pts[-2][2] > Z_SIDE + 2  # the seal really is higher than the side collar there
+    assert (phi_at(result, [[0, 0, 45], [38, 0, 40], [0, 0, -6], [0, 35, 10]]) > 0).all()
 
 
 def test_collar_height_matches_template(result):
@@ -83,9 +83,9 @@ def test_mask_below_follows_saddle(result):
         i = np.round(g.to_index(np.array([[x, y, z]]))[0]).astype(int)
         return bool(m[tuple(i)])
 
-    assert at(0, 0, 10) and not at(0, 0, 44)
-    assert at(0, 20, 25) and not at(0, 20, 35)  # low side
-    assert at(-52, 0, 40) and not at(-52, 0, 48)  # high heel
+    assert at(0, 0, 10) and not at(0, 0, 33)
+    assert at(0, 14, 15) and not at(0, 14, 28)  # low side
+    assert at(-36, 0, 28) and not at(-36, 0, 34)  # high heel
 
 
 def test_envelope_exports_watertight_solid(result):
@@ -113,7 +113,7 @@ def test_manual_rim_fallback(shoe, result):
     out = env.envelope(shoe, h=1.0, manual_rim=pts)
     assert out.report["manual_rim"]
     assert np.abs(out.collar.rim[:, 2] - zrim(out.collar.rim[:, 0], out.collar.rim[:, 1])).max() < 1.0
-    assert (phi_at(out, [[0, 0, 25], [-50, 0, 36]]) < 0).all()
+    assert (phi_at(out, [[0, 0, 15], [-34, 0, 26]]) < 0).all()
 
 
 def test_closing_fills_perforated_walls():
@@ -122,7 +122,7 @@ def test_closing_fills_perforated_walls():
     # and the erosion removes it again unless that is >= 2r
     out = env.envelope(shoe, h=1.0, closing_radius=8.0)
     assert out.report["closing_radius_mm"] == 8.0
-    assert (phi_at(out, [[0, 0, 20], [-30, 0, 15], [30, 5, 25]]) < 0).all()
+    assert (phi_at(out, [[0, 0, 15], [-20, 0, 12], [20, 4, 18]]) < 0).all()
     mesh, _ = out.to_mesh()
     assert mesh.is_watertight
 

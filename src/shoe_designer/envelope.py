@@ -35,7 +35,6 @@ from .sdf import Grid, sdf_from_mesh, sdf_to_mesh
 
 RAY_OFFSET_MM = 0.05
 RAY_CHUNK = 500_000
-ANGLE_BINS = 720
 
 
 class EnvelopeError(Exception):
@@ -187,32 +186,72 @@ def _outward_normals(p: np.ndarray) -> np.ndarray:
     return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
 
 
-def _coarse_rim(mesh: trimesh.Trimesh, inner: np.ndarray) -> np.ndarray:
-    """Upper edge of the inner patch: its highest vertex in each angular bin around the patch centroid.
+def fill_face_holes(mesh: trimesh.Trimesh, inner: np.ndarray) -> np.ndarray:
+    """Relabel every outer face region except the largest one as inner.
 
-    The boundary between inner and outer faces is not used directly: where the vote is unreliable it
-    is sparse and leaves gaps. The highest inner vertex per angle lies at or just below the crest of
-    the wall; the crest snap puts it exactly on the crest. Binning by angle turns a jagged or
-    fragmented upper edge into one closed polyline; it needs the collar to be star-shaped around
-    the patch centroid, which holds for shoe collars.
+    The cavity floor (and any vote flicker inside the cavity) is enclosed by the inner patch; only the
+    outside skin, the largest region of non-inner faces, stays outer.
     """
-    verts = np.unique(mesh.faces[inner])
-    if len(verts) < 8:
-        raise EnvelopeError("no inner skin found (is the mesh hollow with an opening?); "
+    out = ~inner
+    adj = mesh.face_adjacency
+    keep = out[adj[:, 0]] & out[adj[:, 1]]
+    n = len(mesh.faces)
+    g = sparse.coo_matrix((np.ones(keep.sum()), (adj[keep, 0], adj[keep, 1])), shape=(n, n))
+    _, label = connected_components(g, directed=False)
+    area = np.bincount(label[out], weights=mesh.area_faces[out], minlength=label.max() + 1)
+    return inner | (out & (label != int(np.argmax(area))))
+
+
+def _boundary_loops(mesh: trimesh.Trimesh, face_mask: np.ndarray) -> list[np.ndarray]:
+    """Closed boundary polylines (vertex index arrays) of a face set, by walking boundary edges."""
+    f = mesh.faces[face_mask]
+    e = np.sort(np.vstack([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]), axis=1)
+    uniq, cnt = np.unique(e, axis=0, return_counts=True)
+    b = uniq[cnt == 1]
+    nbrs: dict[int, list[int]] = {}
+    for a_, c_ in b:
+        nbrs.setdefault(int(a_), []).append(int(c_))
+        nbrs.setdefault(int(c_), []).append(int(a_))
+    seen: set[tuple[int, int]] = set()
+    loops = []
+    for a_, c_ in b:
+        start = (int(a_), int(c_))
+        if tuple(sorted(start)) in seen:
+            continue
+        loop = [start[0]]
+        prev, cur = start
+        seen.add(tuple(sorted(start)))
+        while cur != start[0]:
+            loop.append(cur)
+            nxt = [v for v in nbrs[cur] if v != prev and tuple(sorted((cur, v))) not in seen]
+            if not nxt:  # dead end or all edges used: close the loop here
+                break
+            prev, cur = cur, nxt[0]
+            seen.add(tuple(sorted((prev, cur))))
+        if len(loop) >= 8:
+            loops.append(np.array(loop))
+    return loops
+
+
+def _coarse_rim(mesh: trimesh.Trimesh, inner: np.ndarray) -> tuple[np.ndarray, dict]:
+    """Coarse collar: the outer boundary loop of the inner patch (holes filled), the one enclosing the most plan area.
+
+    Where the ray vote is unreliable the loop lies up to 10-20 mm below the wall crest but still
+    within the wall in plan, which is all the crest snap needs.
+    """
+    filled = fill_face_holes(mesh, inner)
+    loops = _boundary_loops(mesh, filled)
+    if not loops:
+        raise EnvelopeError("the inner skin has no boundary loop (closed or no cavity?); "
                             "pass manual_rim=<8-12 points on the collar crest>")
-    pts = mesh.vertices[verts]
-    c = pts[:, :2].mean(axis=0)
-    ang = np.arctan2(pts[:, 1] - c[1], pts[:, 0] - c[0])
-    bin_ = ((ang + np.pi) / (2 * np.pi) * ANGLE_BINS).astype(int) % ANGLE_BINS
-    order = np.lexsort((pts[:, 2], bin_))  # ascending z within a bin; last of each bin is the highest
-    last = np.ones(len(order), bool)
-    last[:-1] = bin_[order][1:] != bin_[order][:-1]
-    sel = pts[order[last]]
-    sb = bin_[order[last]]
-    if len(sel) < ANGLE_BINS // 2:
-        raise EnvelopeError(f"inner skin covers only {len(sel)} of {ANGLE_BINS} angular bins around its centroid; "
-                            "the collar is not star-shaped or the split is fragmented; pass manual_rim=...")
-    return np.stack([np.interp(np.arange(ANGLE_BINS), sb, sel[:, i], period=ANGLE_BINS) for i in range(3)], axis=1)
+
+    def plan_area(v):
+        xy = mesh.vertices[v, :2]
+        return abs(0.5 * np.sum(xy[:, 0] * np.roll(xy[:, 1], -1) - np.roll(xy[:, 0], -1) * xy[:, 1]))
+
+    areas = [plan_area(v) for v in loops]
+    best = int(np.argmax(areas))
+    return mesh.vertices[loops[best]], {"boundary_loops": len(loops), "coarse_loop_points": int(len(loops[best]))}
 
 
 def _manual_rim(points: np.ndarray) -> np.ndarray:
@@ -275,7 +314,10 @@ def extract_collar(
     manual_rim: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Collar curve (N, 3) snapped to the crest of the wall, plus diagnostics."""
-    coarse = _manual_rim(manual_rim) if manual_rim is not None else _coarse_rim(mesh, inner)
+    if manual_rim is not None:
+        coarse, loop_info = _manual_rim(manual_rim), {}
+    else:
+        coarse, loop_info = _coarse_rim(mesh, inner)
     p = _ccw(_smooth_closed(_resample_closed(coarse, rim_step), 4.0 / rim_step))
     xy, s = _snap_to_crest(mesh, p, snap_mm, rim_step)
     # outliers in the offsets (a ridge elsewhere within reach) are removed before smoothing
@@ -293,7 +335,7 @@ def extract_collar(
     z = ndimage.median_filter(z, size=5, mode="wrap")
     rim = np.column_stack([q[:, :2], z])
     return rim, {"snap_offset_mm": {"mean": float(np.mean(s_med)), "p95_abs": float(np.percentile(np.abs(s_med), 95)),
-                                    "max_abs": float(np.abs(s_med).max())}}
+                                    "max_abs": float(np.abs(s_med).max())}, **loop_info}
 
 
 def flood_inner_skin(mesh: trimesh.Trimesh, rim: np.ndarray, vote: np.ndarray, barrier_mm: float) -> np.ndarray:
@@ -305,9 +347,18 @@ def flood_inner_skin(mesh: trimesh.Trimesh, rim: np.ndarray, vote: np.ndarray, b
     unreliable band under the collar, which a ray vote cannot classify (the rays escape through the
     opening). Raises when the cut leaks, i.e. the 'inner' region swallows most of the surface.
     """
+    # Faces are tested as triangles, not by their vertices: the wall top is often one strip of long thin
+    # triangles whose vertices lie far from the collar point that crosses them.
     dense = _resample_closed(rim, 0.5 * barrier_mm)
-    near_vertex = cKDTree(dense).query(mesh.vertices, distance_upper_bound=barrier_mm)[0] <= barrier_mm
-    barrier = near_vertex[mesh.faces].any(axis=1)
+    tree = mesh.triangles_tree
+    tris = np.asarray(mesh.triangles)
+    barrier = np.zeros(len(mesh.faces), bool)
+    for pt in dense:
+        cand = np.fromiter(tree.intersection(np.r_[pt - barrier_mm, pt + barrier_mm]), dtype=np.int64)
+        if len(cand) == 0:
+            continue
+        cp = trimesh.triangles.closest_point(tris[cand], np.tile(pt, (len(cand), 1)))
+        barrier[cand[np.linalg.norm(cp - pt, axis=1) <= barrier_mm]] = True
     adj = mesh.face_adjacency
     ok = ~barrier[adj[:, 0]] & ~barrier[adj[:, 1]]
     n = len(mesh.faces)
