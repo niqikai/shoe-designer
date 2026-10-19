@@ -1,0 +1,21 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.13
+      - run: uv sync --python 3.13
+      # No embreex and no template meshes (not in git): tests needing them skip themselves.
+      - run: uv run pytest -q
