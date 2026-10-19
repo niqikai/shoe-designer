@@ -349,7 +349,7 @@ def _simplex(u0: np.ndarray, step: float = 0.08) -> np.ndarray:
 
 def _flags(res: PoseResult, lo, hi, s_min, max_lift) -> dict:
     p = res.pose.as_array()
-    tol = 0.02 * (hi - lo)
+    tol = 0.005 * (hi - lo)
     at_hi = p >= hi - tol
     at_lo = p <= lo + tol
     best = res.cost
