@@ -157,7 +157,7 @@ def closure(
                       heel_zone_x_mm=None, heel_loss_volume_mm3=0.0, heel_loss_depth_mm=0.0,
                       shell_clipped=False, ridge_hit_grid_top=False)
         if phi_e is not None:
-            report.update(shell_columns_outside_envelope=0, shell_protrusion_max_mm=0.0, shell_protrusion_by_x=[],
+            report.update(shell_columns_outside_envelope=0, shell_protrusion_max_mm=0.0, shell_protrusion_at_xy_mm=None, shell_protrusion_by_x=[],
                           shell_out_of_envelope_max_mm=0.0, b_req_max_mm=0.0, b_req_by_x=[])
         return ClosureResult(phi_a, phi_c.copy(), a[:0, :0, :0], (slice(0, 0),) * 3, grid, alpha, report)
 
@@ -218,6 +218,8 @@ def closure(
         stick = np.where(ok, np.maximum(top_s - top_e, 0) * dz, 0.0)
         report["shell_columns_outside_envelope"] = int(((top_s >= 0) & (top_e < 0)).sum())
         report["shell_protrusion_max_mm"] = round(float(stick.max()), 2)
+        ix, iy = np.unravel_index(int(np.argmax(stick)), stick.shape)
+        report["shell_protrusion_at_xy_mm"] = [round(grid.origin[0] + ix * h, 1), round(grid.origin[1] + iy * h, 1)]
         report["shell_protrusion_by_x"] = _by_x(stick, grid.origin[0], h)
         report["shell_out_of_envelope_max_mm"] = round(float(max(phi_e[box][shell].max(), 0.0)) if shell.any() else 0.0, 2)
         b_req = 2.0 * stick * tan_a
