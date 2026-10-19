@@ -70,7 +70,8 @@ class SkinSamples:
     need: np.ndarray  # (N,) max(0, wall - phi_c), raw fit gap; 0 outside M_below and on the bed
 
 
-def skin_samples(phi_e: np.ndarray, phi_c: np.ndarray, grid: Grid, collar, wall: float = WALL_MM) -> SkinSamples:
+def skin_samples(phi_e: np.ndarray, phi_c: np.ndarray, grid: Grid, collar, wall: float = WALL_MM,
+                 bed_fix: bool = True) -> SkinSamples:
     """Raw fit gap on the outer skin (design §2: ``need_fit(q) = max(0, t - phi_C(q))``, q in M_below)."""
     padded = np.pad(phi_e, 1, mode="constant", constant_values=float(np.abs(phi_e).max()))
     verts, faces, _, _ = measure.marching_cubes(padded, level=0.0, spacing=grid.spacing)
@@ -82,7 +83,7 @@ def skin_samples(phi_e: np.ndarray, phi_c: np.ndarray, grid: Grid, collar, wall:
     if probe.mean() < sample(phi_e, grid, verts - 0.5 * normals).mean():  # marching cubes winding: make them outward
         normals = -normals
     below = verts[:, 2] < collar.z_t(verts[:, :2]) - CAP_MARGIN_MM  # the cap closes the old cavity and lies inside phi_C
-    bed = (verts[:, 2] < BED_Z_MM + BED_FIX_Z_MM) & (normals[:, 2] < BED_FIX_NZ)
+    bed = (verts[:, 2] < BED_Z_MM + BED_FIX_Z_MM) & (normals[:, 2] < BED_FIX_NZ) & bed_fix  # no bed, nothing to keep flat
     pc = sample(phi_c, grid, verts)
     need = np.where(below & ~bed, np.maximum(0.0, wall - pc), 0.0)
     return SkinSamples(verts, normals, area, below, bed, pc, need)
@@ -279,8 +280,8 @@ def _push_by_x(pooled: SkinSamples, p: np.ndarray, step: float = 20.0) -> list[d
 def compose(
     phi_e: np.ndarray,
     phi_c: np.ndarray,
-    phi_a: np.ndarray,
-    phi_c_star: np.ndarray,
+    phi_a: np.ndarray | None,
+    phi_c_star: np.ndarray | None,
     grid: Grid,
     collar,
     *,
@@ -291,6 +292,7 @@ def compose(
     sole_min: float | None = SOLE_MIN_MM,
     bed_z: float = BED_Z_MM,
     band_mm: float = PHI_E_BAND_MM,
+    bed_cut: bool = True,
     reach: float = 10.0,
     push: bool = True,
     keep_p: bool = False,
@@ -298,18 +300,22 @@ def compose(
     """phi_shoe from phi_E (S2), phi_C (S4), phi_A / phi_C* (S5), all on ``grid`` (see the module docstring).
 
     ``band_mm``: half width in which ``phi_e`` is exact (``envelope(band=...)``); a push needs max P + 1.5 <= band.
+    ``phi_a`` / ``phi_c_star`` None = closure off (no closure shell, cavity is ``phi_c``): processes that need no
+    support (SLS/MJF). ``bed_cut=False``: no cut at ``bed_z`` and no bed-contact surface held flat.
     ``push=False`` skips level 2 (only hard fill), used to measure what the push buys.
     ``sole_min``: the envelope below ``bed_z + sole_min`` stays solid under the cavity (None = off); the report
     gives the volume it had to add, which is 0 when the pose already honours the sole thickness.
     """
+    if (phi_a is None) != (phi_c_star is None):
+        raise SDFError("phi_a and phi_c_star are given together (closure on) or both None (closure off)")
     for name, f in (("phi_e", phi_e), ("phi_c", phi_c), ("phi_a", phi_a), ("phi_c_star", phi_c_star)):
-        if f.shape != tuple(grid.shape):
+        if f is not None and f.shape != tuple(grid.shape):
             raise SDFError(f"{name} shape {f.shape} does not match grid {grid.shape}")
     voxel = grid.h * grid.h * grid.dz
     z = (grid.origin[2] + np.arange(grid.shape[2]) * grid.dz).astype(np.float32)
     below = collar.mask_below(grid)
 
-    skin = skin_samples(phi_e, phi_c, grid, collar, wall)
+    skin = skin_samples(phi_e, phi_c, grid, collar, wall, bed_fix=bed_cut)
     gate = gate_metrics(skin, wall, t_fill)
     pooled = pool(skin)
     p = smooth_push(pooled, sigma) if push else np.zeros(len(pooled.pts))
@@ -324,9 +330,8 @@ def compose(
     fill[~below] = np.float32(band_mm + 8.0)
     phi_2 = np.minimum(phi_1, fill)
     # closure shell
-    shell = phi_a - np.float32(wall)
-    phi_3 = np.minimum(phi_2, shell)
-    phi = np.maximum(phi_3, -phi_c_star)
+    phi_3 = phi_2 if phi_a is None else np.minimum(phi_2, phi_a - np.float32(wall))
+    phi = np.maximum(phi_3, -(phi_c if phi_c_star is None else phi_c_star))
     del phi_3
 
     solid_before = int((phi < 0).sum())
@@ -347,7 +352,8 @@ def compose(
     phi.reshape(-1, grid.shape[2])[cols] = sub
     cut_vox = before - int((sub < 0).sum())
     # print bed
-    np.maximum(phi, (bed_z - z)[None, None, :], out=phi)
+    if bed_cut:
+        np.maximum(phi, (bed_z - z)[None, None, :], out=phi)
     # Nodes exactly on the cut plane (value 0) make marching cubes emit degenerate, non-manifold faces: nudge them out.
     phi[phi == 0] = np.float32(1e-3)
 
@@ -364,7 +370,7 @@ def compose(
     fill_in = (fill < 0) & ~in1
     report = {
         "params": {"wall": wall, "t_fill": t_fill, "sigma": sigma, "round_r": round_r, "sole_min": sole_min,
-                   "bed_z": bed_z, "alpha_b_deg": round(math.degrees(math.atan2(grid.h, grid.dz)), 3)},
+                   "bed_z": bed_z, "closure": phi_a is not None, "bed_cut": bed_cut, "alpha_b_deg": round(math.degrees(math.atan2(grid.h, grid.dz)), 3)},
         "volume_mm3": {
             "envelope": round(float((phi_e < 0).sum() * voxel)),
             "pushed": round(float(((phi_1 < 0) & (phi_e >= 0)).sum() * voxel)),
@@ -395,7 +401,7 @@ def compose(
 LABELS = ("cavity", "skin", "hard_fill", "closure_shell", "collar", "bed", "mixed")
 
 
-def label_faces(mesh: trimesh.Trimesh, comp: Composed, phi_c: np.ndarray, phi_a: np.ndarray, phi_c_star: np.ndarray,
+def label_faces(mesh: trimesh.Trimesh, comp: Composed, phi_c: np.ndarray, phi_a: np.ndarray | None, phi_c_star: np.ndarray | None,
                 collar, *, wall: float = WALL_MM, t_fill: float = T_FILL_MM, mix_vox: float = 0.5) -> np.ndarray:
     """Source of each exported face (design §5.1): sample the contributing fields at the face centroid and pick
     the one with the smallest |value|; 'mixed' when a second one is within ``mix_vox`` voxels as well. Object array of str."""
@@ -403,12 +409,12 @@ def label_faces(mesh: trimesh.Trimesh, comp: Composed, phi_c: np.ndarray, phi_a:
     c = mesh.triangles_center
     zt = collar.z_t(c[:, :2])
     vals = np.stack([
-        -sample(phi_c_star, g, c),
+        -sample(phi_c if phi_c_star is None else phi_c_star, g, c),
         sample(comp.phi_1, g, c),
         np.where(c[:, 2] < zt, sample(phi_c, g, c) - t_fill, 1e3),
-        sample(phi_a, g, c) - wall,
+        np.full(len(c), 1e3) if phi_a is None else sample(phi_a, g, c) - wall,
         np.abs(c[:, 2] - zt),
-        c[:, 2] - comp.report["params"]["bed_z"],
+        c[:, 2] - comp.report["params"]["bed_z"] if comp.report["params"]["bed_cut"] else np.full(len(c), 1e3),
     ], axis=1)
     a = np.abs(vals)
     order = np.argsort(a, axis=1)
@@ -418,6 +424,7 @@ def label_faces(mesh: trimesh.Trimesh, comp: Composed, phi_c: np.ndarray, phi_a:
     lab = names[first]
     lab[second_close] = "mixed"
     bed = (c[:, 2] - comp.report["params"]["bed_z"] < 0.5 * g.dz) & (mesh.face_normals[:, 2] < BED_FIX_NZ)
+    bed &= comp.report["params"]["bed_cut"]
     lab[bed] = "bed"  # the cut plane coincides with the skin's own sole there; the plane wins (design §5.1)
     return lab
 

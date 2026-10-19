@@ -18,6 +18,13 @@ from shoe_designer.compose import (
     smooth_push,
 )
 from shoe_designer.envelope import build_cap
+from shoe_designer.process import (
+    ProcessConfig,
+    build_volume,
+    channel_width,
+    mesh_inner_shells,
+    sealed_cavities,
+)
 from shoe_designer.sdf import Grid, sdf_from_mesh
 from shoe_designer.support_closure import closure
 
@@ -222,3 +229,113 @@ def test_push_covers_need_everywhere():
         assert (p >= pooled.need - 1e-9).all()  # strict P >= need, the point of the max filter
         assert p[pooled.bed].max() == 0
         assert p[~pooled.below].max() == 0
+
+
+# --------------------------------------------------------------------------- process: closure off, bed cut off
+
+
+def test_closure_off_has_no_shell_and_keeps_cavity():
+    grid, phi_e, phi_c, cl, collar = scene()
+    on = compose(phi_e, phi_c, cl.phi_a, cl.phi_c_star, grid, collar)
+    off = compose(phi_e, phi_c, None, None, grid, collar)
+    assert off.report["volume_mm3"]["closure_shell"] == 0
+    assert on.report["volume_mm3"]["shoe"] < off.report["volume_mm3"]["shoe"] - 1000  # the closure carves the ridge out
+    assert off.report["params"]["closure"] is False
+    mesh, _ = export(off)
+    lab = label_faces(mesh, off, phi_c, None, None, collar)
+    assert "closure_shell" not in set(lab)
+    # the cavity ceiling is flat again: closure-off keeps the exact phi_C (a big downward-facing area)
+    flat = (mesh.face_normals[:, 2] < -0.99) & (lab == "cavity")
+    assert mesh.area_faces[flat].sum() > 500
+    with pytest.raises(Exception):
+        compose(phi_e, phi_c, cl.phi_a, None, grid, collar)  # closure fields come as a pair
+
+
+def test_bed_cut_off_does_not_cut_the_underside():
+    def run(cut):
+        grid = Grid.from_bounds((-6, -40, -8), (106, 40, 80), 1.0)
+        phi_e = np.clip(box_phi(grid, (0, -30, -3), (100, 30, Z_COLLAR)), -8, 8)  # sole reaches 3 mm below z = 0
+        phi_c = np.minimum(box_phi(grid, (10, -12, 8), (90, 12, 30)), box_phi(grid, (30, -12, 15), (70, 12, 120)))
+        collar = rect_collar(30, 70, -12, 12, Z_COLLAR)
+        comp = compose(phi_e, phi_c, None, None, grid, collar, bed_cut=cut)
+        return comp, export(comp)[0]
+
+    comp_on, m_on = run(True)
+    comp_off, m_off = run(False)
+    assert m_on.bounds[0, 2] == pytest.approx(0.0, abs=0.05)
+    assert m_off.bounds[0, 2] == pytest.approx(-3.0, abs=0.1)
+    assert m_off.is_watertight and m_off.body_count == 1
+    lab = label_faces(m_off, comp_off, np.zeros(comp_off.phi.shape, np.float32) + 5, None, None, rect_collar(30, 70, -12, 12, Z_COLLAR))
+    assert "bed" not in set(lab)
+
+
+# --------------------------------------------------------------------------- process: powder and build volume
+
+
+def test_sealed_cavity_check_counts_and_measures():
+    grid = Grid.from_bounds((-5, -20, -5), (60, 20, 40), 1.0)
+    solid = box_phi(grid, (0, -15, 0), (50, 15, 30))
+    pocket = box_phi(grid, (20, -4, 10), (30, 4, 18))
+    phi = np.maximum(solid, -pocket)
+    r = sealed_cavities(phi, grid)
+    assert r["count"] == 1
+    assert r["volume_mm3"] == pytest.approx(10 * 8 * 8 * 1.0, rel=0.35)
+    assert sealed_cavities(solid, grid)["count"] == 0
+    # open it with a 6 mm tunnel along y: no longer sealed
+    tunnel = box_phi(grid, (22, -20, 12), (28, 0, 16))
+    assert sealed_cavities(np.maximum(phi, -tunnel), grid)["count"] == 0
+
+
+@pytest.mark.parametrize("width", [4.0, 8.0])
+def test_channel_width_finds_the_bottleneck(width):
+    grid = Grid.from_bounds((-5, -30, -5), (80, 30, 50), 1.0)
+    solid = box_phi(grid, (0, -25, 0), (70, 25, 40))
+    room = box_phi(grid, (10, -15, 5), (50, 15, 35))
+    hole = box_phi(grid, (50, -width / 2, 15), (75, width / 2, 15 + width))  # tunnel through the +x wall
+    phi = np.maximum(solid, -np.minimum(room, hole))
+    core = (room < 0)
+    r = channel_width(phi, grid, core, min_channel=5.0)
+    assert r["width_mm"] == pytest.approx(width, abs=1.8)
+    assert r["ok"] == (width >= 5.0)
+
+
+def test_mesh_inner_shells():
+    outer = trimesh.creation.box(extents=(30, 30, 30))
+    assert mesh_inner_shells(outer)["count"] == 0
+    inner = trimesh.creation.box(extents=(10, 10, 10))
+    inner.invert()
+    r = mesh_inner_shells(trimesh.util.concatenate([outer, inner]))
+    assert r["count"] == 1 and r["volume_mm3"] == pytest.approx(1000.0)
+
+
+def test_build_volume_against_machines():
+    rng = np.random.default_rng(0)
+    # a 290 x 100 slab turned 45 degrees about z: aligned bbox ~275 x 275, rotated envelope 290 x 100
+    pts = np.array([[x, y, z] for x in (0, 290) for y in (0, 100) for z in (0, 110)], float)
+    c, s = math.cos(math.radians(45)), math.sin(math.radians(45))
+    pts[:, :2] = pts[:, :2] @ np.array([[c, s], [-s, c]])
+    machines = {"big": (340.0, 340.0, 600.0), "mid": (320.0, 320.0, 450.0), "small": (220.0, 220.0, 320.0), "low": (340.0, 340.0, 100.0)}
+    r = build_volume(pts, machines, gap_mm=5.0, min_xy_mm=295.0)
+    assert r["bbox_mm"][0] == pytest.approx(275.8, abs=0.2)
+    ma = r["rotated"]["min_area"]
+    assert sorted([ma["x_mm"], ma["y_mm"]]) == pytest.approx([100.0, 290.0], abs=1.5)  # the tight rectangle
+    assert r["rotated"]["min_longer_side"]["x_mm"] == pytest.approx(275.8, abs=0.5)  # as given (45 deg) is the smallest square-ish fit
+    m = r["machines"]
+    assert m["big"]["aligned"] and m["mid"]["aligned"] and m["mid"]["rotated"]
+    assert not m["small"]["aligned"] and not m["small"]["rotated"] and not m["small"]["meets_min_xy"]
+    assert m["big"]["meets_min_xy"] and not m["low"]["aligned"]  # 110 + 5 mm tall does not fit in 100 mm
+    # clearance counts: 290 + 5 > 292
+    r2 = build_volume(np.array([[x, y, z] for x in (0, 290) for y in (0, 50) for z in (0, 10)], float), {"m": (292.0, 292.0, 100.0)}, 5.0)
+    assert not r2["machines"]["m"]["aligned"]
+
+
+def test_process_config_files():
+    sls = ProcessConfig.from_toml("process_sls_tpu.toml")
+    assert (sls.wall, sls.wall_min, sls.sole_min) == (2.0, 1.2, 6.0)
+    assert sls.closure is False and sls.bed_cut is False and sls.shrink_mm == 0.0
+    assert sls.min_channel_mm == 5.0 and sls.min_xy_mm == 295.0
+    assert set(sls.machines) == {"eos_p396", "large_cn", "eos_p110"}
+    fdm = ProcessConfig.from_toml("process_fdm_tpu.toml")
+    assert fdm.closure and fdm.bed_cut and fdm.alpha_b_deg == 43.0
+    with pytest.raises(Exception):
+        ProcessConfig.from_toml("nonexistent.toml")

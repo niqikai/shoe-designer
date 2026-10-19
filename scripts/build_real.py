@@ -8,6 +8,7 @@ Writes shoe.stl (the first printable body), envelope.stl, cavity_closed.stl and 
 The pose is fitted with s_min = sole + floor ease so the *cavity floor*, not the last, leaves --sole mm of sole.
 """
 import argparse
+import dataclasses
 import json
 import resource
 import sys
@@ -21,6 +22,7 @@ from shoe_designer import audit, ease, pose as pz
 from shoe_designer.assets import load_asset, load_catalog
 from shoe_designer.compose import (SIGMA_MM, T_FILL_MM, WALL_MM, compose, export, gate_verdict, label_faces)
 from shoe_designer.envelope import envelope
+from shoe_designer.process import ProcessConfig, build_volume, channel_width, mesh_inner_shells, sealed_cavities
 from shoe_designer.sdf import ALPHA_B_DEG, Grid, sample, sdf_to_mesh
 from shoe_designer.support_closure import closure
 
@@ -58,18 +60,32 @@ def main():
     ap.add_argument("--shoe", default="dlp_solid_44_right")
     ap.add_argument("--closing", type=float, default=12.0, help="closing radius (mm), as closure_real.py")
     ap.add_argument("--h", type=float, default=1.0)
-    ap.add_argument("--alpha", type=float, default=ALPHA_B_DEG, help="closure angle; 43 = D3 strict")
+    ap.add_argument("--alpha", type=float, default=None, help="closure angle / grid z spacing; default 43 (process file overrides)")
     ap.add_argument("--headroom", type=float, default=45.0)
-    ap.add_argument("--wall", type=float, default=WALL_MM)
-    ap.add_argument("--t-fill", type=float, default=T_FILL_MM)
+    ap.add_argument("--wall", type=float, default=None)
+    ap.add_argument("--t-fill", type=float, default=None)
     ap.add_argument("--sigma", type=float, default=SIGMA_MM)
-    ap.add_argument("--sole", type=float, default=6.0, help="minimum sole under the cavity (D4)")
+    ap.add_argument("--sole", type=float, default=None, help="minimum sole under the cavity (D4)")
+    ap.add_argument("--process", help="process TOML (config/process_sls_tpu.toml, config/process_fdm_tpu.toml); CLI flags override it")
+    ap.add_argument("--closure", choices=("on", "off"), help="45-degree self-support closure (default: process file, else on)")
+    ap.add_argument("--bed-cut", choices=("on", "off"), help="cut at the print bed z=0 (default: process file, else on)")
     ap.add_argument("--round-r", type=float, default=1.0)
     ap.add_argument("--band", type=float, default=14.0, help="phi_E exact band (mm); must exceed the largest push + 1.5")
     ap.add_argument("--no-push", action="store_true", help="skip level 2 (hard fill only)")
     ap.add_argument("--config")
     ap.add_argument("--out-dir", default="reports/build")
     a = ap.parse_args()
+    proc = ProcessConfig.from_toml(a.process) if a.process else None
+    pick = lambda cli, from_proc, default: cli if cli is not None else (from_proc if proc is not None else default)  # noqa: E731
+    a.alpha = pick(a.alpha, proc and proc.alpha_b_deg, ALPHA_B_DEG)
+    a.wall = pick(a.wall, proc and proc.wall, WALL_MM)
+    a.t_fill = pick(a.t_fill, proc and proc.t_fill, T_FILL_MM)
+    a.sole = pick(a.sole, proc and proc.sole_min, 6.0)
+    use_closure = (a.closure == "on") if a.closure else (proc.closure if proc else True)
+    bed_cut = (a.bed_cut == "on") if a.bed_cut else (proc.bed_cut if proc else True)
+    ease_cfg = ease.EaseConfig.from_toml(a.config)
+    if proc is not None:
+        ease_cfg = dataclasses.replace(ease_cfg, fdm_shrink=proc.shrink_mm)
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     secs = {}
@@ -89,7 +105,7 @@ def main():
     t0 = time.perf_counter()
     env = envelope(shoe, h=a.h, grid=grid0, closing_radius=a.closing, band=a.band)
     lap("envelope", t0)
-    field = ease.EaseField.for_last(last, a.config)
+    field = ease.EaseField.for_last(last, ease_cfg)
     floor_ease = float(field(np.array([[last.bounds.mean(axis=0)[0], 0.0, last.bounds[0, 2]]]), np.array([[0.0, 0.0, -1.0]]))[0])
 
     t0 = time.perf_counter()
@@ -102,7 +118,7 @@ def main():
     pc = corners @ res.transform[:3, :3].T + res.transform[:3, 3]
     zt_max = float(env.collar.rim[:, 2].max())
     grid = ease.extend_grid(env.grid, pc.min(axis=0) - 5, np.maximum(pc.max(axis=0), [0, 0, zt_max + a.headroom]) + 5)
-    cav = ease.build_cavity(last, res.transform, env.collar, grid, a.config)
+    cav = ease.build_cavity(last, res.transform, env.collar, grid, ease_cfg)
     off = np.rint((np.asarray(env.grid.origin) - np.asarray(grid.origin)) / np.asarray(grid.spacing)).astype(int)
     phi_e = np.full(grid.shape, a.band, np.float32)
     phi_e[tuple(slice(o, o + n) for o, n in zip(off, env.grid.shape))] = env.phi
@@ -110,12 +126,13 @@ def main():
     lap("cavity", t0)
 
     t0 = time.perf_counter()
-    cl = closure(cav.phi, grid, t=a.wall, phi_e=phi_e, region=region)
+    cl = closure(cav.phi, grid, t=a.wall, phi_e=phi_e, region=region) if use_closure else None
+    phi_a, phi_star = (cl.phi_a, cl.phi_c_star) if cl is not None else (None, None)
     lap("closure", t0)
 
     t0 = time.perf_counter()
-    comp = compose(phi_e, cav.phi, cl.phi_a, cl.phi_c_star, grid, env.collar, wall=a.wall, t_fill=a.t_fill,
-                   sigma=a.sigma, round_r=a.round_r, sole_min=a.sole, band_mm=a.band, push=not a.no_push)
+    comp = compose(phi_e, cav.phi, phi_a, phi_star, grid, env.collar, wall=a.wall, t_fill=a.t_fill,
+                   sigma=a.sigma, round_r=a.round_r, sole_min=a.sole, band_mm=a.band, bed_cut=bed_cut, push=not a.no_push)
     lap("compose", t0)
 
     t0 = time.perf_counter()
@@ -123,11 +140,11 @@ def main():
     lap("export", t0)
     mesh.export(out / "shoe.stl")
     env.to_mesh()[0].export(out / "envelope.stl")
-    sdf_to_mesh(cl.phi_c_star, grid)[0].export(out / "cavity_closed.stl")
+    sdf_to_mesh(cav.phi if cl is None else cl.phi_c_star, grid)[0].export(out / "cavity_closed.stl")
 
     # ----- audit of the exported STL
     t0 = time.perf_counter()
-    labels = label_faces(mesh, comp, cav.phi, cl.phi_a, cl.phi_c_star, env.collar, wall=a.wall, t_fill=a.t_fill)
+    labels = label_faces(mesh, comp, cav.phi, phi_a, phi_star, env.collar, wall=a.wall, t_fill=a.t_fill)
     area = mesh.area_faces
     lab_area = {n: round(float(area[labels == n].sum())) for n in sorted(set(labels))}
     cav_f = labels == "cavity"
@@ -170,13 +187,35 @@ def main():
                 "frac_lt_5p5": round(float((v < a.sole - 0.5).mean()), 4)}
 
     sole_report = {"on_bed": sole_stats(sole[flat]), "lifted_underside": sole_stats(sole[~flat]) if (~flat).any() else None}
+    # how far the final top surface stands above the template envelope (interior columns below the collar): the ridge
+    def top(m):
+        return np.where(m.any(axis=2), m.shape[2] - 1 - np.argmax(m[:, :, ::-1], axis=2), -1)
+
+    top_s, top_e = top((comp.phi < 0) & comp.below), top((phi_e < 0) & comp.below)
+    interior = (phi_e < -6.0).any(axis=2)  # not the steep sides: shifting a slope sideways changes its column top a lot
+    stick = np.where((top_s >= 0) & (top_e >= 0) & interior, np.maximum(top_s - top_e, 0) * grid.dz, 0.0)
+    ix, iy = np.unravel_index(int(np.argmax(stick)), stick.shape)
+    ridge = {"max_mm": round(float(stick.max()), 2), "at_xy": [round(grid.origin[0] + ix * grid.h, 1), round(grid.origin[1] + iy * grid.h, 1)],
+             "columns_over_3mm": int((stick > 3).sum()), "columns_over_8mm": int((stick > 8).sum())}
+    del top_s, top_e
+    # powder: sealed air, narrowest channel, build volume
+    cav_star = cav.phi if cl is None else cl.phi_c_star
+    min_ch = proc.min_channel_mm if proc and proc.min_channel_mm > 0 else 5.0
+    powder = {"sealed_field": sealed_cavities(comp.phi, grid), "sealed_filled_by_compose_mm3": comp.report["volume_mm3"]["sealed_pockets_filled"],
+              "inner_shells_in_stl": mesh_inner_shells(mesh),
+              "channel": channel_width(comp.phi, grid, (cav_star < 0) & comp.below, min_ch)}
+    machines = proc.machines if proc else {}
+    bv = build_volume(mesh.vertices, machines, proc.part_gap_mm if proc else 5.0, proc.min_xy_mm if proc else 0.0)
     verdict = gate_verdict(comp.gate, fill_frac)
     final = {
         "shoe": a.shoe, "params": vars(a), "seconds": secs, "total_seconds": round(time.perf_counter() - t_all, 1),
         "peak_rss_mb": round(rss_mb()), "grid": {"shape": list(grid.shape), "h": grid.h, "dz": grid.dz, "voxels": grid.n_voxels},
         "pose": res.to_dict()["pose"], "pose_flags": res.flags, "floor_ease_mm": round(floor_ease, 3),
-        "cavity": cav.report, "closure": cl.report, "compose": comp.report, "gate_metrics": comp.gate,
-        "sole_under_cavity": sole_report, "verdict": verdict, "outer_displacement_vs_template": displacement,
+        "cavity": cav.report, "closure": cl.report if cl is not None else None, "compose": comp.report, "gate_metrics": comp.gate,
+        "sole_under_cavity": sole_report,
+        "process": proc.to_dict() if proc else None, "closure_on": use_closure, "bed_cut": bed_cut,
+        "ridge_above_template": ridge, "powder": powder, "build_volume": bv,
+        "verdict": verdict, "outer_displacement_vs_template": displacement,
         "export": {"components": erep.n_components, "dropped_volume_mm3": erep.dropped_volume_mm3, "faces": erep.n_faces,
                    "bodies_in_file": len(parts)},
         "geometry": geo,

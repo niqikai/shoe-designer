@@ -1,0 +1,43 @@
+# Process configuration: SLS / MJF TPU (powder bed, no support, no bed contact).
+# Values are GENERIC reference ranges, not a factory data sheet: every number here is a config item to be
+# replaced by the manufacturer's data sheet / calibration coupons (#11). Read by shoe_designer.process.
+# Note: "D4" in the vendor table means lattice opening size, not the wall-thickness decision D4 of the design doc.
+
+[process]
+name = "sls_tpu"
+
+[wall]
+target_mm = 2.0         # t
+min_mm = 1.2            # audit lower bound (table: minimum wall / lattice strut >= 1.2 mm)
+fill_mm = 1.5           # hard-fill thickness (min + 0.3 construction margin)
+sole_min_mm = 6.0       # D4 (wall decision): minimum sole under the cavity
+
+[closure]
+enabled = false         # powder bed supports everything: no 45-degree self-support closure
+alpha_b_deg = 43.0      # kept for DLP / FDM; also sets the grid z spacing
+
+[bed]
+cut = false             # no print-bed contact in SLS: do not cut at z = 0 nor hold the sole flat
+
+[shrink]
+compensation_mm = 0.0   # added to the ease everywhere; not in the reference table, wait for factory data
+
+[powder]
+min_channel_mm = 5.0    # inner channels / powder-escape openings must be >= 5 mm; no sealed cavities allowed
+
+[fit]
+min_xy_mm = 295.0       # the machine needs X/Y >= this
+part_gap_mm = 5.0       # clearance to keep around the part
+
+[machine.eos_p396]
+x = 340.0
+y = 340.0
+z = 600.0
+[machine.large_cn]
+x = 320.0
+y = 320.0
+z = 450.0
+[machine.eos_p110]
+x = 220.0
+y = 220.0
+z = 320.0
