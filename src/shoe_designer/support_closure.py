@@ -37,6 +37,8 @@ def close_overhangs(cavity: np.ndarray) -> np.ndarray:
     c = np.ascontiguousarray(np.asarray(cavity, bool).transpose(2, 0, 1))  # layers first
     v = np.empty_like(c)
     prev_any = False
+    # The grid must leave a margin in x/y (and headroom in z) around the cavity: _grow_overlap and the EDT
+    # treat the outside of the grid as "not A", so a ridge touching the x/y border would get a cut face.
     # border_value=1: the cavity is assumed to continue outside the grid in x/y, so the erosion never starts
     # at the grid faces. This errs toward more closure (printable side); callers should still keep a margin.
     for k in range(c.shape[0]):
@@ -116,6 +118,7 @@ def closure(
     ``phi_a`` / ``phi_c_star`` are never masked. ``phi_c_star`` equals ``phi_c`` exactly outside A's padded
     box; ``phi_a`` there is the constant lower bound ``far`` (> t), not a distance.
     """
+    phi_c = np.asarray(phi_c, np.float32)
     if phi_c.shape != tuple(grid.shape):
         raise SDFError(f"phi_c shape {phi_c.shape} does not match grid {grid.shape}")
     if phi_e is not None and phi_e.shape != phi_c.shape:
@@ -150,8 +153,12 @@ def closure(
         "added_frac_of_cavity": round(n_a / int(c.sum()), 4),
     }
     if n_a == 0:
-        report.update(ceiling_raise_max_mm=0.0, ceiling_raise_p95_mm=0.0, heel_loss_volume_mm3=0.0,
-                      heel_loss_depth_mm=0.0, shell_clipped=False, ridge_hit_grid_top=False)
+        report.update(ceiling_raise_max_mm=0.0, ceiling_raise_p95_mm=0.0, ceiling_raise_by_x=[],
+                      heel_zone_x_mm=None, heel_loss_volume_mm3=0.0, heel_loss_depth_mm=0.0,
+                      shell_clipped=False, ridge_hit_grid_top=False)
+        if phi_e is not None:
+            report.update(shell_columns_outside_envelope=0, shell_protrusion_max_mm=0.0, shell_protrusion_by_x=[],
+                          shell_out_of_envelope_max_mm=0.0, b_req_max_mm=0.0, b_req_by_x=[])
         return ClosureResult(phi_a, phi_c.copy(), a[:0, :0, :0], (slice(0, 0),) * 3, grid, alpha, report)
 
     idx = np.argwhere(a)
@@ -198,6 +205,8 @@ def closure(
     report["shell_clipped"] = clipped
     report["ridge_hit_grid_top"] = bool((v[:, :, -1] & ~c[:, :, -1]).any())
     if phi_e is not None:
+        # true top of the closure shell per column (includes the offset t normal to the sloped ridge faces);
+        # top_e is deliberately not limited to ``region``: material above the region still covers the shell.
         shell = phi_a[box] < t
         if region is not None:
             shell &= region[box]

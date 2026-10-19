@@ -88,6 +88,10 @@ def test_open_top_cavity_is_untouched():
     res = closure(phi_c, grid)
     assert res.report["added_volume_mm3"] == 0
     assert np.array_equal(res.phi_c_star, phi_c)
+    full = closure(phi_c, grid, phi_e=phi_c).report  # same keys as a closure that did add something
+    g2, p2 = slab(41, 43.0)
+    assert set(full) == set(closure(p2, g2, phi_e=p2).report)
+    assert closure(phi_c.astype(np.float64), grid).phi_c_star.dtype == np.float32
 
 
 def test_closure_only_adds_cavity():
