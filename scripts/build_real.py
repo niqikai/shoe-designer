@@ -187,17 +187,11 @@ def main():
                 "frac_lt_5p5": round(float((v < a.sole - 0.5).mean()), 4)}
 
     sole_report = {"on_bed": sole_stats(sole[flat]), "lifted_underside": sole_stats(sole[~flat]) if (~flat).any() else None}
-    # how far the final top surface stands above the template envelope (interior columns below the collar): the ridge
-    def top(m):
-        return np.where(m.any(axis=2), m.shape[2] - 1 - np.argmax(m[:, :, ::-1], axis=2), -1)
-
-    top_s, top_e = top((comp.phi < 0) & comp.below), top((phi_e < 0) & comp.below)
-    interior = (phi_e < -6.0).any(axis=2)  # not the steep sides: shifting a slope sideways changes its column top a lot
-    stick = np.where((top_s >= 0) & (top_e >= 0) & interior, np.maximum(top_s - top_e, 0) * grid.dz, 0.0)
-    ix, iy = np.unravel_index(int(np.argmax(stick)), stick.shape)
-    ridge = {"max_mm": round(float(stick.max()), 2), "at_xy": [round(grid.origin[0] + ix * grid.h, 1), round(grid.origin[1] + iy * grid.h, 1)],
-             "columns_over_3mm": int((stick > 3).sum()), "columns_over_8mm": int((stick > 8).sum())}
-    del top_s, top_e
+    # forefoot top (x > 120, facing up): how far it stands outside the template skin = the closure ridge, if any
+    up_f = (ctr[:, 0] > 120) & (mesh.face_normals[outer][:, 2] > 0.5)
+    ridge = {"max_mm": round(float(disp[up_f].max()), 2), "p95_mm": round(float(np.percentile(disp[up_f], 95)), 2),
+             "area_over_3mm_mm2": round(float(ao[up_f & (disp > 3)].sum())), "area_over_8mm_mm2": round(float(ao[up_f & (disp > 8)].sum())),
+             "area_mm2": round(float(ao[up_f].sum()))}
     # powder: sealed air, narrowest channel, build volume
     cav_star = cav.phi if cl is None else cl.phi_c_star
     min_ch = proc.min_channel_mm if proc and proc.min_channel_mm > 0 else 5.0
