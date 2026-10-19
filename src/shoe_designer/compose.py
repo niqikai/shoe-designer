@@ -22,13 +22,14 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import trimesh
+from scipy import ndimage
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 from skimage import measure
 
 from .ease import collar_region
-from .sdf import Grid, SDFError, sample, sdf_to_mesh
+from .sdf import ExportReport, Grid, SDFError, sample, sdf_to_mesh
 
 WALL_MM = 2.0  # t
 T_FILL_MM = 1.5  # hard fill thickness
@@ -350,6 +351,14 @@ def compose(
     # Nodes exactly on the cut plane (value 0) make marching cubes emit degenerate, non-manifold faces: nudge them out.
     phi[phi == 0] = np.float32(1e-3)
 
+    # sealed pockets (outside air not connected to the grid border) would be inner shells in the STL: fill them
+    air, _ = ndimage.label(phi >= 0)
+    pockets = (air != air[0, 0, 0]) & (phi >= 0)
+    del air
+    n_pocket = int(pockets.sum())
+    phi[pockets] = np.float32(-1e-3)
+    del pockets
+
     inside = phi < 0
     in1 = phi_1 < 0
     fill_in = (fill < 0) & ~in1
@@ -363,6 +372,7 @@ def compose(
             "closure_shell": round(float((~in1 & ~fill_in & inside).sum() * voxel)),
             "sole_guard": round(sole_added * voxel),
             "collar_cut": round(cut_vox * voxel),
+            "sealed_pockets_filled": round(n_pocket * voxel, 1),
             "shoe": round(float(inside.sum() * voxel)),
             "shoe_before_sole_and_collar": round(solid_before * voxel),
         },
@@ -412,6 +422,20 @@ def label_faces(mesh: trimesh.Trimesh, comp: Composed, phi_c: np.ndarray, phi_a:
     return lab
 
 
-def export(comp: Composed, max_dropped_mm3: float = 1000.0):
-    """Marching cubes, largest component. Returns (mesh, ExportReport)."""
-    return sdf_to_mesh(comp.phi, comp.grid, max_dropped_mm3)
+def export(comp: Composed, max_dropped_mm3: float = 1000.0, min_shell_mm3: float = 1.0):
+    """Marching cubes, largest component (``sdf_to_mesh``), then drop zero-volume slivers.
+
+    Nodes with |phi| ~ 0 make marching cubes emit 2- to 8-face shells of ~0 volume inside the solid; they count
+    as extra bodies in the STL. Inner shells smaller than ``min_shell_mm3`` are removed; ``comp`` has no real
+    pockets left (``compose`` fills them), so anything larger would be a construction error and raises.
+    Returns (mesh, ExportReport).
+    """
+    mesh, rep = sdf_to_mesh(comp.phi, comp.grid, max_dropped_mm3)
+    parts = mesh.split(only_watertight=False)
+    if len(parts) == 1:
+        return mesh, rep
+    main = max(parts, key=lambda p: len(p.faces))
+    vols = [abs(p.volume) for p in parts if p is not main]
+    if vols and max(vols) >= min_shell_mm3:
+        raise SDFError(f"exported mesh holds an extra shell of {max(vols):.1f} mm^3 (sealed pocket or fragment)")
+    return main, ExportReport(rep.n_components, float(main.volume), rep.dropped_volume_mm3, len(main.faces))

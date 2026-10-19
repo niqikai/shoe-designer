@@ -43,7 +43,7 @@ def rect_collar(x0, x1, y0, y1, z):
     return build_cap(np.column_stack([xy, np.full(len(xy), z)]), interior_step=2.0)
 
 
-def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box", z0=-4.0):
+def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box", z0=-4.0, pocket=False):
     """Template with a thin wall at x = 0 (``wall_x0`` mm), a floor at ``floor`` mm and a chimney through the collar."""
     grid = Grid.from_bounds((-6, -40, z0), (106, 40, 80), h, alpha_deg=alpha)
     if kind == "box":
@@ -61,6 +61,8 @@ def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box", z0=-4.0):
         main = ell((wall_x0 + 44, 0, 23), (44, 24, 17))
     chim = box_phi(grid, (30, -12, 15), (70, 12, 120))
     phi_c = np.minimum(main, chim)
+    if pocket:  # a sealed void inside the wall
+        phi_c = np.minimum(phi_c, box_phi(grid, (50, 17, 20), (60, 23, 25)))
     collar = rect_collar(30, 70, -12, 12, Z_COLLAR if kind == "box" else 40.0)
     below = collar.mask_below(grid)
     phi_e = np.clip(phi_e, -8, 8).astype(np.float32)
@@ -69,7 +71,7 @@ def scene(wall_x0=0.8, floor=5.0, alpha=43.0, h=1.0, kind="box", z0=-4.0):
 
 
 def build(**kw):
-    sc = {k: kw.pop(k) for k in ("wall_x0", "floor", "alpha", "h", "kind", "z0") if k in kw}
+    sc = {k: kw.pop(k) for k in ("wall_x0", "floor", "alpha", "h", "kind", "z0", "pocket") if k in kw}
     grid, phi_e, phi_c, cl, collar = scene(**sc)
     comp = compose(phi_e, phi_c, cl.phi_a, cl.phi_c_star, grid, collar, **kw)
     mesh, rep = export(comp)
@@ -121,6 +123,12 @@ def test_bed_plane_on_grid_nodes_stays_manifold():
     _, counts = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
     assert (counts == 2).all()
     assert mesh.bounds[0, 2] == pytest.approx(0.0, abs=0.05)
+
+
+def test_sealed_pocket_is_filled():
+    *_, comp, mesh = build(pocket=True)
+    assert comp.report["volume_mm3"]["sealed_pockets_filled"] > 100
+    assert len(mesh.split(only_watertight=False)) == 1 and mesh.body_count == 1
 
 
 def test_hard_fill_alone_reaches_t_fill():
