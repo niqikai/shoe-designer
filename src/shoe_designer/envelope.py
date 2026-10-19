@@ -35,6 +35,10 @@ from .sdf import ExportReport, Grid, sample, sdf_from_mesh, sdf_to_mesh
 
 RAY_OFFSET_MM = 0.05
 RAY_CHUNK = 500_000
+LEAK_WARN_MM2 = 10.0  # 'inner' faces open to the outside air beyond this area suggest a leaked outer patch
+# The collar cut at z_T removes template material above the cap. Only height is lost (the wall thickness
+# below the collar is untouched); half of the hard-fill margin t_fill = 1.5 mm (design doc 1.5) is the limit.
+MAX_ABOVE_CAP_MM = 0.75
 
 
 class EnvelopeError(Exception):
@@ -408,6 +412,27 @@ def flood_inner_skin(mesh: trimesh.Trimesh, rim: np.ndarray, vote: np.ndarray, b
 # --------------------------------------------------------------------------- cap
 
 
+def exposed_inner_area(
+    mesh: trimesh.Trimesh, inner: np.ndarray, phi: np.ndarray, grid: Grid, collar: CollarSurface, delta: float | None = None
+) -> float:
+    """Area (mm^2) of 'inner' faces whose outward side is air outside the envelope.
+
+    The face normal of a true inner face points into the old cavity, which phi_E has filled, so
+    phi_E(centre + delta * normal) < 0. A patch of outer skin flooded into the inner skin is missing from
+    the envelope surface, but its normal points into the air: phi_E > 0 one step out. (Sampling phi_E
+    at the face centre itself is not reliable: where a patch is missing the zero set dents inward and the
+    centre lands near phi = 0 with either sign.)
+
+    Only probes below the cap count (M_below): just under the crest, the step along a face normal leaves
+    the envelope through the cap, which says nothing about leaks.
+    """
+    delta = max(grid.h, grid.dz) if delta is None else delta
+    pts = mesh.triangles_center[inner] + delta * mesh.face_normals[inner]
+    below = pts[:, 2] < collar.z_t(pts[:, :2])
+    exposed = below & (sample(phi, grid, pts) > 0.0)
+    return float(mesh.area_faces[inner][exposed].sum())
+
+
 def build_cap(rim: np.ndarray, interior_step: float = 2.0) -> CollarSurface:
     """Triangulated sealing surface bounded by ``rim``; interior heights solve a (weighted) graph Laplace
     equation with the collar heights fixed, so the cap is exact on the collar."""
@@ -558,15 +583,15 @@ def envelope(
     # material standing above the cap inside the collar (roundI at z_T would cut it)
     vin = collar.inside(src.vertices[:, :2])
     above = src.vertices[vin, 2] - collar.z_t(src.vertices[vin, :2])
-    # inner faces must lie inside the envelope; a patch of outer skin wrongly flooded into the inner skin
-    # leaves a hole in phi_E and shows up here (the cavity floor and walls are >= 1 mm deep)
-    cen = src.triangles_center[inner]
-    exposed = sample(phi, grid, cen) > -0.3
-    exposed_frac = float(src.area_faces[inner][exposed].sum() / max(src.area_faces[inner].sum(), 1e-9))
+    exposed_mm2 = exposed_inner_area(src, inner, phi, grid, collar)
+    exposed_frac = exposed_mm2 / max(float(src.area_faces[inner].sum()), 1e-9)
     warnings = []
-    if exposed_frac > 0.01:
-        warnings.append(f"{exposed_frac:.1%} of the inner skin area is not inside the envelope: a patch of outer skin "
-                        "may have leaked into the inner skin (check barrier_mm / closing_radius)")
+    if exposed_mm2 > LEAK_WARN_MM2:
+        warnings.append(f"{exposed_mm2:.0f} mm^2 of the 'inner' skin faces open to air outside the envelope: a patch of "
+                        "outer skin may have leaked into the inner skin (check barrier_mm / closing_radius)")
+    if above.size and float(above.max()) > MAX_ABOVE_CAP_MM:
+        warnings.append(f"template material stands {float(above.max()):.2f} mm above the cap inside the collar "
+                        f"(> {MAX_ABOVE_CAP_MM} mm); the collar cut will remove it")
     if diag.get("unclosed_loops") or diag.get("pinch_vertices"):
         warnings.append(f"collar boundary has {diag.get('pinch_vertices', 0)} pinch vertices and "
                         f"{diag.get('unclosed_loops', 0)} unclosed loops; verify the collar curve or pass manual_rim")
@@ -593,6 +618,7 @@ def envelope(
         "closing": closing,
         "manual_rim": manual_rim is not None,
         "material_above_cap_mm": float(above.max()) if above.size else 0.0,
+        "inner_area_exposed_mm2": exposed_mm2,
         "inner_area_exposed_frac": exposed_frac,
         "warnings": warnings,
     }

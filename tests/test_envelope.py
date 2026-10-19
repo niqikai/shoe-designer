@@ -44,6 +44,13 @@ def result(shoe):
     return env.envelope(shoe, h=1.0)
 
 
+@pytest.fixture(scope="module")
+def holes_result():
+    # holes of radius 3 in a 3 mm wall need r ~ 8: dilation only fills a lens of thickness t + 2*sqrt(r^2 - a^2),
+    # and the erosion removes it again unless that is >= 2r
+    return env.envelope(saddle_shoe(holes=True), h=1.0, closing_radius=8.0)
+
+
 def phi_at(r, pts):
     return sample(r.phi, r.grid, np.asarray(pts, float))
 
@@ -118,11 +125,8 @@ def test_manual_rim_fallback(shoe, result):
     assert (phi_at(out, [[0, 0, 15], [-34, 0, 26]]) < 0).all()
 
 
-def test_closing_fills_perforated_walls():
-    shoe = saddle_shoe(holes=True)
-    # holes of radius 3 in a 3 mm wall need r ~ 8: dilation only fills a lens of thickness t + 2*sqrt(r^2 - a^2),
-    # and the erosion removes it again unless that is >= 2r
-    out = env.envelope(shoe, h=1.0, closing_radius=8.0)
+def test_closing_fills_perforated_walls(holes_result):
+    out = holes_result
     assert out.report["closing"]["radius_mm"] == 8.0
     assert (phi_at(out, [[0, 0, 15], [-20, 0, 12], [20, 4, 18]]) < 0).all()
     mesh, _ = out.to_mesh()
@@ -182,12 +186,11 @@ def test_report_has_no_warnings_on_a_clean_template(result):
     assert result.report["warnings"] == []
     assert result.report["inner_area_exposed_frac"] < 0.01
     assert result.report["collar"]["pinch_vertices"] == 0
-    assert result.report["material_above_cap_mm"] < 1.0
+    assert result.report["material_above_cap_mm"] <= env.MAX_ABOVE_CAP_MM
 
 
-def test_closing_report_is_kept():
-    out = env.envelope(saddle_shoe(holes=True), h=1.0, closing_radius=8.0)
-    c = out.report["closing"]
+def test_closing_report_is_kept(holes_result):
+    c = holes_result.report["closing"]
     assert c["components"] >= 1 and c["dropped_volume_mm3"] == 0 and c["added_volume_mm3"] > 0
 
 
@@ -199,10 +202,15 @@ def _has_embree():
         return False
 
 
-needs_real = pytest.mark.skipif(
-    not os.environ.get("SHOE_ASSETS_ROOT") or not _has_embree(),
-    reason="needs SHOE_ASSETS_ROOT and embreex (428k-face ray queries)",
-)
+def _real_skip_reason():
+    if not os.environ.get("SHOE_ASSETS_ROOT"):
+        return "SHOE_ASSETS_ROOT not set (the template meshes are not in git; see assets/manifest.toml)"
+    if not _has_embree():
+        return "embreex missing (428k-face ray queries are too slow without it): uv sync --extra fast"
+    return None
+
+
+needs_real = pytest.mark.skipif(_real_skip_reason() is not None, reason=_real_skip_reason() or "")
 
 
 @needs_real
@@ -214,6 +222,7 @@ def test_real_template_dlp_solid_43_right():
     rep = out.report
     rim = out.collar.rim
     assert rep["warnings"] == []
+    assert rep["inner_area_exposed_mm2"] < env.LEAK_WARN_MM2 / 2  # measured: 1 mm^2; injected leaks give > 29 mm^2
     # collar height per 10 mm of x against the highest mesh vertex of the same slab (design doc 0, solid 43):
     # heel 107-108, sides 82-83, front 101-104. The two steep flanks (x 40-50, x 110-120) read ~1 mm low
     # because the slab maximum is taken at its steep edge; everything else is within 0.25 mm.
@@ -225,7 +234,34 @@ def test_real_template_dlp_solid_43_right():
     assert rep["collar"]["z_max"] == pytest.approx(107.6, abs=1.0)
     assert rep["collar"]["length_mm"] == pytest.approx(294.5, rel=0.03)
     assert rep["collar"]["max_overshoot_mm"] <= 0.5  # design doc 1.4: roundI must not cut the template
-    assert rep["material_above_cap_mm"] <= 0.8
+    assert rep["material_above_cap_mm"] <= env.MAX_ABOVE_CAP_MM
     assert rep["volume_mm3"] == pytest.approx(1.5405e6, rel=0.02)
     mesh_out, export = out.to_mesh()
     assert mesh_out.is_watertight and export.n_components == 1 and export.dropped_volume_mm3 == 0
+
+
+
+def _flood_with_leak(result, radius):
+    """Move the outer-skin faces of the +y side wall within ``radius`` of (0, B, 12) into the inner skin
+    (a local barrier leak) and rebuild phi_E without them."""
+    src = result.source
+    c, n = src.triangles_center, src.face_normals
+    leak = (~result.inner_faces) & (np.linalg.norm(c - np.array([0.0, B, 12.0]), axis=1) < radius) & (n[:, 1] > 0.5)
+    inner = result.inner_faces | leak
+    skin = trimesh.Trimesh(src.vertices, src.faces[~inner], process=False)
+    skin.remove_unreferenced_vertices()
+    phi = env.sdf_from_mesh(trimesh.util.concatenate([skin, result.collar.cap]), result.grid, band=8.0)
+    return inner, phi, float(src.area_faces[leak].sum())
+
+
+def test_exposed_inner_area_is_zero_on_a_clean_template(result):
+    assert env.exposed_inner_area(result.source, result.inner_faces, result.phi, result.grid, result.collar) < 1.0
+
+
+@pytest.mark.parametrize("radius", [3.0, 6.0, 10.0])
+def test_local_leak_of_outer_skin_is_detected(result, radius):
+    inner, phi, leaked = _flood_with_leak(result, radius)
+    assert leaked > 20
+    exposed = env.exposed_inner_area(result.source, inner, phi, result.grid, result.collar)
+    assert exposed > 0.8 * leaked  # the dent in phi_E exposes the leaked faces; centre sampling would miss most
+    assert exposed > env.LEAK_WARN_MM2
