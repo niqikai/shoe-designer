@@ -1,0 +1,56 @@
+# Zoned ease field e(x) for the cavity (design doc issue-10-cavity-rebuild.md §4.1, #10 S4).
+# e is the normal offset (mm) of the cavity surface from the last surface. Zones live on the last's
+# normalised coordinates: u = length fraction (0 heel -> 1 toe, last frame +X) and the surface
+# normal class (up / side / down). Zones are layered in file order: later zones override earlier
+# ones, each blended in with a smooth window, so e(x) is continuous everywhere.
+
+[global]
+fdm_shrink_mm = 0.2     # FDM bore shrink compensation, added everywhere (value to be calibrated by #11)
+transition_mm = 10.0    # width of the smooth transition at an interior zone edge (centred on the edge)
+smooth_mm = 1.5         # gaussian sigma applied to e on the cavity band to damp mesh-normal noise (0 = off)
+
+[normals]
+# Normal classes from the z component of the unit normal nz. Weight ramps 0 -> 1 (smoothstep) as
+# nz goes from lo to hi (up) or as -nz does (down); side = 1 - up - down.
+up = [0.5, 0.8]
+down = [0.5, 0.8]
+
+[floor]
+# D1: removable insole. Default: not reserved (floor +0.5 mm). Set 3-4 mm to reserve one.
+insole_mm = 0.0
+
+[base]
+value = 0.5             # arch, waist and anywhere no zone claims
+
+[[zone]]
+name = "toe"            # length fraction > 0.85; the 45-degree closure adds more headroom on top
+u = [0.85, 1.0]
+faces = ["up", "side"]
+value = 1.0
+
+[[zone]]
+name = "metatarsal_sides"   # 0.60-0.85; TPU 95A is elastic, too loose slips
+u = [0.60, 0.85]
+faces = ["side"]
+value = 0.5
+
+[[zone]]
+name = "instep"         # top surface 0.35-0.65
+u = [0.35, 0.65]
+faces = ["up"]
+# D1 says 1.5 mm with laces and "more without". No laces on this shoe: foot enters through the
+# collar and has to clear the instep, TPU stretch only helps so much. 2.5 mm = middle of 2.0-3.0.
+value = 2.5
+
+[[zone]]
+name = "heel"           # 0-0.20; wraps the heel, prevents heel slip
+u = [0.0, 0.20]
+faces = ["up", "side"]
+value = 0.3
+
+[[zone]]
+name = "floor"          # last bottom
+u = [0.0, 1.0]
+faces = ["down"]
+value = 0.5
+insole = true           # + [floor] insole_mm
