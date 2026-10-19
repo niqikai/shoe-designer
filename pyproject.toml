@@ -8,6 +8,8 @@ dependencies = [
     "trimesh>=4.4",
     "scipy>=1.11",
     "rtree>=1.2",
+    "libigl>=2.6.3",
+    "scikit-image>=0.26.0",
 ]
 
 [project.optional-dependencies]
