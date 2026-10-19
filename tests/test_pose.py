@@ -100,24 +100,26 @@ def test_sole_constraint_pushes_deficit_to_the_top():
     assert res.gap.summary()["sole"]["max"] < 0.3
 
 
-def test_pitch_is_traded_against_the_sole():
-    # a pitched envelope with the sole constraint active: the optimum may not violate the sole
-    # for any pitch, and a pose that ignores the envelope tilt beyond the bound is reported
+def test_pitch_bound_is_reported_and_residual_sits_at_the_ends():
+    # envelope pitched 4 deg but the search stops at 2 deg: the flag fires and the 2 deg that is
+    # left over shows up as deficit at the heel/toe ends, not in the middle
     last = last_box()
-    truth = pz.Pose(0, 0, 0, 4.0, 0.0)
-    env, grid, phi, _ = envelope(last, truth)
+    env, grid, phi, _ = envelope(last, pz.Pose(0, 0, 0, 4.0, 0.0))
     mask = np.ones(grid.shape, bool)
     res = pz.fit_pose(phi, grid, mask, last, pitch_max_deg=2.0, xy_center=env.bounds.mean(axis=0)[:2],
                       n_points=6000, n_refine_points=3000)
     assert res.flags["pitch_at_bound"]
     assert res.pose.pitch == pytest.approx(2.0, abs=0.1)
+    s = res.gap.summary()
+    assert max(s["heel"]["max"], s["toe"]["max"]) > 0.5
+    assert s["mid"]["max"] < max(s["heel"]["max"], s["toe"]["max"])
     low = (np.asarray(last.vertices) @ res.transform[:3, :3].T + res.transform[:3, 3])[:, 2].min()
-    assert low >= 6.0 - 1e-6
+    assert low >= 6.0 - 1e-6  # holds by construction for every pitch
 
 
 def test_mask_excludes_points_above_the_mouth():
     base = last_box()
-    stalk = box([6, 6, 80], center=(30, 12, 40))  # pokes far out of the envelope
+    stalk = box([30, 16, 80], center=(30, 12, 40))  # pokes far out of the envelope
     last = trimesh.util.concatenate([base, stalk])
     truth = pz.Pose(0, 0, 1.0, 0.0, 0.0)
     env, grid, phi, _ = envelope(base, truth)
@@ -130,7 +132,8 @@ def test_mask_excludes_points_above_the_mouth():
     # without the mask the stalk drags the pose off
     full = pz.fit_pose(phi, grid, np.ones(grid.shape, bool), last, xy_center=env.bounds.mean(axis=0)[:2],
                        n_points=8000, n_refine_points=4000)
-    assert full.rms > res.rms
+    # the stalk pulls the whole last down onto the sole limit (lift 1 -> 0) when it is not masked
+    assert full.pose.lift < res.pose.lift - 0.5
 
 
 def test_shape_mismatch_rejected():
@@ -138,3 +141,20 @@ def test_shape_mismatch_rejected():
     grid = Grid((0, 0, 0), 1.0, 1.0, (4, 4, 4))
     with pytest.raises(ValueError):
         pz.fit_pose(np.zeros((3, 3, 3), np.float32), grid, np.ones((4, 4, 4)), last)
+
+
+def test_fixed_weights_do_not_let_deficit_escape_the_mask():
+    # The envelope top is 2 mm too low in the middle of the last (a dent); with the mask only
+    # covering the lower half, pose-sampled weights let a pitch/lift hide points above the mouth.
+    last = last_box()
+    env, grid, phi, _ = envelope(last, pz.Pose(0, 0, 0, 0, 0))
+    z = grid.origin[2] + np.arange(grid.shape[2]) * grid.dz
+    mask = np.broadcast_to(z < 6.0 + LAST_EXT[2] - 1.0, grid.shape)  # mouth 1 mm under the block top
+    kw = dict(xy_center=env.bounds.mean(axis=0)[:2], n_points=6000, n_refine_points=3000, pitch_max_deg=6.0)
+    fixed = pz.fit_pose(phi, grid, mask, last, weight_mode="fixed", **kw)
+    pose_w = pz.fit_pose(phi, grid, mask, last, weight_mode="pose", **kw)
+    assert fixed.flags["posed_mask_area_drop"] < 0.02 and not fixed.flags["mask_escape"]
+    assert fixed.flags["counted_area_frac"] == pytest.approx(fixed.flags["baseline_counted_area_frac"])
+    assert "mask_escape" in pose_w.flags  # reported in both modes
+    with pytest.raises(ValueError):
+        pz.fit_pose(phi, grid, mask, last, weight_mode="nope", **kw)

@@ -12,9 +12,12 @@ For a surface point ``p`` of the posed last the deficit is how far short the out
 
     deficit(p) = max(0, phi_e(p) + ease(p) + wall(p))
 
-The pose minimises ``sum(w(p) * deficit(p)**2)`` over last surface samples, where ``w`` is the
-trilinearly interpolated ``m_below`` at the posed point (so it is continuous in the pose and
-points above the mouth do not count).
+The pose minimises ``sum(w(p) * deficit(p)**2)`` over last surface samples. By default
+(``weight_mode="fixed"``) ``w`` is the trilinearly interpolated ``m_below`` at the *nominal* pose
+(xy-centred, no rotation, lowest point at ``s_min``) and stays attached to the last's points.
+Sampling the mask at the posed point instead (``weight_mode="pose"``) lets the optimiser drop
+a deficient point out of the score by pitching or lifting it above the mouth; ``flags
+["mask_escape"]`` reports the posed-mask area lost that way, in either mode.
 
 Pose parameters (``Pose``): translation ``dx, dy`` relative to the xy-centred start, ``lift``
 (extra height above the sole minimum), ``pitch`` and ``yaw`` in degrees. Rotation is about the
@@ -50,6 +53,7 @@ SIDES = ("y+", "y-")  # last-frame +Y (left of the heading for +X forward, +Z up
 THIRDS = ("heel", "mid", "toe")
 FACES = ("sole", "side", "top")  # by last-surface normal: nz < -0.5 / |nz| <= 0.5 / nz > 0.5
 THIN_DEFICIT_MM = 0.5
+MASK_ESCAPE_FRAC = 0.02  # warn when the optimum moves > 2% of the last's area out of M_below
 
 
 def rotation(pitch_deg: float, yaw_deg: float) -> np.ndarray:
@@ -182,7 +186,10 @@ class PoseResult:
 
 class _Problem:
     def __init__(self, phi_e, grid: Grid, m_below, last: trimesh.Trimesh, ease: Field, wall: Field,
-                 s_min: float, bed_z: float, n_points: int, seed: int, xy_center):
+                 s_min: float, bed_z: float, n_points: int, seed: int, xy_center,
+                 weight_mode: str = "pose"):
+        if weight_mode not in ("fixed", "pose"):
+            raise ValueError("weight_mode must be 'fixed' or 'pose'")
         if phi_e.shape != grid.shape or np.shape(m_below) != grid.shape:
             raise ValueError("phi_e and m_below must have the grid's shape")
         self.phi = phi_e
@@ -190,8 +197,10 @@ class _Problem:
         self.mask = np.asarray(m_below, np.float32)
         self.s_min, self.bed_z = s_min, bed_z
         pts, fidx = trimesh.sample.sample_surface(last, n_points, seed=seed)
-        self.pts = np.asarray(pts)
-        self.normals = np.asarray(last.face_normals[fidx])
+        # shuffle once: prefixes are used as uniform subsamples and must not depend on the sampler's order
+        perm = np.random.default_rng(seed).permutation(len(pts))
+        self.pts = np.asarray(pts)[perm]
+        self.normals = np.asarray(last.face_normals[fidx])[perm]
         self.area = float(last.area) / len(self.pts)
         need = _eval_field(ease, self.pts, self.normals) + _eval_field(wall, self.pts, self.normals)
         self.need = np.broadcast_to(need, (len(self.pts),)).astype(np.float64)
@@ -207,6 +216,12 @@ class _Problem:
             lo, hi = grid.coords(inside.min(axis=0)), grid.coords(inside.max(axis=0))
             xy_center = (lo[:2] + hi[:2]) / 2
         self.t0 = np.array([xy_center[0] - self.pivot[0], xy_center[1] - self.pivot[1]])
+        self.w_fixed = None
+        if weight_mode == "fixed":
+            self.w_fixed = self.posed_mask(Pose(0.0, 0.0, 0.0, 0.0, 0.0))
+
+    def posed_mask(self, pose: "Pose", idx=slice(None)) -> np.ndarray:
+        return np.clip(sample(self.mask, self.grid, self.posed(pose, idx)), 0.0, 1.0)
 
     def transform(self, pose: Pose) -> np.ndarray:
         r = rotation(pose.pitch, pose.yaw)
@@ -225,7 +240,7 @@ class _Problem:
     def deficits(self, pose: Pose, idx=slice(None)):
         p = self.posed(pose, idx)
         d = np.maximum(0.0, sample(self.phi, self.grid, p) + self.need[idx])
-        w = np.clip(sample(self.mask, self.grid, p), 0.0, 1.0)
+        w = self.w_fixed[idx] if self.w_fixed is not None else np.clip(sample(self.mask, self.grid, p), 0.0, 1.0)
         return d, w, p
 
     def cost(self, pose: Pose, idx=slice(None)) -> float:
@@ -246,7 +261,7 @@ def _eval_field(f: Field, pts, normals) -> np.ndarray:
 def gap_map(phi_e, grid: Grid, m_below, last: trimesh.Trimesh, transform: np.ndarray, ease: Field = 1.0,
             wall: Field = 2.0, n_points: int = 20000, seed: int = 0) -> GapMap:
     """Gap map of ``last`` placed by an arbitrary rigid ``transform`` (4x4, last -> template frame)."""
-    prob = _Problem(phi_e, grid, m_below, last, ease, wall, 0.0, 0.0, n_points, seed, (0.0, 0.0))
+    prob = _Problem(phi_e, grid, m_below, last, ease, wall, 0.0, 0.0, n_points, seed, (0.0, 0.0), "pose")
     p = prob.pts @ transform[:3, :3].T + transform[:3, 3]
     s = sample(phi_e, grid, p)
     d = np.maximum(0.0, s + prob.need)
@@ -264,6 +279,7 @@ def fit_pose(
     wall: Field = 2.0,
     s_min: float = 6.0,
     bed_z: float = 0.0,
+    weight_mode: str = "fixed",
     pitch_max_deg: float = 5.0,
     yaw_max_deg: float = 3.0,
     search_xy: tuple[float, float] = (10.0, 8.0),
@@ -280,10 +296,12 @@ def fit_pose(
 
     ``ease`` / ``wall`` are mm, scalars or ``f(points_last, normals_last) -> array``.
     The envelope interior is centred in xy by its ``phi_e < 0`` bounding box unless ``xy_center``
-    is given. ``max_lift`` caps how far above ``s_min`` the lowest point of the last may sit.
+    is given. ``max_lift`` caps how far above ``s_min`` the lowest point of the last may sit
+    (guards against floating the last out through the mouth; 4 mm is about half of Zellerfeld's
+    ~8 mm sole over ``s_min`` = 6). ``weight_mode``: ``"fixed"`` or ``"pose"`` (see module docstring).
     """
     t_all = time.perf_counter()
-    prob = _Problem(phi_e, grid, m_below, last, ease, wall, s_min, bed_z, n_points, seed, xy_center)
+    prob = _Problem(phi_e, grid, m_below, last, ease, wall, s_min, bed_z, n_points, seed, xy_center, weight_mode)
     lo = np.array([-search_xy[0], -search_xy[1], 0.0, -pitch_max_deg, -yaw_max_deg])
     hi = np.array([search_xy[0], search_xy[1], max_lift, pitch_max_deg, yaw_max_deg])
     span = np.where(hi > lo, hi - lo, 1.0)
@@ -336,6 +354,11 @@ def fit_pose(
         baseline_cost=prob.cost(nominal), starts=records,
     )
     res.flags = _flags(res, lo, hi, s_min, max_lift)
+    nominal_mask = prob.posed_mask(nominal)
+    final_mask = prob.posed_mask(pose)
+    drop = float((nominal_mask >= 0.5).mean() - (final_mask >= 0.5).mean())
+    res.flags["posed_mask_area_drop"] = drop
+    res.flags["mask_escape"] = drop > MASK_ESCAPE_FRAC
     res.seconds = time.perf_counter() - t_all
     return res
 
