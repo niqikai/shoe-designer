@@ -113,6 +113,44 @@ def test_export_errors_on_large_fragment():
         sdf.sdf_to_mesh(phi, grid)
 
 
+@pytest.mark.parametrize("cavity", [8.0, 20.0])
+def test_internal_cavity_is_kept(cavity):
+    outer = trimesh.creation.box(extents=[30, 30, 30])
+    inner = trimesh.creation.box(extents=[cavity] * 3)
+    inner.invert()
+    both = trimesh.util.concatenate([outer, inner])
+    grid = Grid.for_mesh(both, 1.0)
+    out, report = sdf.sdf_to_mesh(sdf.sdf_from_mesh(both, grid), grid)
+    assert report.n_components == 2 and report.dropped_volume_mm3 == 0
+    assert out.volume == pytest.approx(30**3 - cavity**3, rel=0.02)
+
+
+def test_alpha_out_of_range_errors():
+    for bad in (0.0, 90.0, -5.0, 120.0):
+        with pytest.raises(SDFError, match="alpha_deg"):
+            Grid.dz_for(1.0, bad)
+
+
+def test_nan_field_errors():
+    grid = Grid.from_bounds([0, 0, 0], [5, 5, 5], 1.0)
+    phi = -np.ones(grid.shape, np.float32)
+    phi[2, 2, 2] = np.nan
+    with pytest.raises(SDFError, match="NaN"):
+        sdf.sdf_to_mesh(phi, grid)
+
+
+def test_band_far_cells_need_consistent_sign():
+    # an open (non-watertight) box: the winding number is fuzzy near the hole, but the banded
+    # field must still equal the exact one wherever |phi| < band
+    box = trimesh.creation.box(extents=[20, 20, 20])
+    open_box = trimesh.Trimesh(box.vertices, box.faces[2:], process=False)
+    grid = Grid.for_mesh(open_box, 1.0, margin_voxels=8)
+    exact = sdf.sdf_from_mesh(open_box, grid)
+    banded = sdf.sdf_from_mesh(open_box, grid, band=3.0, coarse=4)
+    near = np.abs(exact) < 3.0
+    assert np.allclose(banded[near], exact[near], atol=1e-4)
+
+
 def test_empty_field_errors():
     grid = Grid.from_bounds([0, 0, 0], [5, 5, 5], 1.0)
     with pytest.raises(SDFError):
@@ -139,3 +177,8 @@ def test_real_asset_roundtrip_1mm(asset_id):
     pts = trimesh.sample.sample_surface(out, 3000, seed=0)[0]
     err = np.abs(sdf.signed_distance(mesh, pts))
     assert np.percentile(err, 99) <= half  # the max sits on sharp features / thin tips
+    # and the other direction: detail in the input must not vanish in the output
+    pts_in = trimesh.sample.sample_surface(mesh, 3000, seed=1)[0]
+    err_in = np.abs(sdf.signed_distance(out, pts_in))
+    assert np.percentile(err_in, 99) <= half
+    assert out.volume == pytest.approx(mesh.volume, rel=0.01)

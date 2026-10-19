@@ -40,6 +40,8 @@ class Grid:
 
     @staticmethod
     def dz_for(h: float, alpha_deg: float = ALPHA_B_DEG) -> float:
+        if not 0.0 < alpha_deg < 90.0:
+            raise SDFError(f"alpha_deg must be in (0, 90) degrees, got {alpha_deg!r}")
         return h / math.tan(math.radians(alpha_deg))
 
     @classmethod
@@ -77,22 +79,34 @@ class Grid:
         return (np.asarray(points, float) - np.asarray(self.origin)) / np.asarray(self.spacing)
 
 
-def _mesh_arrays(mesh: trimesh.Trimesh) -> tuple[np.ndarray, np.ndarray]:
-    return np.ascontiguousarray(mesh.vertices, dtype=np.float64), np.ascontiguousarray(mesh.faces, dtype=np.int64)
+class MeshQuery:
+    """Signed-distance queries against one mesh; the AABB tree and winding-number BVH are built once."""
+
+    def __init__(self, mesh: trimesh.Trimesh):
+        self.v = np.ascontiguousarray(mesh.vertices, dtype=np.float64)
+        self.f = np.ascontiguousarray(mesh.faces, dtype=np.int64)
+        self._aabb = igl.AABB()
+        self._aabb.init(self.v, self.f)
+        self._bvh = igl.FastWindingNumberBVH()
+        self._bvh.init(self.v, self.f)
+
+    def winding(self, points: np.ndarray) -> np.ndarray:
+        return self._bvh.winding_number(np.ascontiguousarray(points, dtype=np.float64))
+
+    def signed_distance(self, points: np.ndarray, chunk: int = CHUNK_POINTS) -> np.ndarray:
+        """Distance to the surface (AABB), negative where the fast winding number is > 0.5. float32."""
+        points = np.asarray(points, float)
+        out = np.empty(len(points), np.float32)
+        for s in range(0, len(points), chunk):
+            q = np.ascontiguousarray(points[s : s + chunk])
+            sq = self._aabb.squared_distance(self.v, self.f, q)[0]
+            out[s : s + chunk] = np.where(self.winding(q) > 0.5, -1.0, 1.0) * np.sqrt(sq)
+        return out
 
 
 def signed_distance(mesh: trimesh.Trimesh, points: np.ndarray, chunk: int = CHUNK_POINTS) -> np.ndarray:
     """Signed distance (negative inside) of ``points`` (N, 3) to ``mesh``. float32."""
-    v, f = _mesh_arrays(mesh)
-    points = np.asarray(points, float)
-    out = np.empty(len(points), np.float32)
-    for s in range(0, len(points), chunk):
-        d = igl.signed_distance(
-            np.ascontiguousarray(points[s : s + chunk]), v, f,
-            igl.SIGNED_DISTANCE_TYPE_FAST_WINDING_NUMBER,
-        )[0]
-        out[s : s + chunk] = d
-    return out
+    return MeshQuery(mesh).signed_distance(points, chunk)
 
 
 def _axes(grid: Grid, idx: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.ndarray:
@@ -115,23 +129,20 @@ def sdf_from_mesh(
     and only the remaining voxels are queried exactly. Values with ``|phi| < band`` are exact.
     """
     nx, ny, nz = grid.shape
-    v, f = _mesh_arrays(mesh)
     phi = np.empty(grid.shape, np.float32)
-
-    def query(points):
-        return signed_distance(mesh, points, chunk)
+    query = MeshQuery(mesh).signed_distance
 
     if band is None:
         rows = max(1, chunk // (ny * nz))
         for x0 in range(0, nx, rows):
             xs = np.arange(x0, min(nx, x0 + rows))
-            phi[xs[0] : xs[-1] + 1] = query(_axes(grid, (xs, np.arange(ny), np.arange(nz)))).reshape(len(xs), ny, nz)
+            phi[xs[0] : xs[-1] + 1] = query(_axes(grid, (xs, np.arange(ny), np.arange(nz))), chunk).reshape(len(xs), ny, nz)
         return phi
 
     if band <= 0 or coarse < 1:
         raise SDFError("band must be positive and coarse >= 1")
     nodes = [np.unique(np.minimum(np.arange(0, n + coarse, coarse), n - 1)) for n in grid.shape]
-    cd = query(_axes(grid, tuple(nodes))).reshape(tuple(len(a) for a in nodes))
+    cd = query(_axes(grid, tuple(nodes)), chunk).reshape(tuple(len(a) for a in nodes))
     diag = math.sqrt(2 * (coarse * grid.h) ** 2 + (coarse * grid.dz) ** 2)
     if min(len(a) for a in nodes) < 2:
         far = np.zeros(tuple(max(len(a) - 1, 1) for a in nodes), bool)
@@ -140,8 +151,10 @@ def sdf_from_mesh(
         corners = [cd[a : cd.shape[0] - 1 + a, b : cd.shape[1] - 1 + b, c : cd.shape[2] - 1 + c]
                    for a in (0, 1) for b in (0, 1) for c in (0, 1)]
         near = np.min(np.abs(corners), axis=0)
-        far = near >= band + diag
-        sign = np.where(corners[0] < 0, -1.0, 1.0).astype(np.float32)
+        neg = np.stack(corners) < 0
+        # a cell is "far" only if it is out of reach AND all eight corners agree on the sign
+        far = (near >= band + diag) & (neg.all(axis=0) | ~neg.any(axis=0))
+        sign = np.where(neg[0], -1.0, 1.0).astype(np.float32)
     cells = far.shape
 
     def cell_of(n, nc):
@@ -149,12 +162,10 @@ def sdf_from_mesh(
 
     ci, cj, ck = (cell_of(n, c) for n, c in zip(grid.shape, cells))
     # Fill slab by slab to avoid a second full-size temporary.
-    need_total = 0
     for x in range(nx):
         far_xy = far[ci[x]][np.ix_(cj, ck)]
         sl = phi[x]
         sl[...] = np.where(far_xy, band * sign[ci[x]][np.ix_(cj, ck)], np.nan)
-        need_total += int(np.isnan(sl).sum())
     # Exact distances for the voxels still unset, in chunks of slabs.
     x0 = 0
     while x0 < nx:
@@ -166,7 +177,7 @@ def sdf_from_mesh(
         ii = np.argwhere(np.isnan(sub))
         if len(ii):
             ii[:, 0] += x0
-            sub[np.isnan(sub)] = query(grid.coords(ii))
+            sub[np.isnan(sub)] = query(grid.coords(ii), chunk)
         x0 = x1
     return phi
 
@@ -208,25 +219,36 @@ def sdf_to_mesh(
 ) -> tuple[trimesh.Trimesh, ExportReport]:
     """Marching cubes at phi = 0 with the anisotropic voxel size.
 
-    The field is padded with ``EXPORT_PAD`` empty voxels on every side. Only the largest
-    connected component (by volume) is kept; discarded volume is reported and, above
-    ``max_dropped_mm3``, raises ``SDFError``. No decimation is applied.
+    The field is padded with ``EXPORT_PAD`` empty voxels on every side. Only the largest outward
+    shell (plus the internal voids lying inside it) is kept; the volume of other solid shells is
+    reported as dropped and, above ``max_dropped_mm3``, raises ``SDFError``. No decimation.
     """
+    if not np.isfinite(phi).all():
+        raise SDFError("phi contains NaN or inf")
     far = float(max(np.abs(phi).max(), 1.0))
     padded = np.pad(phi, EXPORT_PAD, mode="constant", constant_values=far)
     if not (padded < 0).any():
         raise SDFError("field has no interior (nothing below zero)")
     verts, faces, _, _ = measure.marching_cubes(padded, level=0.0, spacing=grid.spacing)
     verts = verts + np.asarray(grid.origin) - EXPORT_PAD * np.asarray(grid.spacing)
-    mesh = trimesh.Trimesh(verts, faces[:, ::-1], process=False)  # skimage winds inward; flip
-    # trimesh.split(only_watertight=False) groups faces by shared vertices.
-    parts = mesh.split(only_watertight=False)
-    vols = np.array([abs(p.volume) for p in parts])
-    keep = int(np.argmax(vols))
-    dropped = float(vols.sum() - vols[keep])
+    mesh = trimesh.Trimesh(verts, faces, process=False)
+    parts = mesh.split(only_watertight=False)  # faces grouped by shared vertices
+    vols = np.array([p.volume for p in parts])
+    if vols[np.argmax(np.abs(vols))] < 0:  # make the dominant shell outward-facing
+        for p in parts:
+            p.invert()
+        vols = -vols
+    # Outward shells (volume > 0) are solids; inward shells (volume < 0) are internal voids.
+    solids = np.flatnonzero(vols > 0)
+    keep = int(solids[np.argmax(vols[solids])])
+    dropped = float(vols[solids].sum() - vols[keep])
     if dropped > max_dropped_mm3:
         raise SDFError(f"dropped {dropped:.1f} mm^3 of disconnected fragments (> {max_dropped_mm3:g})")
-    best = parts[keep]
-    if best.volume < 0:
-        best.invert()
-    return best, ExportReport(len(parts), float(abs(best.volume)), dropped, len(best.faces))
+    # Voids belong to the kept solid if they lie inside it; a void inside a dropped fragment goes with it.
+    kept = [parts[keep]]
+    voids = [p for p in parts if p.volume < 0]
+    if voids:
+        probe = MeshQuery(parts[keep])
+        kept += [p for p in voids if probe.winding(p.vertices[:1])[0] > 0.5]
+    best = trimesh.util.concatenate(kept) if len(kept) > 1 else kept[0]
+    return best, ExportReport(len(parts), float(best.volume), dropped, len(best.faces))
