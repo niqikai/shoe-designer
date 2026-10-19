@@ -269,3 +269,18 @@ def test_cavity_volume_is_independent_of_grid_height():
     v = [ease.build_cavity(last, place(), collar, grid_for(top), uniform(1.0)).report["cavity_volume_below_collar_mm3"]
          for top in (60, 90)]
     assert v[0] == pytest.approx(v[1], rel=1e-6)
+
+
+def test_config_errors_are_ease_errors():
+    for raw in ({"base": {"value": 1}, "zone": [{"name": "x", "value": 1}]},          # missing u
+                {"base": {"value": 1}, "zone": [{"name": "x", "u": [0, 1], "value": "a"}]},  # non-numeric
+                {"base": {}}, {"zone": []}):
+        with pytest.raises(ease.EaseError):
+            EaseConfig.from_dict(raw)
+
+
+def test_zone_narrower_than_transition_is_rejected():
+    cfg = cfg_of(zone=[{"name": "thin", "u": [0.5, 0.52], "faces": ["up"], "value": 2.0}])  # 5.5 mm < 10 mm
+    with pytest.raises(ease.EaseError, match="thin"):
+        EaseField(cfg, (0.0, L))
+    EaseField(DEFAULT, (0.0, L))  # the default zones are all wide enough

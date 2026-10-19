@@ -74,6 +74,13 @@ class EaseConfig:
 
     @classmethod
     def from_dict(cls, raw: dict) -> EaseConfig:
+        try:
+            return cls._parse(raw)
+        except (KeyError, TypeError, ValueError) as e:
+            raise EaseError(f"malformed ease config: {type(e).__name__}: {e}") from None
+
+    @classmethod
+    def _parse(cls, raw: dict) -> EaseConfig:
         g, n = raw.get("global", {}), raw.get("normals", {})
         insole = float(raw.get("floor", {}).get("insole_mm", 0.0))
         zones = []
@@ -108,6 +115,10 @@ class EaseField:
         self.config = config
         self.x0 = float(x_range[0])
         self.length = float(x_range[1] - x_range[0])
+        for z in config.zones:  # two centred ramps overlap (and the value is never reached) below one transition width
+            if z.u[0] > 0.0 and z.u[1] < 1.0 and (z.u[1] - z.u[0]) * self.length < config.transition_mm:
+                raise EaseError(f"zone {z.name!r} is {(z.u[1] - z.u[0]) * self.length:.1f} mm wide, "
+                                f"narrower than transition_mm = {config.transition_mm:g}")
 
     @classmethod
     def for_last(cls, last: trimesh.Trimesh, config: EaseConfig | str | Path | None = None) -> EaseField:
@@ -168,7 +179,7 @@ class CollarReport:
     extruded_columns: int
     film_columns: int  # extruded columns where a solid sliver (0 < gap < t_fill) sat under the cap
     through_columns: int  # extruded columns whose cavity already reached z_T (last stands in the mouth)
-    z_top_min: float | None  # lowest height from which a column was opened upward
+    z_top_min: float | None  # lowest height from which a column was opened upward (voxel resolution)
     max_gap_extruded: float  # largest (z_T - z_c) among extruded columns, < t_fill by construction
     min_gap_kept: float | None  # smallest gap among ring columns that keep a roof (>= t_fill)
     kept_gap_hist: dict = field(default_factory=dict)  # roof thickness bins (mm) of the kept ring columns
