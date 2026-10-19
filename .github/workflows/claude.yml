@@ -20,6 +20,9 @@ jobs:
       (github.event_name == 'issues' && github.event.issue.author_association == 'OWNER' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Text that triggered the run; "@claude opus" switches the model below.
+      TRIGGER_TEXT: ${{ github.event.comment.body || github.event.review.body || github.event.issue.body || '' }}
     permissions:
       contents: write
       pull-requests: write
@@ -33,5 +36,5 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
-            --model claude-sonnet-5-5 --max-turns 10
+            --model ${{ contains(env.TRIGGER_TEXT, '@claude opus') && 'claude-opus-5-5' || 'claude-sonnet-5-5' }} --max-turns 10
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
