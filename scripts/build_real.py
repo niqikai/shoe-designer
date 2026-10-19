@@ -162,9 +162,14 @@ def main():
     o = mesh.triangles_center[fl] - np.array([0.0, 0.0, 1e-3])
     loc, ray, _ = mesh.ray.intersects_location(o, np.tile([0.0, 0.0, -1.0], (len(o), 1)), multiple_hits=False)
     sole = o[ray, 2] - loc[:, 2]
-    sole_report = {"samples": int(len(sole)), "min_mm": round(float(sole.min()), 2), "p1_mm": round(float(np.percentile(sole, 1)), 2),
-                   "median_mm": round(float(np.median(sole)), 2), "frac_lt_6": round(float((sole < a.sole).mean()), 4),
-                   "frac_lt_5p5": round(float((sole < a.sole - 0.5).mean()), 4)}
+    flat = loc[:, 2] < 1.0  # underside on the bed; elsewhere (toe spring) the "sole" is just the wall
+
+    def sole_stats(v):
+        return {"samples": int(len(v)), "min_mm": round(float(v.min()), 2), "p1_mm": round(float(np.percentile(v, 1)), 2),
+                "median_mm": round(float(np.median(v)), 2), "frac_lt_6": round(float((v < a.sole).mean()), 4),
+                "frac_lt_5p5": round(float((v < a.sole - 0.5).mean()), 4)}
+
+    sole_report = {"on_bed": sole_stats(sole[flat]), "lifted_underside": sole_stats(sole[~flat]) if (~flat).any() else None}
     verdict = gate_verdict(comp.gate, fill_frac)
     final = {
         "shoe": a.shoe, "params": vars(a), "seconds": secs, "total_seconds": round(time.perf_counter() - t_all, 1),
