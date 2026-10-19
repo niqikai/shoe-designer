@@ -7,7 +7,8 @@
 [global]
 fdm_shrink_mm = 0.2     # FDM bore shrink compensation, added everywhere (value to be calibrated by #11)
 transition_mm = 10.0    # width of the smooth transition at an interior zone edge (centred on the edge)
-smooth_mm = 1.5         # gaussian sigma applied to e on the cavity band to damp mesh-normal noise (0 = off)
+smooth_mm = 1.5         # gaussian sigma applied to e on the cavity band (0 = off). e uses the face normal at the
+                        # closest point, which is arbitrary at vertices/edges (toe, heel ridge); this damps that noise
 
 [normals]
 # Normal classes from the z component of the unit normal nz. Weight ramps 0 -> 1 (smoothstep) as

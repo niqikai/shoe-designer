@@ -166,14 +166,14 @@ class CollarReport:
     extruded_columns: int
     film_columns: int  # extruded columns where a solid sliver (0 < gap < t_fill) sat under the cap
     through_columns: int  # extruded columns whose cavity already reached z_T (last stands in the mouth)
-    z_top_min: float  # lowest height from which a column was opened upward
+    z_top_min: float | None  # lowest height from which a column was opened upward
     max_gap_extruded: float  # largest (z_T - z_c) among extruded columns, < t_fill by construction
     min_gap_kept: float | None  # smallest gap among ring columns that keep a roof (>= t_fill)
     kept_gap_hist: dict = field(default_factory=dict)  # roof thickness bins (mm) of the kept ring columns
 
     def to_dict(self) -> dict:
         return {k: (None if v is None else (round(v, 3) if isinstance(v, float) else v))
-                for k, v in self.__dict__.items()}  # nan stays nan
+                for k, v in self.__dict__.items()}
 
 
 def _column_xy(grid: Grid) -> np.ndarray:
@@ -203,6 +203,8 @@ def open_collar(phi_c: np.ndarray, grid: Grid, collar, t_fill: float = T_FILL_MM
     nx, ny, nz = grid.shape
     zt = collar.z_t(_column_xy(grid)).reshape(nx, ny)
     region = collar_region(grid, collar, reach)
+    if not region.any():
+        raise EaseError("collar region is empty: the grid does not cover the collar rim")
     zs = grid.origin[2] + np.arange(nz) * grid.dz
     if zt[region].max() + 3 * grid.dz > zs[-1]:
         raise EaseError("grid does not extend above the collar; use a taller grid (extend_grid)")
@@ -213,19 +215,22 @@ def open_collar(phi_c: np.ndarray, grid: Grid, collar, t_fill: float = T_FILL_MM
 
     out = phi_c.copy()
     if opened.any():
-        for k in range(int(kc[opened].min()), nz):
-            foot = opened & (kc <= k)
-            if not foot.any():
-                continue
+        def footprint_sdf(foot):
             d = np.where(foot, -(ndimage.distance_transform_edt(foot, sampling=grid.h) - 0.5 * grid.h),
                          ndimage.distance_transform_edt(~foot, sampling=grid.h) - 0.5 * grid.h)
-            out[:, :, k] = np.minimum(out[:, :, k], d.astype(np.float32))
+            return d.astype(np.float32)
+
+        k_lo, k_hi = int(kc[opened].min()), int(kc[opened].max())
+        for k in range(k_lo, k_hi + 1):
+            out[:, :, k] = np.minimum(out[:, :, k], footprint_sdf(opened & (kc <= k)))
+        if k_hi + 1 < nz:  # above the last opened column the footprint no longer changes
+            out[:, :, k_hi + 1:] = np.minimum(out[:, :, k_hi + 1:], footprint_sdf(opened)[:, :, None])
     kept = ring & ~opened
     through = opened & through
     rep = CollarReport(
         ring_columns=int(ring.sum()), extruded_columns=int(opened.sum()),
-        film_columns=int((opened & ~through & (gap > grid.dz)).sum()), through_columns=int(through.sum()),
-        z_top_min=float(zs[kc[opened]].min()) if opened.any() else float("nan"),
+        film_columns=int((opened & ~through & (gap > grid.dz)).sum()), through_columns=int(through.sum()),  # film: gap > 1 voxel = a real sliver, not the voxel step
+        z_top_min=float(zs[kc[opened]].min()) if opened.any() else None,
         max_gap_extruded=float(gap[opened].max()) if opened.any() else 0.0,
         min_gap_kept=float(gap[kept].min()) if kept.any() else None,
         kept_gap_hist={f"{a}-{b}": int(((gap[kept] >= a) & (gap[kept] < b)).sum())
@@ -299,8 +304,10 @@ def build_cavity(
     ``phi_L`` is an exact distance within ``e_max + band_margin`` of the last and +-band beyond it; there
     ``e`` is set to its largest value, which cannot move the zero level. Inside the band, ``e`` is the
     zone ease at the closest point of the last, lightly smoothed (``smooth_mm``). ``phi_C`` is exactly
-    ``phi_L - e`` only up to the Lipschitz factor of ``e`` (<= ~0.2 for a 2 mm step over 10 mm), so
-    the cavity wall is within ~2% of ``e`` along the normal.
+    ``phi_L - e`` only up to the Lipschitz factor of ``e``: a smoothstep of height D over the 10 mm
+    transition has peak slope 1.5*D/10 (0.3 for the 2 mm instep step, a bit less after the gaussian
+    smoothing), so the wall's normal distance differs from ``e`` by about 1 - 1/sqrt(1 + slope^2),
+    i.e. up to ~4% (~0.1 mm) at the steepest point and nothing elsewhere.
 
     Returns a :class:`Cavity` with ``phi`` (float32, shape ``grid.shape``), ``grid`` and a report.
     """
