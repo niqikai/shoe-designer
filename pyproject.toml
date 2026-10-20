@@ -15,14 +15,14 @@ dependencies = [
 [project.optional-dependencies]
 # Fast ray queries (needed for 1M-face audits). No wheels on Linux aarch64 or macOS < 13, so optional.
 fast = ["embreex>=4.4.0"]
-# Intent parsing (#16): schema validation (needed by tests/test_intent.py) and the Claude API backend.
-intent = ["anthropic>=0.40", "jsonschema>=4.20"]
+# Intent parsing (#16): the Claude API backend. jsonschema (schema validation) is in the dev group.
+intent = ["anthropic>=0.40"]
 
 [project.scripts]
 shoe-assets = "shoe_designer.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "jsonschema>=4.20"]
 
 [build-system]
 requires = ["hatchling"]

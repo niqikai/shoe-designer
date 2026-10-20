@@ -9,7 +9,7 @@ returns a JSON object; this module
 * fills pattern parameters from the style-tag presets (``config/intent.toml``),
 * reports requests the design space cannot realise (heel height, toe shape ...) in ``unsupported_requests``.
 
-``pip install shoe-designer[intent]`` provides jsonschema and anthropic. See docs/design/issue-16-intent.md.
+jsonschema is in the dev dependency group; the Claude backend needs the optional ``intent`` extra (anthropic). See docs/design/issue-16-intent.md.
 """
 
 from __future__ import annotations
@@ -25,7 +25,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-import jsonschema
+try:
+    import jsonschema
+except ImportError as e:  # pragma: no cover
+    raise ImportError(
+        "shoe_designer.intent needs jsonschema: run `uv sync` (it is in the dev group) or `pip install jsonschema`"
+    ) from e
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "intent.toml"

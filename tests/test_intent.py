@@ -5,8 +5,6 @@ import types
 
 import pytest
 
-pytest.importorskip("jsonschema")  # optional extra: uv sync --extra intent
-
 from shoe_designer import intent as it  # noqa: E402
 
 CFG = it.load_config()

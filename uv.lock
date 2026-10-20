@@ -1240,11 +1240,11 @@ fast = [
 ]
 intent = [
     { name = "anthropic" },
-    { name = "jsonschema" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "jsonschema" },
     { name = "pytest" },
 ]
 
@@ -1252,7 +1252,6 @@ dev = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'intent'", specifier = ">=0.40" },
     { name = "embreex", marker = "extra == 'fast'", specifier = ">=4.4.0" },
-    { name = "jsonschema", marker = "extra == 'intent'", specifier = ">=4.20" },
     { name = "libigl", specifier = ">=2.6.3" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "rtree", specifier = ">=1.2" },
@@ -1263,7 +1262,10 @@ requires-dist = [
 provides-extras = ["fast", "intent"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "jsonschema", specifier = ">=4.20" },
+    { name = "pytest", specifier = ">=8" },
+]
 
 [[package]]
 name = "sniffio"

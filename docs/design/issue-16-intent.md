@@ -3,7 +3,7 @@
 目标:把用户的文字或图片翻译成**严格的、流水线今天真能实现的**参数;做不到的需求明确报告,不静默忽略、不编造。AI 只做翻译,不产出几何。
 
 实现:`src/shoe_designer/intent.py`;Schema:`schemas/intent.schema.json`;设计空间与预设:`config/intent.toml`;演示:`scripts/intent_demo.py`;测试:`tests/test_intent.py`。
-依赖放在可选 extra:`uv sync --extra intent`(jsonschema + anthropic;测试需要 jsonschema,没装时测试整体跳过)。
+依赖:jsonschema 在 dev 依赖组(`uv sync` 即装,CI 因此真正运行测试);Claude 后端需要可选 extra `uv sync --extra intent`(anthropic,延迟导入,测试用假 client 不需要它)。
 
 ## 1. 设计空间(今天能变的东西)
 
