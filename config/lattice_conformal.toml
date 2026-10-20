@@ -1,0 +1,57 @@
+# Conformal flow-aligned yarn pattern (#46 part A, checkpoint-1 prototype): read by shoe_designer.lattice_conformal.
+# Same keys as config/lattice_variants.toml (VariantSpec) plus the flow keys below. The three variants are an ablation on one patch
+# of the forefoot upper: c0 = the #14 engine (chart (r0*theta, x), straight Voronoi edges, no flow), c1 = flow chart
+# (cells follow the cross-section, no sweep), c2 = flow chart + flow field. All numbers are demo defaults, not product decisions.
+#
+# flow_sweep         [[u, deg], ...] mean yarn direction from the foot axis (0 = along the foot), u = 0 heel .. 1 toe
+# flow_amp_deg       amplitude of the first harmonic about the foot axis (yarns lean one way on top, the other way under)
+# flow_theta0_deg    angle about the foot axis (0 = +y, 90 = up) where the harmonic is largest
+# flow_base_u        the streamline label is the circumferential position at this u
+# flow_compress      allowed range of neighbouring-streamline spacing; the build is refused outside it
+# rho_floor_frac     the equivalent radius of the cross-section is floored at this fraction of r0 (toe / heel poles are NOT solved)
+
+[defaults]
+style = "voronoi"
+voxel_mm = 0.5
+pitch_mm = 17.0
+jitter = 0.28
+elongate = 1.6
+fillet_mm = 2.5
+yarn_mm = 2.4
+thickness_mm = 3.4
+rim_mm = 8.0
+rim_thick_mm = 0.0
+sole_mm = 6.0
+sole_mode = "slab"
+sole_kind = "bcc"
+sole_cell_mm = 14.0
+seed = 7
+
+[[variant]]
+name = "c0_direct"
+description = "#14 engine: Voronoi in the chart (r0*theta, x), straight edges, no flow"
+conformal = false
+
+[[variant]]
+name = "c1_chart"
+description = "flow chart without flow: cell size follows the cross-section, cells round (conformal in theta, int dx/rho)"
+conformal = true
+
+[[variant]]
+name = "c2_flow"
+description = "flow chart + flow field: yarns sweep 20 deg along the foot and lean +-14 deg over/under the foot, cells elongated 1.6x along the flow"
+conformal = true
+flow_sweep = [[0.0, 20.0], [1.0, 20.0]]
+flow_amp_deg = 14.0
+flow_amp_pts = [[0.0, 0.0], [0.35, 0.0], [0.5, 1.0], [0.75, 1.0], [0.9, 0.0], [1.0, 0.0]]
+flow_theta0_deg = 90.0
+
+[[variant]]
+name = "c3_flow_strong"
+description = "stronger flow: sweep 35 deg, lean +-16 deg, cells 2.4x longer than wide (pitch 14): long yarns that bend with the foot"
+pitch_mm = 14.0
+elongate = 2.4
+flow_sweep = [[0.0, 35.0], [1.0, 35.0]]
+flow_amp_deg = 16.0
+flow_amp_pts = [[0.0, 0.0], [0.35, 0.0], [0.5, 1.0], [0.75, 1.0], [0.9, 0.0], [1.0, 0.0]]
+flow_compress = [0.4, 2.6]
