@@ -1,0 +1,35 @@
+# Pattern layer (#13): perforation / surface displacement on phi_shoe. Read by shoe_designer.pattern.
+# Values are GENERIC SLS/MJF TPU reference numbers, not a factory data sheet: every one is a config item to be
+# replaced once the manufacturer confirms. Items marked (ask) are decisions for the user / factory.
+
+[manufacturing]
+strut_min_mm = 1.2        # smallest web between holes (table: minimum wall / lattice strut >= 1.2); process.wall_min raises it
+strut_margin_mm = 0.3     # construction margin on top of the strut floor (marching-cubes noise), so audit stays >= 1.2
+hole_min_mm = 3.0         # (ask) smallest hole width; holes and cells below it are not made
+perf_wall_min_mm = 1.2    # perforate only where the local wall (outer skin to cavity) is at least this thick
+perf_wall_max_mm = 6.0    # ... and at most this thick: thicker is solid fill, a hole there would be a blind pocket
+
+[protect]
+sole_margin_mm = 4.0      # no pattern below (cavity floor + this); also below bed_z + sole_min + this
+collar_margin_mm = 8.0    # no pattern within this of the collar line (below z_T)
+heel_frac = 0.20          # (ask) heel counter: x below x_min + heel_frac * length is protected unless "heel" is in zones
+toe_frac = 0.85           # (ask) toe cap: x above x_min + toe_frac * length is protected unless "toe" is in zones
+min_normal_cos = 0.7      # the pattern is projected along the dominant axis of the surface normal: only where |n.axis| >= this
+cell_margin_mm = 2.0      # a hex / voronoi cell with a vertex this close to a protected or invalid area is left solid whole
+seam_mm = 2.0             # vertices this close to another projection family / side count as a seam (cells there are cut in half)
+
+[displacement]
+fade_mm = 3.0             # amplitude fades to 0 over at least this distance towards a protected area (never below scale / 2)
+normal_smooth_mm = 1.0    # gaussian sigma of the field the normals / projection come from
+
+[voronoi]
+jitter = 0.25             # seed jitter as a fraction of the cell pitch
+
+[image]
+fit = "contain"           # "contain": keep aspect ratio, centred in the face bounding box; "stretch": fill it
+threshold = 0.5           # gray below this is the feature (hole / raised); white is plain surface
+raster_mm = 0.5           # resolution of the image mask in the face plane
+blur_mm = 0.6             # gaussian blur of the displacement height map
+
+[material]
+density_g_cm3 = 1.2       # (ask) sintered TPU density, only for the weight estimate
