@@ -48,6 +48,32 @@ class ConformalSpec(VariantSpec):
     rho_floor_frac: float = 0.55
     chart_step_mm: float = 0.5
     flow_max_deg: float = 70.0
+    chart: str = "lscm"  # "lscm" (mid-surface conformal chart, falls back to the analytic chart if the mesh is not one disk) or "analytic"
+    flow_cross_deg: float = 0.0  # lscm chart: lean of the yarns away from the top line, alpha = sweep - cross * v_n (v_n = -1 .. 1 across the foot)
+    lscm_target_faces: int = 40000
+    lloyd_iters: int = 6  # voronoi in the lscm chart: seeds are placed for equal WORLD cell area (the conformal factor varies 0.8-3x) and relaxed this often
+    lscm_pin_fracs: tuple = (0.2, 0.8)
+    seam_solid_mm: float = 8.0  # half width of the solid strip over the heel seam
+    seam_x_frac: float = 0.30
+    reach_mm: float = 3.0  # shell points farther than this from the chart mesh stay solid
+    sole_pad_mm: float = 2.5  # sole_mode = "net": solid pad plate under the foot
+    sole_pad_hole_mm: float = 6.0
+    sole_pad_hole_pitch_mm: float = 16.0
+    sole_wall_mm: float = 3.4  # outer wall net thickness
+    sole_wall_rod_mm: float = 3.0
+    sole_pitch_mm: float = 16.0  # outer wall net cell size
+    sole_el: float = 1.4
+    sole_ring_mm: float = 6.0  # bottom edge bead diameter (0 = none)
+    sole_wall_calib: float = 0.7  # measured wall volume of a jittered Voronoi with fillets is ~1.4x the thin-wall estimate 2.1 t / pitch
+    outline: tuple = ()  # outline functions (shoe_designer.outline), each a dict: {fn = "toe", kind = "high", ...}
+    sole_bulge_mm: float = 0.0  # net sole: inset of the bottom edge (curved, bulging side wall)
+    sole_bulge_power: float = 1.5
+    sole_rocker2_mm: float = 0.0  # net sole: cradle (extra rise of the bottom towards the toe and the sides)
+    sole_rocker2_start: float = 0.55
+    sole_cradle_mm: float = 0.0
+    tab_w_mm: float = 0.0  # flat pull tab (0 = none)
+    tab_t_mm: float = 2.6
+    tab_d_mm: float = 26.0
     flow_compress: tuple = (0.55, 1.8)  # allowed range of d psi / d p (width of a flow tube relative to the base line)
     # width of a cell (across the flow) relative to the along-flow length: elongate = length / width
 
@@ -58,11 +84,13 @@ class ConformalSpec(VariantSpec):
         bad = set(d) - names
         if bad:
             raise LatticeError(f"unknown conformal keys {sorted(bad)}")
-        for k in ("raise_pts", "pitch_pts", "yarn_pts_u", "yarn_pts_z", "image_u", "sole_density", "flow_sweep", "flow_amp_pts", "flow_compress"):
+        for k in ("raise_pts", "pitch_pts", "yarn_pts_u", "yarn_pts_z", "image_u", "sole_density", "flow_sweep", "flow_amp_pts", "flow_compress", "lscm_pin_fracs"):
             if k in d:
                 d[k] = tuple(tuple(float(v) for v in p) if isinstance(p, (list, tuple)) else float(p) for p in d[k])
         if "bumps" in d:
             d["bumps"] = tuple(tuple(sorted(b.items())) for b in d["bumps"])
+        if "outline" in d:
+            d["outline"] = tuple(tuple(sorted(o.items())) for o in d["outline"])
         return cls(**d)
 
 
@@ -377,3 +405,379 @@ def shell_pores(solid: np.ndarray, h: float, band: np.ndarray) -> dict:
     d = 2.0 * np.asarray(mx)[keep]
     return {"n": int(keep.sum()), "min": float(d.min()), "p05": float(np.percentile(d, 5)), "median": float(np.median(d)), "p95": float(np.percentile(d, 95)),
             "max": float(d.max()), "n_below_5mm": int((d < 5.0).sum())}
+
+
+# ----------------------------------------------------------------------------------------------- flow in the LSCM chart
+class UVFlow:
+    """Flow field on the uv plane of an :class:`~shoe_designer.lattice_lscm.LscmChart` (u along the foot, heel -> toe)."""
+
+    def __init__(self, chart, v: ConformalSpec):
+        self.v = v
+        uv = chart.uv
+        h = v.chart_step_mm
+        self.h = h
+        self.u0, self.u1 = float(uv[:, 0].min()), float(uv[:, 0].max())
+        self.vlo, self.vhi = float(uv[:, 1].min()), float(uv[:, 1].max())
+        # across-foot position v_n(u): centre line and half width from the mesh
+        nb = 60
+        edges = np.linspace(self.u0, self.u1, nb + 1)
+        k = np.clip(np.digitize(uv[:, 0], edges) - 1, 0, nb - 1)
+        vmid = np.array([0.5 * (uv[k == i, 1].min() + uv[k == i, 1].max()) if (k == i).any() else np.nan for i in range(nb)])
+        vhalf = np.array([0.5 * (uv[k == i, 1].max() - uv[k == i, 1].min()) if (k == i).any() else np.nan for i in range(nb)])
+        ok = np.isfinite(vmid)
+        cen = 0.5 * (edges[1:] + edges[:-1])
+        self.cen, self.vmid, self.vhalf = cen[ok], ndimage.gaussian_filter1d(vmid[ok], 2, mode="nearest"), np.maximum(ndimage.gaussian_filter1d(vhalf[ok], 2, mode="nearest"), 5.0)
+        self.L = self.u1 - self.u0
+        ext = 1.3 * self.L * math.tan(math.radians(v.flow_max_deg)) * 0.5 + 40.0
+        self.vg = np.arange(self.vlo - ext, self.vhi + ext, h)
+        self.ug = np.arange(self.u0 - 5.0, self.u1 + 5.0 + h, h)
+        self._build()
+
+    def alpha(self, uu, vv):
+        v = self.v
+        un = (uu - self.u0) / self.L
+        vm = np.interp(uu, self.cen, self.vmid)
+        vh = np.interp(uu, self.cen, self.vhalf)
+        vn = np.clip((vv - vm) / vh, -1.0, 1.0)
+        sw = np.interp(un, [q[0] for q in v.flow_sweep], [q[1] for q in v.flow_sweep])
+        am = np.interp(un, [q[0] for q in v.flow_amp_pts], [q[1] for q in v.flow_amp_pts])
+        return np.radians(np.clip(sw - v.flow_cross_deg * am * vn, -v.flow_max_deg, v.flow_max_deg))
+
+    def _build(self):
+        v, h = self.v, self.h
+        ug, vg = self.ug, self.vg
+        nu = len(ug)
+        k0 = int(np.argmin(np.abs(ug - (self.u0 + v.flow_base_u * self.L))))
+        P = np.empty((nu, len(vg)))
+        F = np.empty((nu, len(vg)))
+        P[k0], F[k0] = vg, 0.0
+        for direction in (1, -1):
+            pc, fc = vg.copy(), np.zeros(len(vg))
+            k = k0
+            while 0 <= k + direction < nu:
+                du = direction * h
+                a1 = self.alpha(ug[k], pc)
+                pm = pc + 0.5 * du * np.tan(a1)
+                a2 = self.alpha(ug[k] + 0.5 * du, pm)
+                pc = pc + du * np.tan(a2)
+                fc = fc + abs(du) / np.cos(a2) * direction
+                k += direction
+                P[k], F[k] = pc, fc
+        PSI = np.empty((nu, len(vg)))
+        PHI = np.empty((nu, len(vg)))
+        lo, hi = np.inf, 0.0
+        for k in range(nu):
+            if (np.diff(P[k]) <= 0).any():
+                raise LatticeError("flow streamlines cross: reduce flow_cross_deg / flow_sweep")
+            PSI[k] = np.interp(vg, P[k], vg, left=np.nan, right=np.nan)
+            PHI[k] = np.interp(vg, P[k], F[k], left=np.nan, right=np.nan)
+            m = (vg > self.vlo) & (vg < self.vhi)
+            w = np.gradient(PSI[k], h)
+            if np.isfinite(w[m]).all():
+                lo, hi = min(lo, float(w[m].min())), max(hi, float(w[m].max()))
+        if not np.isfinite(PSI[:, (vg > self.vlo) & (vg < self.vhi)]).all():
+            raise LatticeError("flow leaves the chart: reduce the sweep")
+        self.psi_v_range = (lo, hi)
+        a, b = v.flow_compress
+        if lo < a or hi > b:
+            raise LatticeError(f"flow compression d(psi)/d(v) in [{lo:.2f}, {hi:.2f}] outside the allowed [{a}, {b}]")
+        PSI = np.where(np.isfinite(PSI), PSI, vg[None, :])
+        PHI = np.where(np.isfinite(PHI), PHI, 0.0)
+        self.tab = np.stack([PSI, PHI, np.gradient(PSI, h, axis=0), np.gradient(PSI, h, axis=1), np.gradient(PHI, h, axis=0), np.gradient(PHI, h, axis=1)])
+        self.alpha_ref = math.radians(float(np.interp(v.flow_base_u, [q[0] for q in v.flow_sweep], [q[1] for q in v.flow_sweep])))
+
+    def eval(self, uu, vv):
+        """(psi, phi, psi_u, psi_v, phi_u, phi_v) at uv points."""
+        ci = np.clip((uu - self.ug[0]) / self.h, 0, len(self.ug) - 1)
+        cj = np.clip((vv - self.vg[0]) / self.h, 0, len(self.vg) - 1)
+        return tuple(ndimage.map_coordinates(self.tab[i], [ci, cj], order=1, mode="nearest") for i in range(6))
+
+
+class ConformalKnitUV(KnitLayer2):
+    """KnitLayer2 whose Voronoi pattern lives in the flow-aligned LSCM chart (world-space tube distance)."""
+
+    def __init__(self, p, v, aux, rs, frame, image, chart, flow: UVFlow):
+        super().__init__(p, v, aux, rs, frame, image)
+        self.lchart, self.flow = chart, flow
+        el, pitch = v.elongate, v.pitch_mm
+        sa, ca = math.sin(flow.alpha_ref), math.cos(flow.alpha_ref)
+        self.sa, self.ca = sa, ca
+        # seeds in the orthogonalised coordinates c = ((phi + psi sa) / el, psi ca): equal world cell area (density ~ lam^2 / det), Lloyd-relaxed
+        psi, phi, *_ = flow.eval(chart.uv[:, 0], chart.uv[:, 1])
+        step = 1.5
+        gu = np.arange(chart.uv[:, 0].min(), chart.uv[:, 0].max() + step, step)
+        gv = np.arange(chart.uv[:, 1].min(), chart.uv[:, 1].max() + step, step)
+        G = np.stack(np.meshgrid(gu, gv, indexing="ij"), -1).reshape(-1, 2)
+        dq, iq = cKDTree(chart.uv).query(G)
+        ok = dq < 3.0
+        G, lam = G[ok], chart.lam[iq[ok]]
+        ps, ph, ps_u, ps_v, ph_u, ph_v = flow.eval(G[:, 0], G[:, 1])
+        cs = np.stack([(ph + ps * sa) / el, ps * ca], axis=1)
+        det = np.abs(((ph_u + sa * ps_u) / el) * (ca * ps_v) - ((ph_v + sa * ps_v) / el) * (ca * ps_u))
+        wgt = lam**2 / np.maximum(det, 1e-3)
+        world_area = float((lam**2).sum() * step * step)
+        n_seed = max(int(round(world_area / (0.87 * pitch * pitch * el))), 8)
+        rng = np.random.default_rng(v.seed)
+        pr = lam**2
+        pick = rng.choice(len(cs), size=min(n_seed, len(cs)), replace=False, p=pr / pr.sum())
+        pts = cs[pick] + rng.uniform(-v.jitter, v.jitter, (len(pick), 2)) * pitch
+        if v.style != "triangle":
+            for _ in range(max(v.lloyd_iters, 0)):
+                _, a = cKDTree(pts).query(cs)
+                num = np.zeros_like(pts)
+                den = np.zeros(len(pts))
+                np.add.at(num, a, cs * wgt[:, None])
+                np.add.at(den, a, wgt)
+                m = den > 0
+                pts[m] = num[m] / den[m, None]
+        self.seed_pts = pts
+        self.seed_tree = cKDTree(pts)
+        self.n_seeds = len(pts)
+        # solid heel seam strip and coverage bookkeeping
+        ax = p.axis
+        self.seam_x = ax["x_min"] + v.seam_x_frac * (ax["x_max"] - ax["x_min"]) if ax["toe"] == "+x" else ax["x_max"] - v.seam_x_frac * (ax["x_max"] - ax["x_min"])
+        self.uncovered = 0
+        self.total = 0
+        self.reach = v.reach_mm
+
+    def _theta(self, x, py, pz):
+        self._last = (x, py, pz)
+        return super()._theta(x, py, pz)
+
+    def _chart(self, ix, x, theta, th, ns, a_mid):
+        v, fl, lc = self.v, self.flow, self.lchart
+        x_, py, pz = self._last
+        pts = np.stack([np.full(len(py), x_), py, pz], axis=1).astype(np.float64)
+        uv, J, dist_m = lc.eval(pts)
+        psi, phi, psi_u, psi_v, phi_u, phi_v = fl.eval(uv[:, 0], uv[:, 1])
+        el, sa, ca = v.elongate, self.sa, self.ca
+        if v.style == "triangle":  # three families of straight lines (in the orthogonalised chart), 60 degrees apart
+            c1, c2 = phi + psi * sa, psi * ca
+            sp_ = v.pitch_mm * math.sqrt(3.0) / 2.0
+            best_s, best_g = np.full(len(c1), np.inf), np.zeros((len(c1), 2))
+            for ang in (0.0, math.pi / 3.0, 2.0 * math.pi / 3.0):
+                nx_, ny_ = math.cos(ang), math.sin(ang)
+                t = c1 * nx_ + c2 * ny_
+                r = np.mod(t, sp_)
+                sgn = np.where(r < 0.5 * sp_, r, r - sp_)  # signed distance to the nearest line
+                m = np.abs(sgn) < np.abs(best_s)
+                best_s = np.where(m, sgn, best_s)
+                best_g[m] = (nx_, ny_)
+            g_phi, g_psi = best_g[:, 0], best_g[:, 0] * sa + best_g[:, 1] * ca
+            g_uv = np.stack([g_phi * phi_u + g_psi * psi_u, g_phi * phi_v + g_psi * psi_v], axis=1)
+            gw = np.einsum("nij,ni->jn", J, g_uv)
+            gn = np.maximum(np.linalg.norm(gw, axis=0), 1e-6)
+            out = self._tube(a_mid, best_s / gn, np.sum(ns * gw / gn, axis=0))
+            return self._finish(out, a_mid, dist_m, x_, py)
+        q = np.stack([(phi + psi * sa) / el, psi * ca], axis=1)
+        dist, idx = self.seed_tree.query(q, k=3)
+        u = [(q - self.seed_pts[idx[:, i]]) / np.maximum(dist[:, i : i + 1], 1e-9) for i in range(3)]
+        d01, d02 = 0.5 * (dist[:, 1] - dist[:, 0]), 0.5 * (dist[:, 2] - dist[:, 0])
+        g01, g02 = 0.5 * (u[1] - u[0]), 0.5 * (u[2] - u[0])
+        k = v.fillet_mm
+        if k > 0:
+            m = np.minimum(d01, d02)
+            e1, e2 = np.exp(-(d01 - m) / k), np.exp(-(d02 - m) / k)
+            d = m - k * np.log(e1 + e2)
+            g = (e1[:, None] * g01 + e2[:, None] * g02) / (e1 + e2)[:, None]
+        else:
+            d, g = d01, g01
+        gphi = g[:, 0] / el
+        gpsi = g[:, 0] * sa / el + g[:, 1] * ca
+        g_uv = np.stack([gphi * phi_u + gpsi * psi_u, gphi * phi_v + gpsi * psi_v], axis=1)
+        gw = np.einsum("nij,ni->jn", J, g_uv)
+        gn = np.maximum(np.linalg.norm(gw, axis=0), 1e-6)
+        out = self._tube(a_mid, d / gn, np.sum(ns * gw / gn, axis=0))
+        return self._finish(out, a_mid, dist_m, x_, py)
+
+    def _finish(self, out, a_mid, dist_m, x_, py):
+        """No pattern where the chart does not reach, and over the heel seam: the point stays solid (tube distance 0)."""
+        v = self.v
+        yc = np.interp(x_, self.frame["x"], self.frame["yc"])
+        heel = (x_ < self.seam_x) if self.p.axis["toe"] == "+x" else (x_ > self.seam_x)
+        near = np.abs(a_mid) < 0.5 * v.yarn_mm * 1.3 + 1.0  # only points near the rod mid-surface need the chart; the others are air anyway
+        dist_t = np.sqrt(np.maximum(dist_m**2 - a_mid**2, 0.0))  # distance along the surface (the offset from the mid-surface is not a gap)
+        solid = ((dist_t > self.reach) & near) | (heel & (np.abs(py - yc) < v.seam_solid_mm))
+        self.uncovered += int(((dist_t > self.reach) & near).sum())
+        self.total += int(near.sum())
+        return np.where(solid, 0.0, out)
+
+
+# ----------------------------------------------------------------------------------------------- whole-shoe build
+def build_whole(prep: Prep, v: ConformalSpec, cfg, process, progress=None):
+    """Whole upper with the flow-aligned pattern. Returns (fine phi, fine grid, report, aux). The chart is LSCM when the mesh is one clean
+    disk, else the analytic chart (the reason is in the report)."""
+    import dataclasses
+
+    from . import lattice_lscm as LS
+    from .lattice import LatticeConfig, SoleLayer, SoleZone, build_fine, check_sole_params
+    from .lattice_upper import foot_frame
+    from .lattice_variants import check_variant, effective_sole, shell_body_v
+
+    from .lattice import strut_min_mm
+    from .lattice_sole import SoleNetLayer, check_sole_net, footprint
+    from .lattice_variants import sole_bottom
+
+    from . import outline as O
+
+    if v.outline:
+        v = O.apply_outline(v, [dict(o) for o in v.outline])
+    net = v.sole_mode == "net"
+    chk = check_variant(v, cfg, process)
+    cfg_v = dataclasses.replace(LatticeConfig(**{**cfg.__dict__, "voxel_mm": v.voxel_mm}), sole=effective_sole(v, cfg))
+    body, aux = shell_body_v(prep, v)
+    shell_sole = v.sole_mode == "shell"
+    if v.tab_w_mm > 0:
+        body = np.minimum(body, pull_tab_body(prep, v, body, aux["zt_var"])).astype(np.float32)
+        body[body == 0] = 1e-3
+    zone = SoleZone.build(body, prep.c0, prep.grid, cfg_v.sole) if not (shell_sole or net) else None
+    pores = check_sole_params(cfg_v, process, zone) if (not v.preview and not (shell_sole or net)) else {}
+    sole_feats = None
+    if net:
+        need = max(cfg.min_opening_mm if False else 0.0, process.min_channel_mm if process is not None else 0.0)
+        sole_feats = check_sole_net(v, strut_min_mm(cfg, process), need, cfg.voxel_ratio)
+        chk = {**chk, "printable": bool(v.voxel_mm <= min(chk["yarn_diameter_min_mm"], sole_feats["thinnest_mm"]) / cfg.voxel_ratio * (1 + 1e-9) and not v.preview)}
+    frame = foot_frame(prep.c0, prep.zt, prep.grid, v.pitch_mm)
+    route, why, lchart, flow, fchart = "analytic", "", None, None, None
+    if v.conformal and v.chart == "lscm":
+        try:
+            lchart = LS.build_chart(prep, aux, v.rim_mm, 0.0, field=(prep.c0 - 0.5 * aux["T"]).astype(np.float32), floor_margin_mm=max(v.sole_margin_mm - 1.0, 0.5), target_faces=v.lscm_target_faces,
+                                    seam_half_mm=3.0, seam_x_frac=v.seam_x_frac, frame=frame, pin_fracs=tuple(v.lscm_pin_fracs))
+            route = "lscm"
+        except LatticeError as e:  # mesh problems fall back to the analytic chart; the flow guard below is a config error and propagates
+            why = str(e)
+            lchart = None
+        if lchart is not None:
+            flow = UVFlow(lchart, v)
+    if route == "analytic" and v.conformal:
+        fchart = FlowChart(prep, v, frame)
+    holder = {}
+
+    def layers(rs, fg):
+        holder["rs"] = rs
+        if route == "lscm":
+            holder["knit"] = ConformalKnitUV(prep, v, aux, rs, frame, None, lchart, flow)
+        elif v.conformal:
+            holder["knit"] = ConformalKnit(prep, v, aux, rs, frame, None, fchart)
+        else:
+            holder["knit"] = KnitLayer2(prep, v, aux, rs, frame, None)
+        if net:
+            foot = footprint(prep, aux, aux["T"], v.sole_flare_mm)
+            holder["sole"] = SoleNetLayer(prep, aux, rs, v, foot, sole_bottom(prep, v))
+            return [holder["sole"], holder["knit"]]
+        return ([] if shell_sole else [SoleLayer(zone, rs)]) + [holder["knit"]]
+
+    fine, fg, stats = build_fine(body, prep.grid, layers, v.voxel_mm, cfg.pad_mm, progress)
+    k = holder["knit"]
+    aux = {**aux, "rs": holder["rs"], "spec": v}
+    rep = {"outline": [dict(o) for o in v.outline], "name": v.name, "route": route if v.conformal else "direct (#14)", "fallback_reason": why, "check": chk, "voxel_mm": v.voxel_mm, "printable": chk["printable"],
+           "yarn_diameter_used_mm": [round(k.r_min, 3), round(k.r_max, 3)], "sole_pores": pores, "sole_net": sole_feats,
+           "solid_body_cm3": round(stats.vol_base_mm3 / 1000, 2), "lattice_body_cm3": round(stats.vol_final_mm3 / 1000, 2)}
+    if net:
+        rep["sole_zone"] = {"slab_below_pad_cm3": round(stats.zone_base_mm3 / 1000, 2), "solid_after_cm3": round(stats.zone_final_mm3 / 1000, 2),
+                            "fill_fraction": round(stats.zone_final_mm3 / max(stats.zone_base_mm3, 1e-9), 3), "outer_wall_cells": holder["sole"].n_cells,
+                            "wall_length_mm": round(holder["sole"].L, 1), "inner_wall_mm": holder["sole"].wall_in.round(2).tolist()}
+    if lchart is not None:
+        rep["lscm"] = lchart.report
+        rep["flow"] = {"psi_v_range": [round(x, 3) for x in flow.psi_v_range]}
+        rep["coverage"] = chart_coverage(prep, aux, v, lchart)
+    return fine, fg, rep, aux
+
+
+def chart_coverage(prep: Prep, aux: dict, v: ConformalSpec, chart) -> dict:
+    """Share of the rod zone (coarse voxels within the rod reach of the mid-surface phi_C = T/2, between the sole band and the rim) farther than ``reach_mm`` from the chart mesh."""
+    g = prep.grid
+    X, Y, Z = np.meshgrid(g.origin[0] + np.arange(g.shape[0]) * g.h, g.origin[1] + np.arange(g.shape[1]) * g.h, g.origin[2] + np.arange(g.shape[2]) * g.dz, indexing="ij")
+    m = (np.abs(prep.c0 - 0.5 * aux["T"]) < 0.5 * v.yarn_mm * 1.3 + 1.0) & (Z > aux["floor"][:, :, None] + v.sole_margin_mm) & (Z < aux["zt_var"][:, :, None] - v.rim_mm)
+    pts = np.stack([X[m], Y[m], Z[m]], 1)
+    d, _ = chart.tree.query(pts)
+    a = (prep.c0 - 0.5 * aux["T"])[m]
+    dt = np.sqrt(np.maximum(d**2 - a**2, 0.0))
+    return {"zone_points": int(len(pts)), "uncovered_share": round(float((dt > v.reach_mm).mean()), 4), "reach_mm": v.reach_mm}
+
+
+def yarn_zone_masks(prep: Prep, aux: dict, v: ConformalSpec, fg, rs, u_range=None) -> tuple[np.ndarray, np.ndarray]:
+    """(region, band) on the fine grid: the yarn zone (shell between sole band and rim, 3 mm margins; optional u range) and its one-voxel
+    mid-surface layer."""
+    g = prep.grid
+    shape = (fg.shape[0], fg.shape[1], fg.shape[2])
+    c0f = np.empty(shape, np.float32)
+    for ix in range(shape[0]):
+        c0f[ix] = rs.plane(prep.c0, ix)
+    X2, Y2 = np.meshgrid(rs.x, rs.y, indexing="ij")
+    ci = [(X2 - g.origin[0]) / g.h, (Y2 - g.origin[1]) / g.h]
+    zf = ndimage.map_coordinates(aux["floor"], ci, order=1, mode="nearest")
+    zt = ndimage.map_coordinates(aux["zt_var"], ci, order=1, mode="nearest")
+    z = rs.z[None, None, :]
+    region = ((z > (zf + v.sole_margin_mm + 3.0)[:, :, None]) & (z < (zt - v.rim_mm - 3.0)[:, :, None]) & (c0f > 0) & (c0f < v.thickness_mm))
+    if u_range is not None:
+        xu = u_of_x(rs.x, prep.axis)[:, None, None]
+        region &= (xu > u_range[0]) & (xu < u_range[1])
+    band = region & (np.abs(c0f - 0.5 * v.thickness_mm) < 0.75 * fg.h)
+    return region, band
+
+
+def mesh_thickness(mesh, n: int = 200000, seed: int = 0) -> dict:
+    """Local thickness on the exported mesh (independent of the voxels and the field): from surface samples, a ray along the inward normal to
+    the first hit. A round rod of diameter D gives D (to the voxel accuracy of the mesh). Needs embree for speed (``--extra fast``)."""
+    import trimesh
+
+    pts, fi = trimesh.sample.sample_surface(mesh, n, seed=seed)
+    nrm = mesh.face_normals[fi]
+    o = pts - nrm * 1e-3
+    loc, ray_i, _ = mesh.ray.intersects_location(o, -nrm, multiple_hits=False)
+    d = np.full(n, np.nan)
+    d[ray_i] = np.linalg.norm(loc - o[ray_i], axis=1)
+    return {"d": d, "points": pts, "normals": nrm}
+
+
+def pull_tab_body(prep: Prep, v: ConformalSpec, body: np.ndarray, ztv: np.ndarray) -> np.ndarray:
+    """Flat pull tab behind the collar (box-section loop in the y-z plane), clipped so it never enters the cavity."""
+    from .outline import tab_sdf
+
+    g = prep.grid
+    ys = g.origin[1] + np.arange(g.shape[1]) * g.h
+    z = g.origin[2] + np.arange(g.shape[2]) * g.dz
+    xs = g.origin[0] + np.arange(g.shape[0]) * g.h
+    sgn = -1.0 if prep.axis["toe"] == "+x" else 1.0  # the heel end
+    jy = np.abs(ys) < 3.0
+    cols = (body < 0)[:, jy, :].any(axis=1)
+    zsel = (z > float(ztv[prep.has].min()) - 8) & (z < float(ztv[prep.has].min()) - 2)
+    xi = np.flatnonzero(cols[:, zsel].any(axis=1))
+    xb = xs[xi.min()] if sgn < 0 else xs[xi.max()]
+    zt0 = float(np.median(ztv[np.argmin(np.abs(xs - xb)), jy])) if jy.any() else float(ztv[prep.has].min())
+    R = 0.5 * v.tab_d_mm - 0.5 * v.tab_t_mm
+    cz = zt0 + R - 3.0
+    cx = xb + sgn * (0.5 * v.tab_w_mm - 4.0)
+    X, Y, Z = np.meshgrid(xs.astype(np.float32), ys.astype(np.float32), z.astype(np.float32), indexing="ij")
+    return np.maximum(tab_sdf(X, Y, Z, cx, cz, R, v.tab_w_mm, v.tab_t_mm), -prep.c0).astype(np.float32)
+
+
+def sole_cell_openings(prep: Prep, aux: dict, v: ConformalSpec, fg, rs, solid: np.ndarray) -> dict:
+    """Net sole: the open cells below the pad plate. Mid-height layer of the sole zone: connected air regions and the diameter of the largest ball in each
+    (the cells are open downwards, so a ball that fits in the cell can leave through the bottom); plus the pad hole diameter (the way up to the shoe cavity)."""
+    from .lattice_variants import sole_bottom
+
+    g = prep.grid
+    zb = sole_bottom(prep, v)
+    X2, Y2 = np.meshgrid(rs.x, rs.y, indexing="ij")
+    ci = [(X2 - g.origin[0]) / g.h, (Y2 - g.origin[1]) / g.h]
+    zbf = ndimage.map_coordinates(zb, ci, order=1, mode="nearest")
+    flf = ndimage.map_coordinates(aux["floor"], ci, order=1, mode="nearest")
+    zmid = 0.5 * (zbf + flf - v.sole_pad_mm)
+    z = rs.z[None, None, :]
+    layer = np.abs(z - zmid[:, :, None]) < 0.75 * fg.h
+    # inside the footprint: slab present around (solid somewhere in the column below the plate) and away from the outline
+    colsolid = ndimage.binary_closing((solid & layer).any(axis=2), iterations=int(round(20 / fg.h)))
+    inner = ndimage.binary_erosion(colsolid, iterations=int(round(0.5 * v.sole_wall_mm / fg.h + 4)))
+    air = ~solid
+    dist = ndimage.distance_transform_edt(air).astype(np.float32) * fg.h
+    lab, n = ndimage.label(layer & air & inner[:, :, None])
+    if n == 0:
+        return {"n": 0}
+    mx = ndimage.maximum(dist, lab, index=np.arange(1, n + 1))
+    area = ndimage.sum(np.ones_like(dist), lab, index=np.arange(1, n + 1)) * fg.h**2
+    keep = area > 30.0
+    d = 2.0 * np.asarray(mx)[keep]
+    return {"cells": int(keep.sum()), "cell_inscribed_min_mm": float(d.min()), "cell_inscribed_median_mm": float(np.median(d)), "cell_inscribed_max_mm": float(d.max()),
+            "pad_hole_mm": v.sole_pad_hole_mm, "cells_below_5mm": int((d < 5.0).sum())}
