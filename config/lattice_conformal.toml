@@ -1,0 +1,146 @@
+# Conformal flow-aligned yarn pattern (#46 part A, checkpoint-1 prototype): read by shoe_designer.lattice_conformal.
+# Same keys as config/lattice_variants.toml (VariantSpec) plus the flow keys below. The three variants are an ablation on one patch
+# of the forefoot upper: c0 = the #14 engine (chart (r0*theta, x), straight Voronoi edges, no flow), c1 = flow chart
+# (cells follow the cross-section, no sweep), c2 = flow chart + flow field. All numbers are demo defaults, not product decisions.
+#
+# flow_sweep         [[u, deg], ...] mean yarn direction from the foot axis (0 = along the foot), u = 0 heel .. 1 toe
+# flow_amp_deg       amplitude of the first harmonic about the foot axis (yarns lean one way on top, the other way under)
+# flow_theta0_deg    angle about the foot axis (0 = +y, 90 = up) where the harmonic is largest
+# flow_base_u        the streamline label is the circumferential position at this u
+# flow_compress      allowed range of neighbouring-streamline spacing; the build is refused outside it
+# rho_floor_frac     the equivalent radius of the cross-section is floored at this fraction of r0 (toe / heel poles are NOT solved)
+
+[defaults]
+style = "voronoi"
+voxel_mm = 0.5
+pitch_mm = 17.0
+jitter = 0.28
+elongate = 1.6
+fillet_mm = 2.5
+yarn_mm = 2.4
+thickness_mm = 3.4
+rim_mm = 8.0
+rim_thick_mm = 0.0
+sole_mm = 6.0
+sole_mode = "slab"
+sole_kind = "bcc"
+sole_cell_mm = 14.0
+seed = 7
+
+[[variant]]
+name = "c0_direct"
+description = "#14 engine: Voronoi in the chart (r0*theta, x), straight edges, no flow"
+conformal = false
+
+[[variant]]
+name = "c1_chart"
+description = "flow chart without flow: cell size follows the cross-section, cells round (conformal in theta, int dx/rho)"
+conformal = true
+
+[[variant]]
+name = "c2_flow"
+description = "flow chart + flow field: yarns sweep 20 deg along the foot and lean +-14 deg over/under the foot, cells elongated 1.6x along the flow"
+conformal = true
+flow_sweep = [[0.0, 20.0], [1.0, 20.0]]
+flow_amp_deg = 14.0
+flow_amp_pts = [[0.0, 0.0], [0.35, 0.0], [0.5, 1.0], [0.75, 1.0], [0.9, 0.0], [1.0, 0.0]]
+flow_theta0_deg = 90.0
+
+[[variant]]
+name = "c3_flow_strong"
+description = "stronger flow: sweep 35 deg, lean +-16 deg, cells 2.4x longer than wide (pitch 14): long yarns that bend with the foot"
+pitch_mm = 14.0
+elongate = 2.4
+flow_sweep = [[0.0, 35.0], [1.0, 35.0]]
+flow_amp_deg = 16.0
+flow_amp_pts = [[0.0, 0.0], [0.35, 0.0], [0.5, 1.0], [0.75, 1.0], [0.9, 0.0], [1.0, 0.0]]
+flow_compress = [0.4, 2.6]
+
+# ----------------------------------------------------------------------------------------------- whole shoe (style 1 look)
+# Same look as s1_honeycomb in lattice_styles.toml (pitch 17, rods 2.4, fillet 2.5, rim 8, heel loop), direct vs flow chart.
+[[variant]]
+name = "w1_direct"
+description = "whole shoe, style 1 look, #14 engine"
+conformal = false
+heel_loop_mm = 26.0
+rim_thick_mm = 3.0
+sole_mm = 24.0
+sole_cell_mm = 14.0
+sole_density = [[0.0, 0.20], [1.0, 0.16]]
+sole_skin_outsole_mm = 0.0
+sole_skin_cavity_mm = 2.0
+sole_core_min_mm = 6.0
+sole_hole_mm = 0.0
+pitch_pts = [[0.0, 0.78], [0.35, 1.0], [1.0, 1.15]]
+yarn_pts_z = [[0.0, 1.0], [1.0, 1.15]]
+
+[[variant]]
+name = "w1_flow"
+description = "whole shoe, style 1 look, LSCM chart + flow (sweep 20 deg, cross lean 12 deg: yarns run from the instep line back and down to the sole)"
+conformal = true
+chart = "lscm"
+heel_loop_mm = 26.0
+rim_thick_mm = 3.0
+sole_mm = 24.0
+sole_cell_mm = 14.0
+sole_density = [[0.0, 0.20], [1.0, 0.16]]
+sole_skin_outsole_mm = 0.0
+sole_skin_cavity_mm = 2.0
+sole_core_min_mm = 6.0
+sole_hole_mm = 0.0
+yarn_pts_z = [[0.0, 1.0], [1.0, 1.15]]
+flow_sweep = [[0.0, 0.0], [1.0, 0.0]]
+flow_cross_deg = 12.0
+flow_amp_pts = [[0.0, 1.0], [1.0, 1.0]]
+flow_compress = [0.4, 2.5]
+
+[[variant]]
+name = "w1_flow_net"
+description = "whole shoe, style 1 look: LSCM flow upper + integrated net sole (pad plate with holes, outer wall net, extruded inner walls, bottom bead)"
+conformal = true
+chart = "lscm"
+heel_loop_mm = 26.0
+rim_thick_mm = 3.0
+sole_mm = 14.0
+sole_flare_mm = 3.0
+sole_mode = "net"
+sole_cell_mm = 26.0
+sole_density = [[0.0, 0.31], [1.0, 0.24]]   # volume fraction of the inner walls, heel -> toe (calibrated by sole_wall_calib)
+sole_pad_mm = 2.5
+sole_pad_hole_mm = 6.0
+sole_pad_hole_pitch_mm = 16.0
+sole_wall_mm = 3.4
+sole_wall_rod_mm = 3.0
+sole_pitch_mm = 10.0
+sole_el = 1.2
+sole_ring_mm = 6.0
+yarn_pts_z = [[0.0, 1.0], [1.0, 1.15]]
+flow_sweep = [[0.0, 0.0], [1.0, 0.0]]
+flow_cross_deg = 12.0
+flow_amp_pts = [[0.0, 1.0], [1.0, 1.0]]
+flow_compress = [0.4, 2.5]
+
+[[variant]]
+name = "w1_outline_demo"
+description = "w1_flow_net with six outline functions: high toe box, heel counter, thick curved sole wall, forefoot cradle, rolled collar, wide flat pull tab"
+conformal = true
+chart = "lscm"
+rim_thick_mm = 3.0
+sole_mode = "net"
+sole_cell_mm = 26.0
+sole_density = [[0.0, 0.31], [1.0, 0.24]]
+sole_pitch_mm = 10.0
+sole_el = 1.2
+yarn_pts_z = [[0.0, 1.0], [1.0, 1.15]]
+flow_sweep = [[0.0, 0.0], [1.0, 0.0]]
+flow_cross_deg = 12.0
+flow_amp_pts = [[0.0, 1.0], [1.0, 1.0]]
+flow_compress = [0.4, 2.5]
+outline = [
+  { fn = "toe", kind = "high", dT_mm = 6.0 },
+  { fn = "heel", dT_mm = 6.0, bevel_mm = 4.0 },
+  { fn = "sole_wall", sole_mm = 18.0, flare_mm = 3.0, bulge_mm = 3.0 },
+  { fn = "cradle", rocker_mm = 8.0, lateral_mm = 4.0 },
+  { fn = "collar_roll", rim_mm = 10.0, roll_mm = 3.0 },
+  { fn = "pull_tab", width_mm = 16.0, thick_mm = 2.6, diameter_mm = 26.0 },
+]
