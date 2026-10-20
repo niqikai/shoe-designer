@@ -8,6 +8,14 @@ model = "claude-sonnet-5-5"
 effort = "low"
 max_tokens = 2000
 
+[deepseek]
+# REST backend (stdlib urllib, no SDK). Key: DEEPSEEK_API_KEY. Model override: SHOE_INTENT_DEEPSEEK_MODEL.
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+vision_models = ["deepseek-flash"]   # models that accept images; deepseek-v4-pro is text-only
+max_tokens = 2000
+timeout_s = 60
+
 [images]
 formats = ["png", "jpg", "jpeg", "webp"]
 max_bytes = 5242880     # 5 MiB, the per-image API limit

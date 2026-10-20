@@ -21,6 +21,8 @@ import math
 import os
 import re
 import tomllib
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -224,6 +226,8 @@ def _loads(raw: str | dict) -> tuple[dict | None, list[str]]:
     def bad_const(name):
         raise ValueError(f"non-finite number {name} is not valid JSON")
 
+    if not raw.strip():
+        return None, ["output is empty (no JSON object returned)"]
     try:
         obj = json.loads(raw, parse_constant=bad_const)
     except ValueError as e:
@@ -542,3 +546,108 @@ class ClaudeBackend:
         if text is None:
             raise BackendError("response contained no text block")
         return text
+
+
+# ---------------------------------------------------------------- DeepSeek backend (REST, no SDK)
+
+_JSON_EXAMPLE = """{
+  "template": "<dlp_solid | dlp_hollow>",
+  "pattern": null,
+  "style_tags": [],
+  "instep_ease_mm": null,
+  "notes": "",
+  "unsupported_requests": []
+}
+(shape only: "pattern" is null or {"kind": "<kind>", "scale_mm": <number or null>, "open_ratio": <number or null>, "depth_mm": <number or null>, "zones": <list or null>, "seed": <integer or null>, "image": null, "image_use": <"perforation" | "displacement" | null>};
+replace every placeholder with a value derived from the user's request, never copy a placeholder)"""
+
+
+def _urllib_transport(url: str, headers: dict, body: bytes, timeout: float) -> tuple[int, bytes]:
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+class DeepSeekBackend:
+    """DeepSeek chat-completions backend over plain HTTPS (``urllib``; no SDK, no new dependency).
+
+    ``response_format=json_object`` only guarantees syntactically valid JSON, not the schema: conformance comes
+    from :func:`validate_intent`, clamping and the one retry. Thinking is disabled (simple extraction task).
+    The key is read from ``DEEPSEEK_API_KEY`` and only ever placed in the Authorization header: it is never
+    stored on the object, logged or put in an error message. ``transport(url, headers, body, timeout) ->
+    (status, bytes)`` is injectable so tests use a mock (no network)."""
+
+    def __init__(self, transport=None, *, model: str | None = None, config: dict | None = None):
+        self.cfg = config or load_config()
+        d = self.cfg["deepseek"]
+        self.model = model or os.environ.get("SHOE_INTENT_DEEPSEEK_MODEL") or d["model"]
+        self.transport = transport or _urllib_transport
+        self._system = _system_prompt(self.cfg) + (
+            "\n\nRespond with a single json object only (no prose, no code fences), shaped like this json example:\n"
+            + _JSON_EXAMPLE
+        )
+
+    def _messages(self, request: IntentRequest) -> list[dict]:
+        d = self.cfg["deepseek"]
+        text = request.text.strip() or "(no text; use the images)"
+        if request.feedback:
+            text += "\n\n" + request.feedback + "\nAnswer again with a corrected json object."
+        if not request.images:
+            user: Any = text
+        else:
+            if self.model not in d["vision_models"]:
+                raise BackendError(
+                    f"model {self.model!r} does not accept images; use one of {d['vision_models']} "
+                    "(e.g. deepseek-flash) or send text only"
+                )
+            user = []
+            for i, img in enumerate(request.images, 1):
+                label = "pattern image" if img.role == "pattern" else "reference shoe image"
+                user.append({"type": "text", "text": f"Image {i}: {label}"})
+                url = f"data:{img.media_type};base64,{img.read_b64()}"
+                user.append({"type": "image_url", "image_url": {"url": url, "detail": "auto"}})  # images: user message only
+            user.append({"type": "text", "text": text})
+        return [{"role": "system", "content": self._system}, {"role": "user", "content": user}]
+
+    def complete(self, request: IntentRequest) -> str:
+        d = self.cfg["deepseek"]
+        key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key:
+            raise BackendError("DEEPSEEK_API_KEY is not set")
+        body = json.dumps(
+            {
+                "model": self.model,
+                "messages": self._messages(request),
+                "response_format": {"type": "json_object"},
+                "thinking": {"type": "disabled"},
+                "temperature": 0,
+                "max_tokens": d["max_tokens"],
+            }
+        ).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+        try:
+            status, raw = self.transport(d["base_url"].rstrip("/") + "/chat/completions", headers, body, d["timeout_s"])
+        except Exception as e:  # network / timeout; the message of urllib errors carries no headers
+            raise BackendError(f"{type(e).__name__}: {str(e).replace(key, '***')}") from e
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if status != 200:
+            msg = ""
+            if isinstance(data, dict) and isinstance(data.get("error"), dict):
+                msg = str(data["error"].get("message", ""))[:200].replace(key, "***")
+            raise BackendError(f"HTTP {status}" + (f": {msg}" if msg else ""))
+        try:
+            choice = data["choices"][0]
+            finish, content = choice.get("finish_reason"), choice["message"].get("content")
+        except (TypeError, KeyError, IndexError) as e:
+            raise BackendError("malformed response (no choices[0].message)") from e
+        if finish == "length":
+            raise BackendError("output truncated (finish_reason=length)")
+        if finish not in ("stop", None):
+            raise BackendError(f"generation ended with finish_reason={finish}")
+        return content or ""  # occasional empty content: validation rejects it and the one retry runs

@@ -449,3 +449,142 @@ def test_no_api_key_in_repo_sources():
     root = pathlib.Path(it.__file__).resolve().parents[2]
     for f in [*root.glob("src/**/*.py"), *root.glob("scripts/*.py"), *root.glob("config/*.toml"), *root.glob("schemas/*.json")]:
         assert not re.search(r"sk-ant-[A-Za-z0-9_-]{8,}", f.read_text(encoding="utf-8")), f
+
+
+# ---------------------------------------------------------------- DeepSeek backend with a mock transport
+
+SECRET = "sk-test-DEEPSEEK-SECRET-123456"
+
+
+class FakeHTTP:
+    """Records requests; replies with queued (status, payload) pairs. payload: dict -> JSON, str -> raw bytes."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    def __call__(self, url, headers, body, timeout):
+        self.calls.append({"url": url, "headers": headers, "body": json.loads(body), "timeout": timeout})
+        status, payload = self.replies.pop(0)
+        if isinstance(payload, Exception):
+            raise payload
+        return status, (payload if isinstance(payload, bytes) else json.dumps(payload).encode())
+
+
+def ds_ok(obj, finish="stop"):
+    content = obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)
+    return 200, {"choices": [{"finish_reason": finish, "message": {"role": "assistant", "content": content}}]}
+
+
+@pytest.fixture(autouse=False)
+def ds_key(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", SECRET)
+
+
+def test_deepseek_request_shape(ds_key, png):
+    http = FakeHTTP(ds_ok(base(template="dlp_hollow")))
+    r = it.parse_intent("镂空鞋", it.DeepSeekBackend(http), images=[(png, "reference")])
+    assert r.ok
+    c = http.calls[0]
+    assert c["url"] == "https://api.deepseek.com/chat/completions"
+    assert c["headers"]["Authorization"] == f"Bearer {SECRET}"
+    b = c["body"]
+    assert b["model"] == "deepseek-flash" and b["response_format"] == {"type": "json_object"}
+    assert b["thinking"] == {"type": "disabled"} and 0 < b["max_tokens"] <= 8000
+    system, user = b["messages"]
+    assert system["role"] == "system" and "json" in system["content"].lower() and '"template"' in system["content"]
+    assert user["role"] == "user" and isinstance(system["content"], str)  # images never in system
+    parts = user["content"]
+    assert [p["type"] for p in parts] == ["text", "image_url", "text"]
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,") and parts[2]["text"] == "镂空鞋"
+    assert not any(isinstance(m["content"], list) for m in b["messages"][:1])
+
+
+def test_deepseek_text_only_uses_plain_string_content(ds_key):
+    http = FakeHTTP(ds_ok(base()))
+    it.parse_intent("极简", it.DeepSeekBackend(http))
+    assert http.calls[0]["body"]["messages"][1]["content"] == "极简"
+
+
+def test_deepseek_empty_content_retries_once(ds_key):
+    http = FakeHTTP(ds_ok(""), ds_ok(base(style_tags=["minimal"])))
+    r = it.parse_intent("x", it.DeepSeekBackend(http))
+    assert r.ok and r.attempts == 2
+    assert "empty" in http.calls[1]["body"]["messages"][1]["content"]
+    r = it.parse_intent("x", it.DeepSeekBackend(FakeHTTP(ds_ok(""), ds_ok(""))))
+    assert not r.ok and r.intent is None and r.attempts == 2
+
+
+def test_deepseek_non_schema_json_is_validated_and_retried(ds_key):
+    http = FakeHTTP(ds_ok({"template": "dlp_solid", "heel_height_mm": 40}), ds_ok(base()))
+    r = it.parse_intent("x", it.DeepSeekBackend(http))
+    assert r.ok and r.attempts == 2 and "heel_height_mm" in http.calls[1]["body"]["messages"][1]["content"]
+
+
+def test_deepseek_length_and_other_finish_reasons_fail(ds_key):
+    for finish in ("length", "content_filter", "insufficient_system_resource"):
+        r = it.parse_intent("x", it.DeepSeekBackend(FakeHTTP(ds_ok(base(), finish))))
+        assert not r.ok and r.attempts == 1 and ("truncated" in r.errors[0] or finish in r.errors[0])
+
+
+def test_deepseek_model_without_vision_rejects_images_clearly(ds_key, png):
+    http = FakeHTTP()
+    r = it.parse_intent("x", it.DeepSeekBackend(http, model="deepseek-v4-pro"), images=[(png, "pattern")])
+    assert not r.ok and "does not accept images" in r.errors[0] and "deepseek-flash" in r.errors[0]
+    assert http.calls == []  # nothing sent, nothing silently dropped
+    # text-only is fine on the text-only model
+    ok = it.parse_intent("x", it.DeepSeekBackend(FakeHTTP(ds_ok(base())), model="deepseek-v4-pro"))
+    assert ok.ok
+
+
+def test_deepseek_model_is_configurable(monkeypatch):
+    assert it.DeepSeekBackend(FakeHTTP(), model="m").model == "m"
+    monkeypatch.setenv("SHOE_INTENT_DEEPSEEK_MODEL", "deepseek-v4-pro")
+    assert it.DeepSeekBackend(FakeHTTP()).model == "deepseek-v4-pro"
+
+
+def test_deepseek_missing_key_fails_without_calling(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    http = FakeHTTP()
+    r = it.parse_intent("x", it.DeepSeekBackend(http))
+    assert not r.ok and "DEEPSEEK_API_KEY" in r.errors[0] and http.calls == []
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        (401, {"error": {"message": f"bad key {SECRET}"}}),
+        (402, {"error": {"message": "Insufficient Balance"}}),
+        (429, b"slow down"),
+        (503, b"<html>"),
+        (200, b"not json"),
+        (200, {"choices": []}),
+        (200, {"nothing": 1}),
+    ],
+)
+def test_deepseek_http_errors_are_failures_and_never_leak_the_key(ds_key, reply):
+    r = it.parse_intent("x", it.DeepSeekBackend(FakeHTTP(reply)))
+    assert not r.ok and r.attempts == 1
+    assert SECRET not in json.dumps(r.to_dict())
+
+
+def test_deepseek_transport_exception_does_not_leak_key(ds_key):
+    r = it.parse_intent("x", it.DeepSeekBackend(FakeHTTP((0, OSError(f"boom {SECRET}")))))
+    assert not r.ok and SECRET not in json.dumps(r.to_dict()) and "OSError" in r.errors[0]
+
+
+@pytest.mark.parametrize(
+    "text,answer,check",
+    [
+        ("波浪纹的镂空运动鞋", base(template="dlp_hollow", style_tags=["sporty"], pattern={"kind": "wave_displacement"}),
+         lambda i, r: i["pattern"]["kind"] == "wave_displacement" and i["template"] == "dlp_hollow"),
+        ("孔径 50mm 的六边形", base(pattern={"kind": "hex_perforation", "scale_mm": 50}),
+         lambda i, r: i["pattern"]["scale_mm"] == 30.0 and r.changes[0].original == 50),
+        ("high heel pointed toe", base(unsupported_requests=["high heel", "pointed toe"]),
+         lambda i, r: i["unsupported_requests"] == ["high heel", "pointed toe"] and not r.warnings),
+        ("脚背松量 1mm", base(instep_ease_mm=1),
+         lambda i, r: i["instep_ease_mm"] == 2.0),
+    ],
+)
+def test_deepseek_mocked_examples_validate_and_clamp(ds_key, text, answer, check):
+    r = it.parse_intent(text, it.DeepSeekBackend(FakeHTTP(ds_ok(answer))))
+    assert r.ok and check(r.intent, r)

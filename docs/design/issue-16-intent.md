@@ -69,3 +69,18 @@
 
 - `RuleBackend`:关键词规则(中英文词表在 `config/intent.toml [keywords.*]`),确定性,供测试与离线使用。
 - `ClaudeBackend`:Claude Messages API,图片用 base64 block,`output_config.format` 为 JSON schema(`api_schema()` 去掉了结构化输出不支持的关键字,被去掉的约束由本地校验兜底),不用强制 `tool_choice`。模型 id 在 `config/intent.toml [claude]`,可用 `SHOE_INTENT_MODEL` 覆盖;API key 只由 SDK 从环境变量读取,不落盘、不打印。测试用假 client,不联网。
+
+## 7. 后端对比:Claude 与 DeepSeek
+
+| | `ClaudeBackend` | `DeepSeekBackend` |
+|---|---|---|
+| 调用方式 | anthropic SDK(可选 extra `intent`,延迟导入) | 标准库 `urllib` 直调 REST,零依赖 |
+| 环境变量 | `ANTHROPIC_API_KEY`;模型覆盖 `SHOE_INTENT_MODEL` | `DEEPSEEK_API_KEY`;模型覆盖 `SHOE_INTENT_DEEPSEEK_MODEL` |
+| 默认模型 | `claude-sonnet-5-5`(`[claude]`) | `deepseek-flash`(`[deepseek]`) |
+| 结构约束 | `output_config.format` JSON schema:服务端强制 schema 形状 | `response_format=json_object`:**只保证是合法 JSON,不保证符合 schema** |
+| 图片输入 | 支持(base64 block) | 仅 `deepseek-flash`(`vision_models` 配置);`deepseek-v4-pro` 不支持,带图请求会直接报错并提示换模型,不会静默丢图;图片只放 user 消息 |
+| thinking | 模型自带,effort=low | 请求里 `thinking: {"type": "disabled"}`(简单抽取任务) |
+
+两者共用同一套保障:`validate_intent`(jsonschema)→ clamp 并报告 → 校验失败重试一次 → 仍失败则返回失败、不编造。对 DeepSeek 这一套是真正的 schema 保证,而不是补充。
+
+DeepSeek 的特殊处理:提示中必须有 "json" 字样和示例对象(示例用占位符,要求替换);空内容(官方说明偶尔出现)按"输出为空"走校验失败的那一次重试;`finish_reason=length`/`content_filter` 等视为后端失败,不重试;HTTP 非 200(401/402/429/5xx)返回失败,错误信息只含状态码与服务端 message,key 在错误信息中会被遮蔽。严格模式(tool calls strict,Beta)未使用,因为 schema 有可选字段。

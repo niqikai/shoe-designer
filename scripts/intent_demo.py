@@ -1,12 +1,14 @@
 """Intent parsing demo (#16): text / images -> structured intent, via the Claude API.
 
   ANTHROPIC_API_KEY=... uv run --extra intent python scripts/intent_demo.py "波浪纹的镂空运动鞋"
+  DEEPSEEK_API_KEY=... uv run python scripts/intent_demo.py --backend deepseek "波浪纹的镂空运动鞋"
   ... intent_demo.py "like this shoe" --reference shoe.jpg
   ... intent_demo.py "use this pattern" --pattern pattern.png
-  ... intent_demo.py "..." --rules          # offline rule backend, no key needed
+  ... intent_demo.py "..." --backend rules   # offline rule backend, no key needed (default: claude)
 
-Without ANTHROPIC_API_KEY (and without --rules) the demo skips with a hint. The key is read by the SDK from the
-environment and is never printed. Model: config/intent.toml, or SHOE_INTENT_MODEL / --model.
+--backend claude needs ANTHROPIC_API_KEY, --backend deepseek needs DEEPSEEK_API_KEY; without the key the demo
+skips with a hint. Keys are read from the environment and never printed. Models: config/intent.toml, or
+SHOE_INTENT_MODEL (claude) / SHOE_INTENT_DEEPSEEK_MODEL (deepseek), or --model.
 """
 
 from __future__ import annotations
@@ -27,17 +29,25 @@ def main() -> int:
     ap.add_argument("--reference", action="append", default=[], help="reference shoe image")
     ap.add_argument("--pattern", help="pattern image (becomes PatternSpec.image)")
     ap.add_argument("--model", help="override the configured model id")
-    ap.add_argument("--rules", action="store_true", help="use the offline rule backend")
+    ap.add_argument("--backend", choices=["claude", "deepseek", "rules"], default="claude")
+    ap.add_argument("--rules", action="store_true", help="same as --backend rules")
     args = ap.parse_args()
 
-    if args.rules:
+    which = "rules" if args.rules else args.backend
+    if which == "rules":
         backend = it.RuleBackend()
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        backend = it.ClaudeBackend(model=args.model)
+    elif which == "deepseek":
+        if not os.environ.get("DEEPSEEK_API_KEY"):
+            print("skipped: set DEEPSEEK_API_KEY to call DeepSeek (or pass --backend rules for the offline backend).")
+            return 0
+        backend = it.DeepSeekBackend(model=args.model)
         print(f"model: {backend.model}")
     else:
-        print("skipped: set ANTHROPIC_API_KEY to call the Claude API (or pass --rules for the offline backend).")
-        return 0
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("skipped: set ANTHROPIC_API_KEY to call the Claude API (or pass --backend rules for the offline backend).")
+            return 0
+        backend = it.ClaudeBackend(model=args.model)
+        print(f"model: {backend.model}")
 
     images = [(p, "reference") for p in args.reference] + ([(args.pattern, "pattern")] if args.pattern else [])
     texts = [" ".join(args.text)] if args.text else EXAMPLES
