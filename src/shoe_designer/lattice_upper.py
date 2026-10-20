@@ -225,30 +225,36 @@ class UpperLayer:
 
 
 def shell_openings(phi: np.ndarray, fg: Grid, cav: np.ndarray, coarse: Grid, zt: np.ndarray, floor_z: np.ndarray, u: UpperConfig, thick: float,
-                   chunk: int = 96, halo_mm: float = 12.0) -> dict:
-    """Hole sizes of the shell: diameter of the largest ball around air voxels on the shell's mid-surface (phi_C = T / 2), in the
-    upper zone (above the sole margin, below the rim). Percentiles of 2 * distance to the nearest solid, chunked in x."""
+                   chunk: int = 96, halo_mm: float = 12.0, min_open_mm: float = 5.0) -> dict:
+    """Hole sizes of the shell. The air voxels on the mid-surface (phi_C = T / 2) in the upper zone (above the sole margin, below
+    the rim) fall into connected pieces, one per hole of the mesh; each hole's size is 2 * the largest distance to the solid inside
+    it (its inscribed ball). Chunked in x; a hole belongs to the chunk of its first plane."""
     rs = Resampler(coarse, fg)
     halo = int(math.ceil(halo_mm / fg.h))
-    vals = []
+    holes = []
     n = fg.shape[0]
     for s0 in range(0, n, chunk):
         e0 = min(s0 + chunk, n)
         a, b = max(s0 - halo, 0), min(e0 + halo, n)
         air = phi[a:b] >= 0
-        dist = None
-        for ix in range(s0, e0):
+        band = np.zeros(air.shape, bool)
+        for ix in range(a, b):
             zz = rs.z[None, :]
             zone = (zz > (rs.row(floor_z, ix) + u.sole_margin_mm)[:, None]) & (zz < (rs.row(zt, ix) - u.rim_mm)[:, None])
-            band = np.abs(rs.plane(cav, ix) - 0.5 * thick) < 0.35
-            m = zone & band & air[ix - a]
-            if m.any():
-                if dist is None:
-                    dist = ndimage.distance_transform_edt(air, sampling=fg.h).astype(np.float32)
-                vals.append(dist[ix - a][m] * 2.0)
-    v = np.concatenate(vals) if vals else np.zeros(1)
-    return {"samples": int(len(v)), "p10_mm": round(float(np.percentile(v, 10)), 2), "p50_mm": round(float(np.percentile(v, 50)), 2),
-            "p90_mm": round(float(np.percentile(v, 90)), 2), "max_mm": round(float(v.max()), 2)}
+            band[ix - a] = zone & (np.abs(rs.plane(cav, ix) - 0.5 * thick) < 0.35)
+        band &= air
+        if not band.any():
+            continue
+        dist = ndimage.distance_transform_edt(air, sampling=fg.h).astype(np.float32)
+        lab, k = ndimage.label(band)
+        mx = ndimage.maximum(dist, lab, index=np.arange(1, k + 1))
+        for i, sl in enumerate(ndimage.find_objects(lab)):
+            if s0 <= sl[0].start + a < e0:
+                holes.append(2.0 * float(mx[i]))
+    v = np.asarray(holes) if holes else np.zeros(1)
+    return {"holes": int(len(holes)), "p10_mm": round(float(np.percentile(v, 10)), 2), "p50_mm": round(float(np.percentile(v, 50)), 2),
+            "p90_mm": round(float(np.percentile(v, 90)), 2), "max_mm": round(float(v.max()), 2),
+            "fraction_ge_min": round(float((v >= min_open_mm).mean()), 3), "min_open_mm": min_open_mm}
 
 
 def upper_shell(form: str, phi: np.ndarray, cav: np.ndarray, zt: np.ndarray, grid: Grid, cfg: LatticeConfig, process: ProcessConfig | None = None,
@@ -270,7 +276,7 @@ def upper_shell(form: str, phi: np.ndarray, cav: np.ndarray, zt: np.ndarray, gri
 
     fine, fg, stats = build_fine(body, grid, layers, cfg.voxel_mm, cfg.pad_mm, progress)
     g = cfg.tpu_density_g_cm3
-    openings = shell_openings(fine, fg, cav, grid, zt.astype(np.float32), aux["floor_z"], u, thick)
+    openings = shell_openings(fine, fg, cav, grid, zt.astype(np.float32), aux["floor_z"], u, thick, min_open_mm=cfg.min_opening_mm)
     rep = {"form": form, "openings": openings, "thickness_mm": thick, "upper": u.knit.__dict__ if form == "knit" else u.volume.__dict__,
            "rim_mm": u.rim_mm, "sole_thickness_mm": u.sole_thickness_mm, "sole_pores": pores,
            "solid_body_cm3": round(stats.vol_base_mm3 / 1000, 2), "lattice_body_cm3": round(stats.vol_final_mm3 / 1000, 2),

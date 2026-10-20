@@ -155,6 +155,9 @@ def main():
     base_vol = float(base_mesh.volume)
     print(f"[baseline] {base_vol / 1000:.2f} cm3", flush=True)
     report = {"process": proc.name, "lattice_config": dataclasses.asdict(cfg), "baseline_cm3": round(base_vol / 1000, 2), "forms": {}}
+    rpath = out / f"lattice_report{a.tag}.json"
+    if rpath.exists():  # keep the forms of earlier runs (--only runs a subset)
+        report["forms"].update(json.load(open(rpath)).get("forms", {}))
     prog = lambda i, n: print(f"   plane {i}/{n}  rss {rss_mb():.0f} MB", flush=True)  # noqa: E731
     for name in a.only.split(","):
         t1 = time.perf_counter()
@@ -183,7 +186,7 @@ def main():
             render(fine, fg, tag, out / f"{tag}.png")
             render_slices(fine, fg, out / f"{tag}_slices.png", [4.5, 6.0])
         del fine, mesh
-        (out / f"lattice_report{a.tag}.json").write_text(json.dumps(report, indent=1, ensure_ascii=False, default=float))
+        rpath.write_text(json.dumps(report, indent=1, ensure_ascii=False, default=float))
 
 
 if __name__ == "__main__":

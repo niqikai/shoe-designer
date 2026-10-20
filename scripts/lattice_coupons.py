@@ -49,10 +49,13 @@ def main():
     print(f"wrote {len(rows)} coupons to {out}")
 
 
+KIND_ZH = {"bcc": "体心立方(BCC)", "cubic": "简单立方(杆沿胞元棱)"}
+
+
 def note(rows, cfg, proc, size) -> str:
     t = ["# 晶格试件说明(#11 / #14)", "",
          f"工艺:{proc.name}(粉末床 TPU)。共 9 件:胞元 4 / 6 / 8 mm × 杆径 1.2 / 1.6 / 2.0 mm,尺寸 {size[0]:g}×{size[1]:g}×{size[2]:g} mm。",
-         f"结构:体心立方(BCC)杆状晶格,上下各 {rows[0]['skin_mm']:g} mm 实体蒙皮板,四个侧面是开放的晶格(不封口);"
+         f"结构:{KIND_ZH[rows[0]['kind']]}杆状晶格,上下各 {rows[0]['skin_mm']:g} mm 实体蒙皮板,四个侧面是开放的晶格(不封口);"
          f"底板 4 个、顶板 1 个直径 {rows[0]['hole_mm']:g} mm 的圆孔作出粉孔。STL 单位毫米,每件水密、单体、无封闭空腔。", "",
          "## 请工厂帮忙看三件事", "",
          "1. **出粉**:打印后用你们常规的清粉流程(气枪/吹砂/超声),记录每件能否清干净、各用了什么方式和时间。"
