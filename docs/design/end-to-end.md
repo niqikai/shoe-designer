@@ -17,6 +17,9 @@ DEEPSEEK_API_KEY=... uv run --extra fast make-shoe "sporty perforated sneaker" -
 # 路线 B:点阵鞋(#46),样式与轮廓函数可选
 uv run --extra fast make-shoe --form B --style k2_triangle --out-dir reports/make_shoe/b
 uv run --extra fast make-shoe --form B --outline '[{"fn":"sole_wall","sole_mm":20}]'
+# 路线 B-knit:#47 的建模自由度变体 v1_base … v10_structure(config/lattice_variants.toml)
+uv run --extra fast make-shoe --form B-knit --variant v7_hex --out-dir reports/make_shoe/knit
+uv run --extra fast make-shoe --form B-knit --variant v6_image --pattern-image my.png   # 图像驱动线径;不给图用内置测试图
 ```
 
 `scripts/make_shoe.py` 是同一入口的薄封装。参数见 `make-shoe --help`:`--size`(43/44/45,默认 44)、`--template`(solid/hollow,默认取意图,再默认 solid)、`--process`(默认 `config/process_sls_tpu.toml`)、`--image`/`--pattern-image`(参考图 / 图案图)、`--pattern`(强制图案种类)。
@@ -25,7 +28,7 @@ uv run --extra fast make-shoe --form B --outline '[{"fn":"sole_wall","sole_mm":2
 
 1. **意图**:`intent.parse_intent`(后端 rules / claude / deepseek)。打印限幅报告(被夹到设计空间的数值、不支持的请求);没有文字也没有图时用设计空间默认值。
 2. **模板与内腔**(A、B 共用):模板包络 → 鞋楦摆位 → 内腔(鞋楦 + 松量,意图的脚背松量在这里生效)。
-3. **A**:闭包(工艺文件允许时)→ `compose` → 图案层 `apply_pattern`(意图的 pattern,或风格标签预设)→ 可选鞋底点阵。**B**:`lattice_conformal.build_whole`,取 `config/lattice_conformal*.toml` 里的样式,轮廓函数经 `outline.clamp` 限幅后并入限幅报告。B 的外观由 `--style` 决定,意图里的 pattern / 风格标签不生效(报告里写明)。
+3. **A**:闭包(工艺文件允许时)→ `compose` → 图案层 `apply_pattern`(意图的 pattern,或风格标签预设)→ 可选鞋底点阵。**B**:`lattice_conformal.build_whole`,取 `config/lattice_conformal*.toml` 里的样式,轮廓函数经 `outline.clamp` 限幅后并入限幅报告。**B-knit**:同一份内腔(进程内计算,等价于 `scripts/lattice_variants.py --prep` 的 cache2.npz)交给 `lattice_variants.build_variant`;外观由 `--variant` 决定(未知名字会列出全部可选项),`check_variant` 的可打印标志进审计("变体可打印性":预览体素偏粗时记为注意)。`--pattern-image` / `--image` 只对图像驱动的变体(v6_image)生效。B 的外观由 `--style` 决定,意图里的 pattern / 风格标签不生效(报告里写明)。
 4. **工艺检查与审计**:水密、单一实体、无封闭空腔(场上的封闭气泡 + STL 内壳)、最小壁厚(实心用射线,点阵用形态学开运算)、开口与排粉(最窄通道 ≥ `min_channel_mm`、粉末够不到的内腔)、成型尺寸(各机型)、Gate/D8(设计文档 §2,仅 A)、重量(占位密度 1.2 g/cm³)。
 5. **输出**(`--out-dir`):`shoe.stl`、`report.md`(中文摘要)、`params.json`(输入、解析后的意图、限幅、参数、用时)、`audit.json`。
 

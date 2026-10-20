@@ -124,3 +124,39 @@ def test_bad_size_is_a_user_error(tmp_path):
 def test_full_form_a(tmp_path):
     assert ms.main(["波浪纹的镂空运动鞋", "--out-dir", str(tmp_path)]) in (0, 1)
     assert (tmp_path / "shoe.stl").stat().st_size > 1e6
+
+
+def test_variant_names_match_config_and_unknown_is_listed():
+    names = ms.variant_names()
+    assert names[0] == "v1_base" and "v10_structure" in names and len(names) == 10
+    with pytest.raises(ms.MakeShoeError) as e:
+        ms.load_variant("v99", None)
+    assert all(n in str(e.value) for n in names)
+    assert all(n in ms.parser().format_help().replace("\n", " ").replace("  ", " ") for n in ("v1_base",))
+
+
+def test_variant_image_only_for_image_driven():
+    v, note = ms.load_variant("v6_image", "pic.png")
+    assert v.image == "pic.png" and "drives" in note
+    v, note = ms.load_variant("v6_image", None)
+    assert v.image == "test" and note is None
+    v, note = ms.load_variant("v7_hex", "pic.png")
+    assert not v.image and "not used" in note
+
+
+def test_knit_arg_wiring_and_printable_check(tmp_path, monkeypatch):
+    phi, g, core = cup()
+    seen = {}
+    monkeypatch.setattr(ms, "place_cavity", lambda *a, **k: types.SimpleNamespace(pose={}))
+
+    def fake(pl, v, cfg, log):
+        seen["variant"] = v.name
+        return {"form": "B-knit", "variant": v.name, "printable": False, "_field": (phi, g), "_core": (core, g)}
+
+    monkeypatch.setattr(ms, "build_form_knit", fake)
+    a = ms.parser().parse_args(["--form", "B-knit", "--variant", "v7_hex", "--out-dir", str(tmp_path), "--samples", "500"])
+    assert ms.run(a, lambda s: None) == 0 and seen["variant"] == "v7_hex"
+    md = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "B-knit 针织变体 v7_hex" in md and "预览(不可打印)" in md and "B-knit takes its look" in md
+    assert json.loads((tmp_path / "params.json").read_text())["variant"] == "v7_hex"
+    assert ms.main(["--form", "B-knit", "--variant", "nope", "--out-dir", str(tmp_path)]) == 2

@@ -2,6 +2,7 @@
 
     make-shoe "波浪纹的镂空运动鞋" --form A --size 44 --out-dir reports/make_shoe/demo
     make-shoe --form B --style k1_honeycomb
+    make-shoe --form B-knit --variant v7_hex
 
 Steps: intent (text / images -> structured intent, clamp report) -> build (A: template + cavity rebuild S2-S6, pattern layer #13,
 optional sole lattice #14; B: flow-aligned lattice shoe #46) -> process-profile checks (config/process_sls_tpu.toml) -> audit
@@ -35,7 +36,7 @@ from .assets import AssetError, load_asset, load_catalog
 from .compose import compose, gate_verdict
 from .envelope import envelope
 from .lattice_conformal import build_whole, load_specs
-from .lattice_variants import prepare
+from .lattice_variants import build_variant, load_variants, prepare
 from .pattern import PatternConfig, PatternMasks, PatternSpec, apply_pattern
 from .process import ProcessConfig, build_volume, channel_width, mesh_inner_shells
 from .sdf import Grid
@@ -45,6 +46,7 @@ SIZES = (43, 44, 45)  # the DLP template family
 TEMPLATES = ("solid", "hollow")
 STYLE_FILES = ("lattice_conformal_styles.toml", "lattice_conformal.toml")
 DEFAULT_STYLE = "k1_honeycomb"
+DEFAULT_VARIANT = "v1_base"
 DEFAULT_PROCESS = "config/process_sls_tpu.toml"
 HEADROOM_MM = 45.0
 CLOSING_MM = 12.0
@@ -213,17 +215,51 @@ def load_style(name: str, outline_json: str | None):
     return v, clamps
 
 
-def build_form_b(pl: Placed, v, lattice_cfg: L.LatticeConfig, log=print):
-    """Flow-aligned lattice shoe (#46) on the cavity of the placed last."""
+def coarse_prep(pl: Placed):
+    """The in-process equivalent of scripts/lattice_variants.py --prep: unopened phi_C and the collar height on the template grid."""
     from .ease import _column_xy
 
-    t0 = time.perf_counter()
     c0 = (pl.cav.phi_last - pl.cav.ease_grid).astype(np.float32)  # phi_C before the collar is opened
     zt = pl.env.collar.z_t(_column_xy(pl.grid)).reshape(pl.grid.shape[:2])
-    prep = prepare(c0, zt, pl.grid)
+    return c0, prepare(c0, zt, pl.grid)
+
+
+def build_form_b(pl: Placed, v, lattice_cfg: L.LatticeConfig, log=print):
+    """Flow-aligned lattice shoe (#46) on the cavity of the placed last."""
+    t0 = time.perf_counter()
+    c0, prep = coarse_prep(pl)
     fine, fg, rep, _aux = build_whole(prep, v, lattice_cfg, pl.proc)
     log(f"[lattice shoe {v.name}] {time.perf_counter() - t0:.0f} s, route {rep['route']}")
-    return {"form": "B", "style": v.name, "lattice": rep, "pose": pl.pose, "_field": (fine, fg), "_core": (c0 < 0, pl.grid)}
+    return {"form": "B", "style": v.name, "lattice": rep, "printable": rep["printable"], "pose": pl.pose, "_field": (fine, fg),
+            "_core": (c0 < 0, pl.grid)}
+
+
+def variant_names() -> list[str]:
+    return [v.name for v in load_variants()]
+
+
+def load_variant(name: str, image: str | None):
+    """A B-knit variant (#47) by name. ``image`` replaces the built-in test picture of an image-driven variant (v6_image)."""
+    specs = {v.name: v for v in load_variants()}
+    if name not in specs:
+        raise MakeShoeError(f"unknown variant {name!r}; available: {', '.join(specs)}")
+    v, note = specs[name], None
+    if image:
+        if v.image:
+            v, note = dataclasses.replace(v, image=str(image)), f"variant {name}: image {image} drives the yarn diameter (instead of the built-in test picture)"
+        else:
+            note = f"image {image} is not used: variant {name} is not image-driven (v6_image is)"
+    return v, note
+
+
+def build_form_knit(pl: Placed, v, lattice_cfg: L.LatticeConfig, log=print):
+    """B-knit variant (#47: lattice_variants.build_variant) on the cavity of the placed last."""
+    t0 = time.perf_counter()
+    c0, prep = coarse_prep(pl)
+    fine, fg, rep, _aux = build_variant(prep, v, lattice_cfg, pl.proc)
+    log(f"[knit variant {v.name}] {time.perf_counter() - t0:.0f} s, {'printable' if rep['printable'] else 'preview (not printable)'}")
+    return {"form": "B-knit", "variant": v.name, "lattice": rep, "printable": rep["printable"], "pose": pl.pose, "_field": (fine, fg),
+            "_core": (c0 < 0, pl.grid)}
 
 
 # --------------------------------------------------------------------------------------------------- 3. checks + audit
@@ -297,6 +333,11 @@ def check_and_audit(rep: dict, proc: ProcessConfig, lcfg: L.LatticeConfig, latti
     else:
         add("gate_d8", "na", "n/a", "B 路线不推移模板外皮,模板只用于摆放鞋楦")
 
+    printable = rep.pop("printable", None)
+    if printable is not None:
+        add("variant_printable", "pass" if printable else "warn", "可打印" if printable else "预览(不可打印)",
+            "check_variant:体素 ≤ 最细特征 / 4 且各线径 ≥ 工艺下限;预览体素偏粗,只用于看形")
+
     dens = lcfg.tpu_density_g_cm3
     vol = float(mesh.volume)
     weight = round(vol / 1000 * dens, 1)
@@ -313,13 +354,13 @@ def check_and_audit(rep: dict, proc: ProcessConfig, lcfg: L.LatticeConfig, latti
 ICON = {"pass": "通过", "warn": "注意", "fail": "未通过", "na": "不适用"}
 CHECK_ZH = {
     "watertight": "水密", "single_solid": "单一实体", "no_closed_cavity": "无封闭空腔", "min_rib": "最小壁厚 / 筋宽",
-    "openings_drain": "开口与排粉", "build_volume": "成型尺寸", "gate_d8": "Gate / D8 模板适用性", "weight": "重量(占位密度)",
+    "openings_drain": "开口与排粉", "build_volume": "成型尺寸", "gate_d8": "Gate / D8 模板适用性", "variant_printable": "变体可打印性(check_variant)", "weight": "重量(占位密度)",
 }
 
 
 def report_md(p: dict, res: Result) -> str:
     form = p["form"]
-    desc = "A 模板重建(模板外皮 + 鞋楦内腔 + 图案层" + (" + 鞋底点阵)" if p["lattice_sole"] else ")") if form == "A" else f"B 点阵鞋(样式 {p['style']})"
+    desc = "A 模板重建(模板外皮 + 鞋楦内腔 + 图案层" + (" + 鞋底点阵)" if p["lattice_sole"] else ")") if form == "A" else f"B-knit 针织变体 {p['variant']}(#47)" if form == "B-knit" else f"B 点阵鞋(样式 {p['style']})"
     lines = ["# 鞋款生成报告", "", f"- 路线:{desc}", f"- 码数:EU {p['size']}({p['template_id']})", f"- 工艺:{p['process']}",
              f"- 输入:{p['text'] or '(无文字)'}" + (f";图片 {len(p['images'])} 张" if p["images"] else ""), f"- 意图后端:{p['backend']}", ""]
     lines += ["## 意图与限幅", ""]
@@ -363,11 +404,18 @@ def run(a, log=None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     ignored: list[str] = []
     spec = None
-    style = None
+    style = variant = None
     if a.form == "A":
         spec = intent_pattern(intent, a.pattern, a.pattern_image)
         clamp_report += [f"pattern.{k}: {v['from']} -> {v['to']} (design space)" for k, v in spec.clamped.items()]
         ignored += list(spec.notes)
+    elif a.form == "B-knit":
+        variant, note = load_variant(a.variant, a.pattern_image or (a.image[0] if a.image else None))
+        ignored.append("B-knit takes its look from --variant; the intent's pattern / style tags are not applied")
+        if note:
+            ignored.append(note)
+        if a.lattice_sole or a.outline:
+            ignored.append("--lattice-sole / --outline do not apply to B-knit (the variant defines sole and outline)")
     else:
         style, outline_clamps = load_style(a.style, a.outline)
         clamp_report += [f"outline: {s}" for s in outline_clamps]
@@ -383,15 +431,15 @@ def run(a, log=None) -> int:
         rep = build_form_a(pl, spec, a.lattice_sole, lcfg, log)
     else:
         try:
-            rep = build_form_b(pl, style, lcfg, log)
+            rep = build_form_knit(pl, variant, lcfg, log) if a.form == "B-knit" else build_form_b(pl, style, lcfg, log)
         except L.LatticeError as e:
             raise MakeShoeError(f"lattice shoe refused: {e}") from None
-    lattice_like = a.form == "B" or a.lattice_sole
+    lattice_like = a.form != "A" or a.lattice_sole
     res = check_and_audit(rep, proc, lcfg, lattice_like, a.samples, log)
     res.mesh.export(out / "shoe.stl")
     params = {"form": a.form, "size": a.size, "template": template, "template_id": shoe_id, "process": proc.name, "process_file": a.process,
               "backend": a.backend if (text.strip() or images) else "none", "text": text, "images": [p for p, _ in images],
-              "intent": intent, "clamp_report": clamp_report, "ignored": ignored, "lattice_sole": a.lattice_sole, "style": a.style if a.form == "B" else None,
+              "intent": intent, "clamp_report": clamp_report, "ignored": ignored, "lattice_sole": a.lattice_sole, "style": a.style if a.form == "B" else None, "variant": a.variant if a.form == "B-knit" else None,
               "pattern": spec.to_dict() if spec else None, "h_mm": a.h, "seconds": res.seconds, "peak_rss_mb": round(rss_mb()),
               "total_seconds": round(time.perf_counter() - t_all, 1), "stl": str(out / "shoe.stl")}
     (out / "params.json").write_text(json.dumps({**params, "build": res.build}, indent=1, ensure_ascii=False, default=float))
@@ -411,7 +459,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--pattern-image", help="pattern image (form A: image pattern)")
     ap.add_argument("--backend", choices=["rules", "claude", "deepseek"], default="rules", help="intent parser (default rules, offline)")
     ap.add_argument("--model", help="override the backend model id")
-    ap.add_argument("--form", choices=["A", "B"], default="A", help="A template rebuild (default) or B lattice shoe")
+    ap.add_argument("--form", choices=["A", "B", "B-knit"], default="A",
+                    help="A template rebuild (default), B conformal lattice shoe (#46), B-knit modeling-freedom variants (#47)")
     ap.add_argument("--size", type=int, default=44, help=f"EU size, one of {SIZES} (default 44)")
     ap.add_argument("--template", choices=TEMPLATES, help="solid / hollow (default: the intent's, else solid)")
     ap.add_argument("--process", default=DEFAULT_PROCESS)
@@ -419,6 +468,7 @@ def parser() -> argparse.ArgumentParser:
                     help="form A: force the pattern kind")
     ap.add_argument("--lattice-sole", action="store_true", help="form A: lattice sole (#14)")
     ap.add_argument("--style", default=DEFAULT_STYLE, help=f"form B: variant name (default {DEFAULT_STYLE}); see config/lattice_conformal*.toml")
+    ap.add_argument("--variant", default=DEFAULT_VARIANT, help=f"form B-knit: {', '.join(variant_names())} (default {DEFAULT_VARIANT})")
     ap.add_argument("--outline", help="form B: outline functions as a JSON list or a JSON file (see shoe_designer.outline)")
     ap.add_argument("--h", type=float, default=1.0, help="template grid spacing in mm")
     ap.add_argument("--samples", type=int, default=10000, help="wall-thickness ray samples (solid forms)")

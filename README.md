@@ -43,4 +43,6 @@ SHOE_ASSETS_ROOT=~/Downloads uv run --extra fast make-shoe "波浪纹的镂空�
 SHOE_ASSETS_ROOT=~/Downloads uv run --extra fast make-shoe --form B --out-dir reports/make_shoe/b                          # form B
 ```
 
+Form B-knit (the #47 variants): `make-shoe --form B-knit --variant v7_hex`.
+
 Writes `shoe.stl`, `report.md`, `params.json`, `audit.json`. Intent backends: `--backend rules|claude|deepseek` (keys from the environment).
