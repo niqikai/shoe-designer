@@ -32,3 +32,15 @@ registered with it. Loading rejects lengths outside 150–400 mm (wrong units or
 
 The Zellerfeld files are CC BY-NC-ND 4.0: non-commercial, and modified versions may not be distributed.
 That is tracked in issue #8.
+
+## End to end (S7)
+
+One command from a request to an STL plus a Chinese audit report (`docs/design/end-to-end.md`):
+
+```bash
+uv sync --extra fast
+SHOE_ASSETS_ROOT=~/Downloads uv run --extra fast make-shoe "波浪纹的镂空运动鞋" --size 44 --out-dir reports/make_shoe/a   # form A
+SHOE_ASSETS_ROOT=~/Downloads uv run --extra fast make-shoe --form B --out-dir reports/make_shoe/b                          # form B
+```
+
+Writes `shoe.stl`, `report.md`, `params.json`, `audit.json`. Intent backends: `--backend rules|claude|deepseek` (keys from the environment).
