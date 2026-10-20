@@ -1,0 +1,70 @@
+# Three looks after a concept board (#14): honeycomb-flow / geometric triangles / fluid skeleton. Same engine and loader as
+# lattice_variants.toml (shoe_designer.lattice_variants), design space widened: yarn (rod) diameter up to ~7 mm, pitch up to
+# ~45 mm, rounded junctions (fillet_mm), anisotropic Voronoi (elongate), open soles (sole_skin_outsole_mm = 0 and a coarse sole
+# lattice). The voxel is set by the thinnest printed feature (rods, sole struts, skins >= 1.2 mm) / 4: coarse voxels only
+# where every feature is thick. Demo defaults, not product decisions.
+
+[defaults]
+sole_hole_mm = 0.0        # no powder windows: the open sole is the exit
+
+[[variant]]
+name = "s1_honeycomb"
+description = "style 1: irregular honeycomb (Voronoi) 17 mm, stretched 1.6x along the foot, rods 2.4 mm with rounded junctions, denser at the heel and collar, thick rim, open BCC sole"
+style = "voronoi"
+pitch_mm = 17.0
+jitter = 0.28
+elongate = 1.6
+fillet_mm = 2.5
+yarn_mm = 2.4
+thickness_mm = 3.4
+pitch_pts = [[0.0, 0.78], [0.35, 1.0], [1.0, 1.15]]
+yarn_pts_z = [[0.0, 1.0], [1.0, 1.15]]
+rim_mm = 8.0
+rim_thick_mm = 3.0
+heel_loop_mm = 26.0
+sole_mm = 24.0
+sole_kind = "bcc"
+sole_cell_mm = 14.0
+sole_density = [[0.0, 0.20], [1.0, 0.16]]
+sole_skin_outsole_mm = 0.0
+sole_skin_cavity_mm = 2.0
+sole_core_min_mm = 6.0
+voxel_mm = 0.5
+
+[[variant]]
+name = "s2_triangle"
+description = "style 2: regular equilateral triangles 14 mm, rods 2.8 mm, uniform, solid thick rim, open BCC sole"
+style = "triangle"
+pitch_mm = 14.0
+helix_slope = 0.577
+ring_factor = 1.155
+yarn_mm = 2.8
+thickness_mm = 3.6
+rim_mm = 10.0
+rim_thick_mm = 3.5
+heel_loop_mm = 26.0
+sole_mm = 24.0
+sole_kind = "bcc"
+sole_cell_mm = 12.0
+sole_density = [[0.0, 0.22], [1.0, 0.22]]
+sole_skin_outsole_mm = 0.0
+sole_skin_cavity_mm = 2.0
+sole_core_min_mm = 6.0
+voxel_mm = 0.5
+
+[[variant]]
+name = "s3_skeleton"
+description = "style 3: few thick smooth rods (5.5 mm) around large cells (~38 mm), strong rounded junctions, the skeleton continues under the foot (no sole slab)"
+style = "voronoi"
+pitch_mm = 38.0
+jitter = 0.35
+elongate = 1.3
+fillet_mm = 6.0
+yarn_mm = 5.5
+thickness_mm = 7.5
+rim_mm = 10.0
+rim_thick_mm = 4.0
+heel_loop_mm = 34.0
+heel_loop_tube_mm = 7.0
+sole_mode = "shell"   # no sole slab: the skeleton wraps the foot and continues under it as thick rings
+voxel_mm = 1.0

@@ -73,7 +73,7 @@ def prep_cache(a):
 
 
 # ------------------------------------------------------------------------------------------------ renders (vertex splatting)
-def splat_views(phi, grid, stride=1):
+def splat_views(phi, grid, stride=1, views=None):
     from skimage import measure
 
     sub = np.pad(phi[::stride, ::stride, ::stride], 1, constant_values=1.0)
@@ -81,7 +81,7 @@ def splat_views(phi, grid, stride=1):
     verts, _, normals, _ = measure.marching_cubes(sub, level=0.0, spacing=sp)
     verts = verts + np.asarray(grid.origin) - np.asarray(sp)
     out = {}
-    for name, (cam, up) in VIEWS.items():
+    for name, (cam, up) in (views or VIEWS).items():
         cam, up = np.asarray(cam, float), np.asarray(up, float)
         cam /= np.linalg.norm(cam)
         right = np.cross(up, cam)

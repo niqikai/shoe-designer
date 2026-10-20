@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import tomllib
+import dataclasses
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -50,6 +51,8 @@ class VariantSpec:
     helix_slope: float = 0.9
     ring_factor: float = 1.0
     jitter: float = 0.3
+    elongate: float = 1.0
+    fillet_mm: float = 0.0
     thickness_mm: float = 2.4
     yarn_mm: float = 1.6
     rim_mm: float = 8.0
@@ -78,6 +81,17 @@ class VariantSpec:
     image_sparse_mm: float = 1.2
     image_u: tuple = (0.15, 0.85)
     seed: int = 7
+    sole_kind: str = ""
+    sole_cell_mm: float = 0.0
+    sole_density: tuple = ()
+    sole_skin_outsole_mm: float = -1.0
+    sole_skin_cavity_mm: float = -1.0
+    sole_pad_factor: float = 0.0
+    sole_hole_mm: float = -1.0
+    sole_core_min_mm: float = 0.0
+    sole_mode: str = "slab"
+    heel_loop_mm: float = 0.0
+    heel_loop_tube_mm: float = 5.0
     voxel_mm: float = 0.3
     preview: bool = False
 
@@ -88,7 +102,7 @@ class VariantSpec:
         bad = set(d) - names
         if bad:
             raise LatticeError(f"unknown variant keys {sorted(bad)}")
-        for k in ("raise_pts", "pitch_pts", "yarn_pts_u", "yarn_pts_z", "image_u"):
+        for k in ("raise_pts", "pitch_pts", "yarn_pts_u", "yarn_pts_z", "image_u", "sole_density"):
             if k in d:
                 d[k] = tuple(tuple(float(v) for v in p) if isinstance(p, (list, tuple)) else float(p) for p in d[k])
         if "bumps" in d:
@@ -106,6 +120,28 @@ def load_variants(path: str | Path | None = None) -> list[VariantSpec]:
     with open(p, "rb") as f:
         raw = tomllib.load(f)
     return [VariantSpec.from_dict(v, raw.get("defaults", {})) for v in raw["variant"]]
+
+
+def effective_sole(v: VariantSpec, cfg: LatticeConfig):
+    """The sole config of the variant: config/lattice.toml with the variant's ``sole_*`` overrides."""
+    kw = {}
+    if v.sole_kind:
+        kw["kind"] = v.sole_kind
+    if v.sole_cell_mm:
+        kw["cell_mm"] = v.sole_cell_mm
+    if v.sole_density:
+        kw["density"] = tuple(tuple(p) for p in v.sole_density)
+    if v.sole_skin_outsole_mm >= 0:
+        kw["skin_outsole_mm"] = v.sole_skin_outsole_mm
+    if v.sole_skin_cavity_mm >= 0:
+        kw["skin_cavity_mm"] = v.sole_skin_cavity_mm
+    if v.sole_pad_factor:
+        kw["pad_radius_factor"] = v.sole_pad_factor
+    if v.sole_hole_mm >= 0:
+        kw["outsole_hole_mm"] = v.sole_hole_mm
+    if v.sole_core_min_mm:
+        kw["core_min_mm"] = v.sole_core_min_mm
+    return dataclasses.replace(cfg.sole, **kw)
 
 
 def check_variant(v: VariantSpec, cfg: LatticeConfig, process: ProcessConfig | None) -> dict:
@@ -126,7 +162,10 @@ def check_variant(v: VariantSpec, cfg: LatticeConfig, process: ProcessConfig | N
     for b in v.bump_dicts():
         if b.get("normal", "all") not in NORMALS:
             raise LatticeError(f"bump normal must be one of {NORMALS}")
-    sole_d = 2 * min(r for _, r in knot_radii(cfg.sole))
+    es = effective_sole(v, cfg)
+    # the thinnest printed feature decides the voxel: sole struts and the skins that exist
+    sole_d = (min([2 * min(r for _, r in knot_radii(es))] + [k for k in (es.skin_outsole_mm, es.skin_cavity_mm) if k > 0])
+              if v.sole_mode != "shell" else float("inf"))
     printable = v.voxel_mm <= min(d_min, sole_d) / cfg.voxel_ratio * (1 + 1e-9)
     if not v.preview:
         check_radii([0.5 * d_min], lo, v.voxel_mm, cfg.voxel_ratio, what="yarn")
@@ -243,10 +282,38 @@ def shell_body_v(p: Prep, v: VariantSpec) -> tuple[np.ndarray, dict]:
     t_floor = np.take_along_axis(t3, k[:, :, None], axis=2)[:, :, 0]
     foot = _signed_2d(p.has, g.h) - t_floor - np.float32(v.sole_flare_mm)
     zb = sole_bottom(p, v)
-    slab = np.maximum(foot[:, :, None], np.maximum(zb[:, :, None] - z[None, None, :], z[None, None, :] - p.floor[:, :, None]))
-    body = np.maximum(np.minimum(shell, slab), -p.c0).astype(np.float32)
+    if v.sole_mode == "shell":  # no sole slab: the shell wraps the whole foot, the mesh continues under it
+        body = np.maximum(shell, -p.c0).astype(np.float32)
+    else:
+        slab = np.maximum(foot[:, :, None], np.maximum(zb[:, :, None] - z[None, None, :], z[None, None, :] - p.floor[:, :, None]))
+        body = np.maximum(np.minimum(shell, slab), -p.c0).astype(np.float32)
+    if v.heel_loop_mm > 0:
+        body = np.minimum(body, heel_loop(p, v, body, ztv)).astype(np.float32)
     body[body == 0] = 1e-3
     return body, {"T": t3, "zt_var": ztv, "floor": p.floor}
+
+
+def heel_loop(p: Prep, v: VariantSpec, body: np.ndarray, ztv: np.ndarray) -> np.ndarray:
+    """Pull loop at the back of the collar: a torus (tube ``heel_loop_tube_mm``, outer diameter ``heel_loop_mm``) in the y-z plane."""
+    g = p.grid
+    ys = g.origin[1] + np.arange(g.shape[1]) * g.h
+    z = g.origin[2] + np.arange(g.shape[2]) * g.dz
+    xs = g.origin[0] + np.arange(g.shape[0]) * g.h
+    sgn = -1.0 if p.axis["toe"] == "+x" else 1.0  # the heel end
+    jy = np.abs(ys) < 3.0
+    solid = body < 0
+    cols = solid[:, jy, :].any(axis=1)  # (nx, nz)
+    zsel = (z > float(ztv[p.has].min()) - 8) & (z < float(ztv[p.has].min()) - 2)
+    xi = np.flatnonzero(cols[:, zsel].any(axis=1))
+    xb = xs[xi.min()] if sgn < 0 else xs[xi.max()]
+    zt0 = float(np.median(ztv[np.argmin(np.abs(xs - xb)), jy])) if jy.any() else float(ztv[p.has].min())
+    r_t = 0.5 * v.heel_loop_tube_mm
+    R = 0.5 * v.heel_loop_mm - r_t
+    cz = zt0 + R - 3.0
+    cx = xb + (r_t - 1.0) * (1.0 if sgn < 0 else -1.0)  # the tube sinks 1 mm into the back of the collar
+    X, Y, Z = np.meshgrid(xs.astype(np.float32), ys.astype(np.float32), z.astype(np.float32), indexing="ij")
+    q = np.sqrt(Y * Y + (Z - cz) ** 2) - R
+    return (np.sqrt(q * q + (X - cx) ** 2) - r_t).astype(np.float32)
 
 
 # ----------------------------------------------------------------------------------------------- yarn layer
@@ -274,12 +341,12 @@ class KnitLayer2:
         self.z_hi = float(aux["zt_var"][p.has].max())
         if v.style == "voronoi":
             n = frame["n_around"]
-            jmax = int(math.ceil((self.X[-1] - self.X[0]) / (v.pitch_mm * 0.87))) + 4
+            jmax = int(math.ceil((self.X[-1] - self.X[0]) / v.elongate / (v.pitch_mm * 0.87))) + 4
             rng = np.random.default_rng(v.seed)
             jit = rng.uniform(-v.jitter, v.jitter, (n, jmax, 2)) * v.pitch_mm
             i, j = np.meshgrid(np.arange(n), np.arange(jmax), indexing="ij")
             s = (i + 0.5) * v.pitch_mm + jit[:, :, 0] + 0.5 * (j % 2) * v.pitch_mm
-            x = self.X[0] - 2 * v.pitch_mm + j * v.pitch_mm * 0.87 + jit[:, :, 1]
+            x = self.X[0] / v.elongate - 2 * v.pitch_mm + j * v.pitch_mm * 0.87 + jit[:, :, 1]
             circ = n * v.pitch_mm
             pts = np.stack([s.ravel() - circ / 2, x.ravel()], axis=1)
             self.vor_circ = circ
@@ -332,7 +399,8 @@ class KnitLayer2:
     def _chart(self, ix, x, theta, th, ns, a_mid):
         v, f = self.v, self.frame
         r0, p = f["r0"], v.pitch_mm
-        S, Xc = r0 * theta, self.X[ix] + np.zeros_like(theta)
+        el = v.elongate
+        S, Xc = r0 * theta, self.X[ix] / el + np.zeros_like(theta)
         # chart gradient of the pattern distance d(S, X) -> world gradient (S = r0 theta, X' = 1/m)
         if v.style == "hex":
             py = p * math.sqrt(3.0)
@@ -356,15 +424,22 @@ class KnitLayer2:
             gx = -np.sign(pk) * nrm[k, 1]
         else:  # voronoi
             Sw = np.mod(S + self.vor_circ / 2, self.vor_circ) - self.vor_circ / 2
-            dist, idx = self.vor_tree.query(np.stack([Sw, Xc], axis=1), k=2)
             q = np.stack([Sw, Xc], axis=1)
-            u1 = (q - self.vor_pts[idx[:, 0]]) / np.maximum(dist[:, :1], 1e-9)
-            u2 = (q - self.vor_pts[idx[:, 1]]) / np.maximum(dist[:, 1:2], 1e-9)
-            d = 0.5 * (dist[:, 1] - dist[:, 0])
-            g = 0.5 * (u2 - u1)
+            dist, idx = self.vor_tree.query(q, k=3)
+            u = [(q - self.vor_pts[idx[:, i]]) / np.maximum(dist[:, i : i + 1], 1e-9) for i in range(3)]
+            d01, d02 = 0.5 * (dist[:, 1] - dist[:, 0]), 0.5 * (dist[:, 2] - dist[:, 0])
+            g01, g02 = 0.5 * (u[1] - u[0]), 0.5 * (u[2] - u[0])
+            k = v.fillet_mm
+            if k > 0:  # soft minimum of the two bisectors that meet at a Voronoi vertex: rounds the junction
+                m = np.minimum(d01, d02)
+                e1, e2 = np.exp(-(d01 - m) / k), np.exp(-(d02 - m) / k)
+                d = m - k * np.log(e1 + e2)
+                g = (e1[:, None] * g01 + e2[:, None] * g02) / (e1 + e2)[:, None]
+            else:
+                d, g = d01, g01
             gs, gx = g[:, 0], g[:, 1]
         gw = gs * r0 * th
-        gw[0] = gw[0] + gx / self.m[ix]
+        gw[0] = gw[0] + gx / (self.m[ix] * el)
         gn = np.maximum(np.linalg.norm(gw, axis=0), 1e-6)
         b = d / gn
         c = np.sum(ns * gw / gn, axis=0)
@@ -393,7 +468,8 @@ class KnitLayer2:
         x = float(rs.x[ix])
         u = float(u_of_x(x, p.axis))
         zf, zt = rs.row(aux["floor"], ix), rs.row(aux["zt_var"], ix)
-        phi_z = np.maximum((zf + np.float32(v.sole_margin_mm))[:, None] - zz, zz - (zt - np.float32(v.rim_mm))[:, None])
+        low = (zf + np.float32(v.sole_margin_mm))[:, None] - zz if v.sole_mode != "shell" else (np.float32(-1e3) - zz)
+        phi_z = np.maximum(low, zz - (zt - np.float32(v.rim_mm))[:, None])
         for hh, uu, sign in ((v.heel_counter_h_mm, v.heel_counter_u, 1.0), (v.toe_cap_h_mm, v.toe_cap_u, -1.0)):
             if hh > 0:
                 xterm = (u - uu) * self.L if sign > 0 else (uu - u) * self.L  # negative inside the patch (u range)
@@ -481,8 +557,10 @@ def build_variant(prep: Prep, v: VariantSpec, cfg: LatticeConfig, process: Proce
     chk = check_variant(v, cfg, process)
     cfg_v = LatticeConfig(**{**cfg.__dict__, "voxel_mm": v.voxel_mm})
     body, aux = shell_body_v(prep, v)
-    zone = SoleZone.build(body, prep.c0, prep.grid, cfg.sole)
-    pores = check_sole_params(cfg_v, process, zone) if not v.preview else {}
+    cfg_v = dataclasses.replace(cfg_v, sole=effective_sole(v, cfg))
+    shell_sole = v.sole_mode == "shell"
+    zone = SoleZone.build(body, prep.c0, prep.grid, cfg_v.sole) if not shell_sole else None
+    pores = check_sole_params(cfg_v, process, zone) if (not v.preview and not shell_sole) else {}
     frame = foot_frame(prep.c0, prep.zt, prep.grid, v.pitch_mm)
     img = None
     if v.image:
@@ -496,7 +574,7 @@ def build_variant(prep: Prep, v: VariantSpec, cfg: LatticeConfig, process: Proce
 
     def layers(rs, fg):
         holder["knit"] = KnitLayer2(prep, v, aux, rs, frame, img)
-        return [SoleLayer(zone, rs), holder["knit"]]
+        return ([] if shell_sole else [SoleLayer(zone, rs)]) + [holder["knit"]]
 
     fine, fg, stats = build_fine(body, prep.grid, layers, v.voxel_mm, cfg.pad_mm, progress)
     k = holder["knit"]
@@ -505,5 +583,5 @@ def build_variant(prep: Prep, v: VariantSpec, cfg: LatticeConfig, process: Proce
            "solid_body_cm3": round(stats.vol_base_mm3 / 1000, 2), "lattice_body_cm3": round(stats.vol_final_mm3 / 1000, 2),
            "sole_pores": pores, "frame": {kk: frame[kk] for kk in ("n_around", "r0", "circumference_mm")},
            "collar_z_max_mm": round(float(aux["zt_var"][prep.has].max()), 1), "thickness_max_mm": round(float(aux["T"].max()), 2),
-           "sole_zone": {kk: zone.report[kk] for kk in ("columns_with_core", "islands_dropped", "core_thickness_mm")}}
+           "sole_zone": ({kk: zone.report[kk] for kk in ("columns_with_core", "islands_dropped", "core_thickness_mm")} if zone is not None else "none (shell wraps the foot)")}
     return fine, fg, rep, aux

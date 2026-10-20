@@ -99,3 +99,40 @@ def test_deterministic(prep):
     b = V.build_variant(prep, v, CFG, PROC)[0]
     assert np.array_equal(a, b)
     assert dataclasses.replace(v, seed=8) != v
+
+
+# ------------------------------------------------------------------------------------------------ concept-board styles
+def test_styles_config_loads_and_checks():
+    specs = V.load_variants("lattice_styles.toml")
+    assert [s.name for s in specs] == ["s1_honeycomb", "s2_triangle", "s3_skeleton"]
+    for s in specs:
+        chk = V.check_variant(s, CFG, PROC)
+        assert chk["printable"] and chk["yarn_diameter_min_mm"] >= 2.0
+    assert specs[2].voxel_mm == 1.0 and specs[2].yarn_mm >= 5.0 and specs[2].pitch_mm >= 30.0
+
+
+def test_coarse_voxel_is_judged_by_the_thinnest_feature():
+    s = V.load_variants("lattice_styles.toml")[0]
+    with pytest.raises(L.LatticeError, match="voxel"):
+        V.check_variant(dataclasses.replace(s, voxel_mm=1.0), CFG, PROC)  # 2.4 mm rods need <= 0.6 mm
+    assert not V.check_variant(dataclasses.replace(s, voxel_mm=1.0, preview=True), CFG, PROC)["printable"]
+    thin_skin = dataclasses.replace(s, sole_skin_cavity_mm=1.5, voxel_mm=0.5)
+    assert not V.check_variant(thin_skin, CFG, PROC)["printable"]  # a 1.5 mm skin needs <= 0.375 mm
+
+
+def test_skeleton_style_with_loop_and_no_sole_builds_and_the_loop_is_attached(prep):
+    s = dataclasses.replace(V.load_variants("lattice_styles.toml")[2], pitch_mm=20.0, yarn_mm=4.0, thickness_mm=5.0, fillet_mm=3.0, heel_loop_mm=22.0,
+                            heel_loop_tube_mm=4.0, voxel_mm=1.0)
+    fine, fg, rep, aux = V.build_variant(prep, s, CFG, PROC)
+    L.fill_sealed(fine, fg)
+    mesh, er = L.to_mesh(fine, fg, 200.0)
+    assert mesh.is_watertight and mesh.body_count == 1 and er.dropped_volume_mm3 < 50
+    assert rep["sole_zone"].startswith("none")
+
+
+def test_voronoi_elongation_and_fillet_change_the_field(prep):
+    base = spec(style="voronoi", pitch_mm=12.0, voxel_mm=0.3)
+    a = V.build_variant(prep, base, CFG, PROC)[0]
+    b = V.build_variant(prep, dataclasses.replace(base, elongate=1.6, fillet_mm=2.0), CFG, PROC)[0]
+    assert not np.array_equal(a, b)
+    assert (b < 0).sum() > (a < 0).sum() * 0.95  # a fillet only adds material at the junctions
