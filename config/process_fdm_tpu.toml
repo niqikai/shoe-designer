@@ -1,0 +1,41 @@
+# Process configuration: FDM + TPU (sole-down on the bed, supports not allowed inside the cavity).
+# Reproduces the S6 defaults. Machine sizes are web figures, to be confirmed by the print service.
+
+[process]
+name = "fdm_tpu"
+
+[wall]
+target_mm = 2.0
+min_mm = 1.2
+fill_mm = 1.5
+sole_min_mm = 6.0
+
+[closure]
+enabled = true
+alpha_b_deg = 43.0
+
+[bed]
+cut = true
+
+[shrink]
+compensation_mm = 0.2   # FDM bore shrink, to be calibrated by #11
+
+[powder]
+min_channel_mm = 0.0    # no powder to remove
+
+[fit]
+min_xy_mm = 0.0
+part_gap_mm = 5.0
+
+[machine.bambu_h2d]
+x = 325.0
+y = 320.0
+z = 325.0
+[machine.qidi_max4]
+x = 390.0
+y = 390.0
+z = 340.0
+[machine.qidi_q2]
+x = 270.0
+y = 270.0
+z = 256.0
