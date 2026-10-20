@@ -20,6 +20,7 @@ intent = ["anthropic>=0.40"]
 
 [project.scripts]
 shoe-assets = "shoe_designer.cli:main"
+make-shoe = "shoe_designer.make_shoe:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "jsonschema>=4.20"]
