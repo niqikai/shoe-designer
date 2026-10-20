@@ -1,0 +1,123 @@
+# Design space and presets for intent parsing (#16, docs/design/issue-16-intent.md).
+# [limits] are the clamp bounds shared with the #13 PatternSpec and config/ease_zones.toml; schemas/intent.schema.json
+# carries the same numbers as "x-clamp" (tests keep the two in sync).
+
+[claude]
+# Model is configuration, not code. Override per run with the SHOE_INTENT_MODEL environment variable.
+model = "claude-sonnet-5-5"
+effort = "low"
+max_tokens = 2000
+
+[deepseek]
+# REST backend (stdlib urllib, no SDK). Key: DEEPSEEK_API_KEY. Model override: SHOE_INTENT_DEEPSEEK_MODEL.
+model = "deepseek-flash"
+base_url = "https://api.deepseek.com"
+vision_models = ["deepseek-flash"]   # models that accept images; deepseek-v4-pro is text-only
+max_tokens = 2000
+timeout_s = 60
+
+[images]
+formats = ["png", "jpg", "jpeg", "webp"]
+max_bytes = 5242880     # 5 MiB, the per-image API limit
+max_count = 4           # at most one of them a pattern image
+
+[limits]
+scale_mm = [4.0, 30.0]
+open_ratio = [0.05, 0.6]
+depth_mm = [0.0, 2.0]
+instep_ease_mm = [2.0, 3.0]    # config/ease_zones.toml instep zone: 2.0-3.0 mm, default 2.5
+seed = [0, 2147483647]
+
+[defaults]
+scale_mm = 12.0
+open_ratio = 0.3
+depth_mm = 0.8
+zones = ["side", "top"]
+seed = 0
+image_use = "perforation"
+
+# One preset per style tag: the pattern the tag stands for. An explicit pattern kind from the user wins; a preset
+# only fills the parameters the user did not give (when its kind matches) or supplies the whole pattern (when
+# the user gave none). With several tags the first tag in the list decides.
+[style.sporty]
+kind = "hex_perforation"
+scale_mm = 10.0
+open_ratio = 0.35
+
+[style.casual]
+kind = "wave_displacement"
+scale_mm = 18.0
+depth_mm = 0.6
+
+[style.minimal]
+kind = "none"
+
+[style.organic]
+kind = "voronoi_perforation"
+scale_mm = 14.0
+open_ratio = 0.3
+
+[style.geometric]
+kind = "hex_perforation"
+scale_mm = 20.0
+open_ratio = 0.2
+
+[style.knit]
+kind = "rib_displacement"
+scale_mm = 6.0
+depth_mm = 0.5
+
+# Requests the pipeline cannot realise today. Matching text is reported in unsupported_requests and changes
+# nothing else. "patterns" are case-insensitive regexes used by the rule backend and as a safety net behind
+# the Claude backend (a mention the model forgot to list is appended).
+[[unsupported]]
+label = "heel height / heels"
+patterns = ["高跟", "跟高", "坡跟", "平底", "heel height", "high[- ]?heel", "stiletto", "wedge", "kitten heel"]
+
+[[unsupported]]
+label = "toe shape"
+patterns = ["尖头", "圆头", "方头", "鞋头型", "pointed", "round toe", "square toe", "toe shape", "toe box"]
+
+[[unsupported]]
+label = "sole thickness / platform"
+patterns = ["厚底", "增高", "松糕", "platform", "thick sole", "chunky sole"]
+
+[[unsupported]]
+label = "colour"
+patterns = ["颜色", "红色", "蓝色", "黑色", "白色", "绿色", "黄色", "粉色", "\\bcolou?r", "\\b(red|blue|black|white|green|yellow|pink)\\b"]
+
+[[unsupported]]
+label = "laces / closures"
+patterns = ["鞋带", "系带", "魔术贴", "拉链", "\\blaces?\\b", "velcro", "zipper"]
+
+[[unsupported]]
+label = "shoe type outside the two templates (boots, sandals ...)"
+patterns = ["靴", "凉鞋", "拖鞋", "高帮", "\\bboots?\\b", "sandals?", "slippers?", "high[- ]top"]
+
+[[unsupported]]
+label = "size / foot-shape adjustment"
+patterns = ["宽脚", "脚宽", "wide feet", "wide fit", "加宽"]
+
+# Rule-based backend keyword tables (also the documented Chinese/English vocabulary of the mock).
+[keywords.template]
+dlp_hollow = ["镂空", "hollow", "perforat", "mesh", "openwork"]
+dlp_solid = ["实心", "solid"]
+
+[keywords.pattern]
+wave_displacement = ["波浪", "波纹", "wave", "wavy"]
+rib_displacement = ["罗纹", "条纹", "竖纹", "rib"]
+voronoi_perforation = ["泰森", "维诺", "voronoi", "有机孔"]
+hex_perforation = ["六边形", "蜂窝", "hex", "honeycomb"]
+none = ["无图案", "纯色表面", "no pattern", "plain surface"]
+
+[keywords.style]
+sporty = ["运动", "sport", "athletic"]
+casual = ["休闲", "casual"]
+minimal = ["极简", "简约", "minimal"]
+organic = ["有机", "organic"]
+geometric = ["几何", "geometric"]
+knit = ["针织", "编织", "knit"]
+
+[keywords.instep]
+loose = ["脚背宽松", "脚背松", "instep loose", "loose instep"]
+tight = ["脚背紧", "脚背贴", "instep tight", "tight instep"]

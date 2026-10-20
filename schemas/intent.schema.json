@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/niqikai/shoe-designer/schemas/intent.schema.json",
+  "title": "ShoeIntent",
+  "description": "Structured shoe-design intent. Every field is something the pipeline really realises, except 'notes' (recorded only, never used by the pipeline) and 'unsupported_requests' (things the user asked for that the design space cannot do; they are reported, not realised). Numbers must be copied verbatim from the request, even if they look out of range: the system adjusts them afterwards and reports every change. Final intents are validated against strict_schema(), where x-clamp becomes minimum/maximum.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["template", "pattern", "style_tags", "instep_ease_mm", "notes", "unsupported_requests"],
+  "properties": {
+    "template": {
+      "description": "Which of the two usable designs to rebuild. Sizes are the same design scaled.",
+      "enum": ["dlp_solid", "dlp_hollow"]
+    },
+    "pattern": {
+      "description": "PatternSpec (#13). null = the user did not ask for a pattern: the first style tag's preset applies, else kind none.",
+      "anyOf": [{"$ref": "#/$defs/pattern"}, {"type": "null"}]
+    },
+    "style_tags": {
+      "description": "Style words mapped to pattern presets (config/intent.toml [style.*]).",
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 6,
+      "items": {"enum": ["sporty", "casual", "minimal", "organic", "geometric", "knit"]}
+    },
+    "instep_ease_mm": {
+      "description": "Instep ease (config/ease_zones.toml). null = keep the configured default.",
+      "anyOf": [{"type": "number", "x-clamp": [2.0, 3.0]}, {"type": "null"}]
+    },
+    "notes": {
+      "description": "Free text for humans. RECORDED ONLY: it never influences the pipeline.",
+      "type": "string",
+      "maxLength": 500
+    },
+    "unsupported_requests": {
+      "description": "Requests the design space cannot realise (heel height, toe shape, colour ...), in the user's own words. They never change other fields.",
+      "type": "array",
+      "maxItems": 12,
+      "items": {"type": "string", "maxLength": 120}
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["none", "hex_perforation", "voronoi_perforation", "wave_displacement", "rib_displacement", "image"]},
+        "scale_mm": {"anyOf": [{"type": "number", "x-clamp": [4.0, 30.0]}, {"type": "null"}]},
+        "open_ratio": {"description": "Perforation kinds, and image with image_use perforation.", "anyOf": [{"type": "number", "x-clamp": [0.05, 0.6]}, {"type": "null"}]},
+        "depth_mm": {"description": "Displacement kinds, and image with image_use displacement.", "anyOf": [{"type": "number", "x-clamp": [0.0, 2.0]}, {"type": "null"}]},
+        "zones": {"anyOf": [{"type": "array", "uniqueItems": true, "minItems": 1, "items": {"enum": ["side", "top", "toe", "heel"]}}, {"type": "null"}]},
+        "seed": {"anyOf": [{"type": "integer", "x-clamp": [0, 2147483647]}, {"type": "null"}]},
+        "image": {"description": "Only the pattern image the user supplied; the parser fills it in, a model must leave it null.", "anyOf": [{"type": "string"}, {"type": "null"}]},
+        "image_use": {"anyOf": [{"enum": ["perforation", "displacement"]}, {"type": "null"}]}
+      }
+    }
+  }
+}
