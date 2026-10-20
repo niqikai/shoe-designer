@@ -1,0 +1,59 @@
+# Lattice weight reduction (#14): sole strut lattice + upper shell prototypes. Read by shoe_designer.lattice.
+# Every number is a GENERIC SLS/MJF TPU reference value, not a factory data sheet: replace them with the
+# results of the #11 coupons (lattice_coupons.py writes 9 of them) and the factory's material sheet.
+# Items marked (ask) are decisions for the user / factory.
+
+[strut]
+min_diameter_mm = 1.2     # table: minimum wall / lattice strut >= 1.2 mm; the process file's wall.min_mm can only raise it
+                          # the build is refused when 2 * r < this anywhere (also with the graded radius and the pad layer)
+
+[grid]
+voxel_mm = 0.3            # fine grid of the lattice; must be <= (smallest strut diameter) / voxel_ratio
+voxel_ratio = 4.0         # at least this many voxels across the thinnest strut (1.2 mm -> 0.3 mm)
+pad_mm = 2.0              # empty margin around the part on the fine grid
+
+[report]
+tpu_density_g_cm3 = 1.2   # PLACEHOLDER (not checked against a data sheet): weights are volume * this
+
+[powder]
+min_opening_mm = 5.0      # (ask) through opening of the lattice; the process file's powder.min_channel_mm can only raise it.
+                          # The generic table says >= 6-8 mm cleans automatically, 4-6 needs air + ultrasound, < 4 clogs:
+                          # the report lists the achieved opening, #11 decides whether it is enough.
+enforce_opening = false   # true: refuse a cell/radius whose through opening is below min_opening_mm
+
+# ------------------------------------------------------------------------------------------------ A. sole
+[sole]
+kind = "bcc"              # "bcc" (struts from the cell centre to the 8 corners) or "cubic" (struts along the cell edges)
+cell_mm = 6.0             # (ask) ONE cell size for the whole sole: density only changes through the strut radius
+skin_cavity_mm = 2.0      # solid skin under the footbed (distance to the cavity, and vertically below the floor)
+skin_outsole_mm = 2.0     # solid skin above the outsole
+core_min_mm = 3.0         # (ask) thinner lattice core than this stays solid (cannot hold a cell)
+open_mm = 3.0             # lattice columns narrower than this (morphological opening) stay solid
+edge_extend_mm = 4.0      # the zone grows this far over thinner columns / out of the sole, so the sides open instead of a thin film
+# solid volume fraction along the foot axis: u = 0 at the heel, 1 at the toe (front sparse/soft, heel dense/stable)
+density = [[0.0, 0.40], [0.35, 0.36], [0.70, 0.26], [1.0, 0.22]]
+pad_layer_mm = 2.0        # dense layer directly under the footbed skin: thicker struts over this height
+pad_radius_factor = 1.15  # strut radius multiplier at the footbed (1 = off)
+outsole_hole_mm = 6.0     # (ask) powder windows: round holes through the outsole skin into the lattice (0 = none); >= powder.min_opening_mm
+hole_pitch_mm = 24.0      # hex grid pitch of the windows
+toe = "auto"              # which end is the toe: "auto" (the wider end of the cavity), "+x" or "-x"
+
+# ------------------------------------------------------------------------------------------------ B. upper (prototype)
+[upper]
+thickness_mm = 1.8        # shell thickness T of the yarn shell: outer skin = cavity offset by T
+rim_mm = 8.0              # solid collar band below the collar line (the finish of the opening)
+sole_thickness_mm = 12.0  # sole slab under the cavity floor (the shell body is built from the cavity only)
+sole_margin_mm = 2.0      # the yarn shell starts this far above the sole slab's top
+
+[upper.knit]
+yarn_diameter_mm = 1.6    # >= strut.min_diameter_mm
+pitch_mm = 7.0            # spacing of the yarns along the surface, per direction (diamond opening ~ pitch)
+helix_slope = 0.9         # diamond angle: x advance per unit of arc length around the foot axis
+
+[upper.volume]
+thickness_mm = 7.0        # thick shell between the cavity and the cavity offset by this
+kind = "gyroid"           # "gyroid" (sheet, world coordinates) or "bcc"
+cell_mm = 8.0
+wall_mm = 1.4             # gyroid sheet thickness (>= strut.min_diameter_mm)
+radius_mm = 0.7           # strut radius when kind = "bcc"
+skin_mm = 0.0             # solid skin kept on both faces of the shell; 0 = open to both sides (a skin on both would seal the sheet)
