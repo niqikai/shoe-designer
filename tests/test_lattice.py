@@ -248,3 +248,96 @@ def test_toe_direction_can_be_forced():
     assert a.radius_at(0.0) == b.radius_at(0.0)
     with pytest.raises(L.LatticeError):
         L.foot_axis(cav, grid, "up")
+
+
+# ------------------------------------------------------------------------------------------------ B. upper shell prototypes
+def capsule_scene():
+    """Foot-like cavity: a capsule along x (radius 20, floor at z = 14) with an opening chimney above; collar line z = 52."""
+    grid = Grid.from_bounds((-30, -40, -6), (150, 40, 75), 1.0)
+    X, Y, Z = axes_of(grid)
+    ax, bx = 15.0, 105.0
+    t = np.clip((X - ax) / (bx - ax), 0, 1)
+    cap = np.sqrt((X - (ax + t * (bx - ax))) ** 2 + Y**2 + (Z - 34.0) ** 2) - 20.0
+    chim = np.maximum(np.abs(Y) - 12.0, np.maximum(np.abs(X - 60.0) - 30.0, 40.0 - Z))
+    cav = np.minimum(cap, chim).astype(np.float32)
+    zt = np.full(grid.shape[:2], 52.0, np.float32)
+    return grid, cav, zt
+
+
+@pytest.fixture(scope="module")
+def uppers():
+    from shoe_designer import lattice_upper as U
+
+    grid, cav, zt = capsule_scene()
+    out = {}
+    for form in U.FORMS:
+        out[form] = U.upper_shell(form, cav, cav, zt, grid, dataclasses.replace(CFG, voxel_mm=0.3), PROC)
+    return grid, cav, zt, out
+
+
+@pytest.mark.parametrize("form", ["knit", "volume"])
+def test_upper_prototype_is_one_watertight_body(uppers, form):
+    grid, cav, zt, out = uppers
+    fine, fg, rep = out[form]
+    fine = fine.copy()
+    pockets = L.fill_sealed(fine, fg)
+    assert pockets["largest_voxels"] * fg.h**3 < 1.0  # < 1 mm^3: blips at a zone boundary, never a real cavity
+    mesh, er = L.to_mesh(fine, fg)
+    assert mesh.is_watertight and mesh.body_count == 1
+    assert mesh_inner_shells(mesh)["count"] == 0
+    assert er.dropped_volume_mm3 < 50
+    assert rep["lattice_body_cm3"] < 0.8 * rep["solid_body_cm3"]  # lighter than the solid shell + sole it replaces
+
+
+def test_knit_yarn_diameter_measured_equals_set(uppers):
+    grid, cav, zt, out = uppers
+    fine, fg, rep = out["knit"]
+    k = rep["upper"]["yarn_diameter_mm"]
+    solid = fine < 0
+    # a yarn is a tube: distance to air inside it peaks at its radius (well away from crossings and the sole)
+    sub = solid[:, :, int(round((34.0 - fg.origin[2]) / fg.dz)) : int(round((46.0 - fg.origin[2]) / fg.dz))]
+    d = ndimage.distance_transform_edt(np.pad(sub, 2), sampling=fg.h)
+    peak = np.percentile(d[d > 0.3], 99)
+    assert abs(peak - 0.5 * k) <= 0.35 * k  # crossings are thicker; the tube radius is within a few voxels
+    assert rep["openings"]["max_mm"] > 2.0  # the diamonds are open
+
+
+def test_upper_forms_check_their_parameters():
+    from shoe_designer import lattice_upper as U
+
+    u = U.UpperConfig.from_lattice(CFG)
+    U.check_upper("knit", u, CFG, PROC)
+    U.check_upper("volume", u, CFG, PROC)
+    with pytest.raises(L.LatticeError, match="diameter"):
+        U.check_upper("knit", dataclasses.replace(u, knit=dataclasses.replace(u.knit, yarn_diameter_mm=1.0)), CFG, PROC)
+    with pytest.raises(L.LatticeError, match="wall"):
+        U.check_upper("volume", dataclasses.replace(u, volume=dataclasses.replace(u.volume, wall_mm=1.0)), CFG, PROC)
+    with pytest.raises(L.LatticeError, match="cannot hold"):
+        U.check_upper("volume", dataclasses.replace(u, volume=dataclasses.replace(u.volume, thickness_mm=3.0)), CFG, PROC)
+    with pytest.raises(L.LatticeError):
+        U.check_upper("tpms", u, CFG, PROC)
+
+
+def test_offset_field_reaches_beyond_the_clamped_band():
+    from shoe_designer import lattice_upper as U
+
+    grid, cav, zt = capsule_scene()
+    clamped = np.minimum(cav, 6.0)  # S4 clamps phi_C a few mm outside the cavity
+    f = U.offset_field(clamped, grid)
+    probe = tuple(np.array([60, 0, 34 - 20 - 7]) - np.array(grid.origin[:3]) + 0)  # 7 mm below the capsule bottom
+    i = tuple(int(round(v / s)) for v, s in zip(probe, grid.spacing))
+    assert f[i] == pytest.approx(7.0, abs=1.2)
+
+
+def test_coupons_are_watertight_single_bodies_without_sealed_cavities():
+    for cell in L.COUPON_CELLS:
+        for d in L.COUPON_DIAMETERS:
+            phi, grid, rep = L.coupon(cell, d, CFG, PROC)
+            assert L.sealed(phi, grid)["count"] == 0
+            mesh, er = L.to_mesh(phi, grid, 5.0)
+            assert mesh.is_watertight and mesh.body_count == 1 and mesh_inner_shells(mesh)["count"] == 0
+            assert rep["pores"]["through_mm"] > 0
+    with pytest.raises(L.LatticeError):
+        L.coupon(6.0, 1.0, CFG, PROC)  # 1.0 mm strut < 1.2 mm
+    with pytest.raises(L.LatticeError):
+        L.coupon(6.0, 1.6, CFG, PROC, hole_mm=4.0)  # window below the 5 mm opening

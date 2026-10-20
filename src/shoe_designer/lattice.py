@@ -615,12 +615,63 @@ def fill_sealed(phi: np.ndarray, grid: Grid) -> dict:
     """Safety net: fill every air pocket that does not reach the grid border (they would trap powder). In place; reports it."""
     air, n = ndimage.label(phi >= 0)
     pockets = (air != air[0, 0, 0]) & (air > 0)
+    voxel = grid.h * grid.h * grid.dz
+    sizes = np.bincount(air[pockets]) if pockets.any() else np.zeros(1, int)
     del air
-    vol = float(pockets.sum() * grid.h * grid.h * grid.dz)
     phi[pockets] = np.float32(-1e-3)
-    return {"filled_mm3": round(vol, 2), "components": int(max(n - 1, 0))}
+    return {"filled_mm3": round(float(pockets.sum() * voxel), 2), "components": int(max(n - 1, 0)), "largest_voxels": int(sizes.max())}
+
+
+
+# ----------------------------------------------------------------------------------------------- coupons (#11)
+COUPON_CELLS = (4.0, 6.0, 8.0)
+COUPON_DIAMETERS = (1.2, 1.6, 2.0)
+
+
+def coupon(cell: float, diameter: float, cfg: LatticeConfig, process: ProcessConfig | None = None, kind: str | None = None,
+           size=(48.0, 48.0, 20.0), skin_mm: float | None = None, hole_mm: float | None = None) -> tuple[np.ndarray, Grid, dict]:
+    """Test block for the factory: lattice core between a bottom and a top skin plate, open lattice on the four sides, round powder
+    holes in both plates (4 in the bottom plate at the quarter points, 1 in the top plate at the centre). One cell size, one strut
+    diameter, no density gradient. Returns (phi, fine grid, report). Parameter checks as for the sole (diameter >= minimum, voxel).
+    """
+    kind = kind or cfg.sole.kind
+    skin = cfg.sole.skin_outsole_mm if skin_mm is None else skin_mm
+    hole = cfg.sole.outsole_hole_mm if hole_mm is None else hole_mm
+    lo = strut_min_mm(cfg, process)
+    check_radii([0.5 * diameter], lo, cfg.voxel_mm, cfg.voxel_ratio, what="coupon strut")
+    if skin < lo:
+        raise LatticeError(f"skin {skin:g} mm < minimum {lo:g} mm")
+    need = max(cfg.min_opening_mm, process.min_channel_mm if process is not None else 0.0)
+    if hole < need:
+        raise LatticeError(f"coupon powder hole {hole:g} mm < required opening {need:g} mm")
+    h = cfg.voxel_mm
+    sx, sy, sz = size
+    pad = 3
+    shape = tuple(int(math.ceil(v / h)) + 1 + 2 * pad for v in size)
+    grid = Grid((-pad * h,) * 3, h, h, shape)
+    g = [-pad * h + np.arange(n, dtype=np.float32) * np.float32(h) for n in shape]
+    X, Y, Z = np.meshgrid(*g, indexing="ij")
+    box = np.maximum(np.maximum(-X, X - sx), np.maximum(np.maximum(-Y, Y - sy), np.maximum(-Z, Z - sz)))
+    # outside the block the max-box distance is not Euclidean, fine for a sign + a few voxels of gradient
+    phi_z = np.maximum(skin - Z, Z - (sz - skin))
+    lat = strut_distance(kind, X, Y, Z, cell, (0.0, 0.0, skin)) - np.float32(0.5 * diameter)
+    phi = np.maximum(box, np.minimum(-phi_z, lat))
+    holes = [(sx * 0.25, sy * 0.25), (sx * 0.75, sy * 0.25), (sx * 0.25, sy * 0.75), (sx * 0.75, sy * 0.75)]
+    for hx, hy in holes:
+        carve = np.minimum(np.float32(0.5 * hole) - np.hypot(X - hx, Y - hy), skin + 0.5 - Z)  # bottom plate
+        phi = np.maximum(phi, carve)
+    carve = np.minimum(np.float32(0.5 * hole) - np.hypot(X - sx / 2, Y - sy / 2), Z - (sz - skin - 0.5))  # top plate
+    phi = np.maximum(phi, carve).astype(np.float32)
+    phi[phi == 0] = 1e-3
+    vol = float(_occ(phi, h).sum()) * h**3
+    rep = {"kind": kind, "cell_mm": cell, "strut_diameter_mm": diameter, "size_mm": list(size), "skin_mm": skin, "hole_mm": hole,
+           "voxel_mm": h, "nominal_density": round(density_for_radius(kind, cell, 0.5 * diameter), 4),
+           "volume_cm3": round(vol / 1000, 3), "solid_block_cm3": round(sx * sy * sz / 1000, 3),
+           "fill_vs_solid": round(vol / (sx * sy * sz), 4), "grams_at_placeholder_density": round(vol / 1000 * cfg.tpu_density_g_cm3, 1),
+           "pores": pore_report(kind, cell, 0.5 * diameter, 0.2)}
+    return phi, grid, rep
 
 
 __all__ = ["LatticeConfig", "SoleConfig", "LatticeError", "SoleZone", "strut_distance", "radius_for_density", "density_for_radius",
-           "sole_lattice", "check_sole_params", "check_radii", "check_voxel", "pore_report", "powder_access", "zone_box", "fill_sealed", "thin_material", "to_mesh", "export_checks",
+           "sole_lattice", "coupon", "check_sole_params", "check_radii", "check_voxel", "pore_report", "powder_access", "zone_box", "fill_sealed", "thin_material", "to_mesh", "export_checks",
            "SDFError"]

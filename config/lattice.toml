@@ -44,13 +44,11 @@ thickness_mm = 1.8        # shell thickness T of the yarn shell: outer skin = ca
 rim_mm = 8.0              # solid collar band below the collar line (the finish of the opening)
 sole_thickness_mm = 12.0  # sole slab under the cavity floor (the shell body is built from the cavity only)
 sole_margin_mm = 2.0      # the yarn shell starts this far above the sole slab's top
-offset_mm = 0.0           # lattice phase
 
 [upper.knit]
 yarn_diameter_mm = 1.6    # >= strut.min_diameter_mm
 pitch_mm = 7.0            # spacing of the yarns along the surface, per direction (diamond opening ~ pitch)
 helix_slope = 0.9         # diamond angle: x advance per unit of arc length around the foot axis
-inner_dia_cm = 0.0        # reserved
 
 [upper.volume]
 thickness_mm = 7.0        # thick shell between the cavity and the cavity offset by this
@@ -58,4 +56,4 @@ kind = "gyroid"           # "gyroid" (sheet, world coordinates) or "bcc"
 cell_mm = 8.0
 wall_mm = 1.4             # gyroid sheet thickness (>= strut.min_diameter_mm)
 radius_mm = 0.7           # strut radius when kind = "bcc"
-skin_mm = 1.2             # solid skin kept on both faces of the shell (0 = open lattice to both sides)
+skin_mm = 0.0             # solid skin kept on both faces of the shell; 0 = open to both sides (a skin on both would seal the sheet)
