@@ -472,23 +472,29 @@ class RuleBackend:
 
 
 def _system_prompt(cfg: dict) -> str:
-    lim = cfg["limits"]
     tags = ", ".join(cfg["style"])
     unsup = "; ".join(e["label"] for e in cfg["unsupported"])
     return f"""You translate a shoe request (any language) into a JSON object for a fixed 3D-printing pipeline.
 You do not design anything; you only pick values the pipeline can realise. Output exactly one JSON object that matches the schema.
 
 What the pipeline can change:
-- template: "dlp_solid" or "dlp_hollow" (default dlp_solid; choose dlp_hollow only if the user wants an open / perforated / hollow look).
+- template: "dlp_solid" or "dlp_hollow" (default dlp_solid). The words hollow / perforated / mesh / openwork (镂空) choose the TEMPLATE
+  dlp_hollow. They do not choose a pattern kind: the pattern kind is set only by an explicit pattern word (hex / honeycomb, voronoi,
+  wave, rib ...) or by a style tag. Both can appear together, e.g. "wave-pattern hollow sneaker" = template dlp_hollow + pattern wave_displacement.
 - pattern: kind none | hex_perforation | voronoi_perforation | wave_displacement | rib_displacement | image. Parameters
-  scale_mm {lim['scale_mm']}, open_ratio {lim['open_ratio']} (perforation kinds), depth_mm {lim['depth_mm']} (displacement kinds),
-  zones subset of side/top/toe/heel, seed integer. Give a parameter only if the user stated it; use null otherwise.
-  If the user gave no pattern wish at all, set pattern to null.
+  scale_mm, open_ratio (perforation kinds), depth_mm (displacement kinds), zones subset of side/top/toe/heel, seed integer.
+  Give a parameter only if the user stated it; use null otherwise. If the user gave no pattern wish at all, set pattern to null.
 - style_tags: only from [{tags}], only when the request clearly matches.
-- instep_ease_mm {lim['instep_ease_mm']} or null.
+- instep_ease_mm: the instep ease in mm if the user gave a number, else null.
 - notes: free text for humans, never used by the pipeline.
-- unsupported_requests: everything the user asked for that the pipeline cannot do ({unsup}, and anything else outside the list above),
+- unsupported_requests: only requests OUTSIDE what the pipeline can do ({unsup}, and anything else that is not a field above),
   quoted briefly in the user's words. Never turn an unsupported request into some other field, and never drop it silently.
+
+Numbers: copy the number the user wrote, exactly, into its field, even if it seems very large, very small or unreasonable. Do NOT
+round, cap, clamp or guess a range: the system checks every number against the allowed range afterwards and reports each adjustment.
+A number that is too big or too small is NOT an unsupported request: keep it in its field and keep that field's value (never set it
+to null because the number looks out of range). Example of the rule, with placeholders: user asks for "<field> <HUGE NUMBER>" ->
+the field holds <HUGE NUMBER>, and unsupported_requests does not mention it.
 
 Pattern images: when an image is marked "pattern image", set pattern.kind to "image", pattern.image to null, and image_use to
 perforation or displacement. Images marked "reference" are shoe photos: read style from them (style_tags, pattern kind); do not

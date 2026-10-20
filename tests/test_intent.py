@@ -588,3 +588,52 @@ def test_deepseek_transport_exception_does_not_leak_key(ds_key):
 def test_deepseek_mocked_examples_validate_and_clamp(ds_key, text, answer, check):
     r = it.parse_intent(text, it.DeepSeekBackend(FakeHTTP(ds_ok(answer))))
     assert r.ok and check(r.intent, r)
+
+
+# ---------------------------------------------------------------- verbatim numbers, template-vs-pattern rule
+
+
+def test_model_returns_original_out_of_range_numbers_code_clamps_and_reports():
+    # what a model must do for "孔径 50mm, instep ease 5mm": copy the numbers, leave unsupported_requests empty
+    ans = base(template="dlp_hollow", style_tags=["sporty"], pattern={"kind": "hex_perforation", "scale_mm": 50}, instep_ease_mm=5)
+    r = it.parse_intent("a sporty perforated sneaker, 孔径 50mm, instep ease 5mm", Scripted(ans))
+    assert r.ok and r.intent["pattern"]["scale_mm"] == 30.0 and r.intent["instep_ease_mm"] == 3.0
+    got = {c.field: (c.original, c.new) for c in r.changes}
+    assert got == {"pattern.scale_mm": (50, 30.0), "instep_ease_mm": (5, 3.0)}
+    assert r.intent["unsupported_requests"] == []
+
+
+def test_out_of_range_item_listed_as_unsupported_is_a_known_unchecked_behaviour():
+    # documented: no semantic detection; the list is passed through, other fields are unaffected
+    ans = base(pattern={"kind": "hex_perforation"}, unsupported_requests=["孔径 50mm"], instep_ease_mm=None)
+    r = it.parse_intent("孔径 50mm", Scripted(ans))
+    assert r.ok and r.intent["unsupported_requests"] == ["孔径 50mm"] and r.changes == []
+
+
+@pytest.mark.parametrize("make", [lambda: it.ClaudeBackend(FakeClient()), lambda: it.DeepSeekBackend(FakeHTTP())])
+def test_system_prompt_rules_shared_by_both_backends(make):
+    sp = make()._system
+    low = sp.lower()
+    assert "copy the number the user wrote" in low and "do not\nround, cap, clamp" in low.replace("not\n", "not\n")
+    assert "not an unsupported request" in low and "never set it\nto null" in low
+    assert "choose the template" in low and "do not choose a pattern kind" in low
+    assert "pattern wave_displacement" in low  # worked example of both together
+    for lo_hi in CFG["limits"].values():  # ranges are not shown to the model, so it cannot pre-clamp
+        assert f"({lo_hi[0]}, {lo_hi[1]})" not in sp and f"[{lo_hi[0]}, {lo_hi[1]}]" not in sp
+
+
+def test_api_schema_has_no_range_hints_for_the_model():
+    s = json.dumps(it.api_schema())
+    for bad in ('"minimum"', '"maximum"', "4.0, 30.0", "0.05"):
+        assert bad not in s
+
+
+def test_hollow_word_selects_template_not_pattern():
+    a = intent_of("镂空鞋").intent
+    assert a["template"] == "dlp_hollow" and a["pattern"]["kind"] == "none"
+    b = intent_of("六边形图案").intent
+    assert b["template"] == "dlp_solid" and b["pattern"]["kind"] == "hex_perforation"
+    c = intent_of("镂空,波浪纹").intent
+    assert c["template"] == "dlp_hollow" and c["pattern"]["kind"] == "wave_displacement"
+    d = intent_of("hollow shoe with voronoi holes").intent
+    assert d["template"] == "dlp_hollow" and d["pattern"]["kind"] == "voronoi_perforation"

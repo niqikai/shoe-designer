@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/niqikai/shoe-designer/schemas/intent.schema.json",
   "title": "ShoeIntent",
-  "description": "Structured shoe-design intent. Every field is something the pipeline really realises, except 'notes' (recorded only, never used by the pipeline) and 'unsupported_requests' (things the user asked for that the design space cannot do; they are reported, not realised). Numeric fields marked x-clamp may be out of range in the parser output; intent.py clamps them to the range and reports every change. Final intents are validated against strict_schema(), where x-clamp becomes minimum/maximum.",
+  "description": "Structured shoe-design intent. Every field is something the pipeline really realises, except 'notes' (recorded only, never used by the pipeline) and 'unsupported_requests' (things the user asked for that the design space cannot do; they are reported, not realised). Numbers must be copied verbatim from the request, even if they look out of range: the system adjusts them afterwards and reports every change. Final intents are validated against strict_schema(), where x-clamp becomes minimum/maximum.",
   "type": "object",
   "additionalProperties": false,
   "required": ["template", "pattern", "style_tags", "instep_ease_mm", "notes", "unsupported_requests"],

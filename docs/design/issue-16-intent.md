@@ -42,6 +42,20 @@
 
 **预设合并**:用户明确的 kind 优先;预设 kind 与之相同时只补用户没给的参数,不同时不借用预设参数(用全局默认);多个 tag 时第一个 tag 决定。缺省参数取 `[defaults]`。
 
+### 数值原样输出、由代码收敛
+
+系统提示(Claude 与 DeepSeek 共用)要求模型**照抄用户写的数值**,不要自己取整、封顶或猜范围;范围数值不写进提示,也不在给模型的 schema(`api_schema()`)里,模型无从预先收敛。越界值保留在原字段,由 `normalise` clamp 并写入 `changes`(原值、新值、原因),例如孔径 50 mm → 30、脚背松量 5 → 3.0。数值越界**不是**"不支持的需求",不应进 `unsupported_requests`,也不应把字段置 null。
+
+已知行为:若模型仍把越界项放进 `unsupported_requests` 或置 null,代码**不做语义检测**,原样接受(其他字段不受影响,该数值就不会被收敛/报告)。真实模型验证时留意这一点。
+
+### "镂空"的规则(模板 vs 图案)
+
+- "镂空 / hollow / perforated / mesh / openwork" 选择的是**模板** `dlp_hollow`;不决定图案类型。
+- 图案类型只由明确的图案词(六边形/蜂窝 → hex_perforation,泰森/voronoi → voronoi_perforation,波浪 → wave_displacement,罗纹/条纹 → rib_displacement)或 style tag 预设决定。
+- 两者同时出现互不影响:"波浪纹的镂空运动鞋" = `dlp_hollow` + `wave_displacement`(+ sporty 标签,但 kind 已显式给出,预设参数不借用);"镂空鞋"(无图案词)= `dlp_hollow` + pattern `none`;"六边形图案"(无镂空词)= `dlp_solid` + `hex_perforation`。
+- 同时说"实心"和"镂空"→ 保持默认 `dlp_solid` 并在 notes 记一笔。
+- `unsupported_requests` 只放能力范围之外的需求(跟高、鞋头型、颜色等)。
+
 ## 3. 结果与报告
 
 `parse_intent(text, backend, images=...)` 返回 `IntentResult`:
