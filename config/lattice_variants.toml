@@ -1,0 +1,90 @@
+# Shape-freedom demo for the knit upper (#14 B-knit): every look is one [[variant]]; read by shoe_designer.lattice_variants.
+# The cavity (last + ease) is fixed; everything here lives outside it. u = 0 at the heel, 1 at the toe. All numbers are
+# demo defaults, not product decisions. Yarn diameters must stay >= strut.min_diameter_mm (config/lattice.toml): a variant
+# below that is refused. voxel_mm 0.3 resolves the thinnest strut of the sole lattice (1.33 mm / 4); "preview = true" skips
+# that check and the variant is then labelled "preview (not printable)".
+
+[defaults]
+voxel_mm = 0.3
+thickness_mm = 2.4        # shell thickness T (outer skin = cavity offset by T); must be >= the thickest yarn
+yarn_mm = 1.6
+pitch_mm = 7.0
+sole_mm = 12.0
+
+[[variant]]
+name = "v1_base"
+description = "baseline: low cut, uniform 7 mm diamonds, 12 mm sole"
+
+[[variant]]
+name = "v2_hightop"
+description = "high-top / ankle boot: collar raised 45 mm around the ankle, wider solid rim"
+raise_pts = [[0.0, 45.0], [0.5, 45.0], [0.64, 0.0], [1.0, 0.0]]
+rim_mm = 10.0
+rim_thick_mm = 1.0
+
+[[variant]]
+name = "v3_outline"
+description = "outline: much taller and fuller toe box, bulging heel (thickness bumps along u, height and normal)"
+thickness_mm = 2.4
+bumps = [
+  { dT = 14.0, u = [0.55, 1.15], normal = "top", z = [10.0, 90.0], ramp = 0.12, ramp_z = 8.0 },
+  { dT = 9.0, u = [0.70, 1.2], normal = "all", z = [-5.0, 70.0], ramp = 0.10, ramp_z = 6.0 },
+  { dT = 8.0, u = [-0.2, 0.16], normal = "back", z = [0.0, 120.0], ramp = 0.06, ramp_z = 10.0 },
+]
+
+[[variant]]
+name = "v4_sole"
+description = "thick rocker sole: 28 mm, 4 mm flare, forefoot rocker 14 mm, heel bevel, chevron tread 2 mm"
+sole_mm = 28.0
+sole_flare_mm = 4.0
+rocker_mm = 14.0
+heel_bevel_mm = 5.0
+tread_depth_mm = 2.0
+
+[[variant]]
+name = "v5_gradient"
+description = "density gradient: spacing 5.6 mm at the heel to 11 mm at the toe, yarn 2.0 -> 1.45 mm (heel -> toe), heavier near the sole"
+pitch_mm = 7.0
+pitch_pts = [[0.0, 0.8], [0.5, 1.0], [1.0, 1.6]]
+yarn_pts_u = [[0.0, 1.25], [0.5, 1.0], [1.0, 0.9]]
+yarn_pts_z = [[0.0, 1.15], [1.0, 0.9]]
+thickness_mm = 2.4
+
+[[variant]]
+name = "v6_image"
+description = "image-driven density: a test picture (ring, star, bar; own drawing) sets the yarn diameter 1.2 (light) .. 3.0 mm (dark)"
+image = "test"
+image_dense_mm = 3.0
+thickness_mm = 3.2
+pitch_mm = 6.5
+
+[[variant]]
+name = "v7_hex"
+description = "mesh style: hexagons (pattern on the unrolled mid-surface), 12 mm cells"
+style = "hex"
+pitch_mm = 12.0
+thickness_mm = 2.4
+
+[[variant]]
+name = "v8_voronoi"
+description = "mesh style: Voronoi cells (seeded, 12 mm)"
+style = "voronoi"
+pitch_mm = 12.0
+jitter = 0.3
+
+[[variant]]
+name = "v9_triangle"
+description = "mesh style: three-way (two helices + rings) triangles"
+style = "triangle"
+pitch_mm = 9.0
+ring_factor = 1.0
+
+[[variant]]
+name = "v10_structure"
+description = "local structure: solid heel counter (45 mm), toe cap (28 mm), wide 12 mm rim with thicker lip"
+heel_counter_h_mm = 45.0
+heel_counter_u = 0.2
+toe_cap_h_mm = 28.0
+toe_cap_u = 0.86
+rim_mm = 12.0
+rim_thick_mm = 1.5
