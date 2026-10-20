@@ -396,7 +396,7 @@ def shell_pores(solid: np.ndarray, h: float, band: np.ndarray) -> dict:
     wall), each with the diameter of the largest ball that fits (distance to the solid, twice) -- inscribed window diameter."""
     air = ~solid
     dist = ndimage.distance_transform_edt(air).astype(np.float32) * h
-    lab, n = ndimage.label(band & air)
+    lab, n = ndimage.label(band & air, structure=np.ones((3, 3, 3)))  # 26-connected: the curved one-voxel layer is not 6-connected
     if n == 0:
         return {"n": 0}
     mx = ndimage.maximum(dist, lab, index=np.arange(1, n + 1))
@@ -781,3 +781,55 @@ def sole_cell_openings(prep: Prep, aux: dict, v: ConformalSpec, fg, rs, solid: n
     d = 2.0 * np.asarray(mx)[keep]
     return {"cells": int(keep.sum()), "cell_inscribed_min_mm": float(d.min()), "cell_inscribed_median_mm": float(np.median(d)), "cell_inscribed_max_mm": float(d.max()),
             "pad_hole_mm": v.sole_pad_hole_mm, "cells_below_5mm": int((d < 5.0).sum())}
+
+
+# ----------------------------------------------------------------------------------------------- coupons (#11)
+def shell_coupon(rod_mm: float, pitch_mm: float, size_mm=(70.0, 70.0), voxel_mm: float = 0.5, radius_mm: float = 80.0, jitter: float = 0.28, elongate: float = 1.0,
+                 fillet_mm: float | None = None, frame_mm: float = 5.0, seed: int = 7):
+    """A curved patch of the rod net (cylinder of radius ``radius_mm`` about an axis along y, developable chart: exact tube distance) with a solid frame:
+    the same rod diameter / cell size / fillet logic as the shoe upper, for the #11 print and powder-removal tests. Shell thickness = rod + 1 mm.
+    Returns (phi, grid, info)."""
+    from .lattice import _occ
+    from .sdf import Grid
+
+    T = rod_mm + 1.0
+    W, Hh = size_mm
+    fillet = fillet_mm if fillet_mm is not None else 0.15 * pitch_mm
+    pad = 2.0
+    zmax = radius_mm + T - math.sqrt(max(radius_mm**2 - (W / 2) ** 2, 0.0)) + pad
+    g = Grid((-W / 2 - pad, -pad, -2.0 * pad), voxel_mm, voxel_mm, (int(math.ceil((W + 2 * pad) / voxel_mm)) + 1, int(math.ceil((Hh + 2 * pad) / voxel_mm)) + 1, int(math.ceil((zmax + 2 * pad) / voxel_mm)) + 1))
+    x = (g.origin[0] + np.arange(g.shape[0]) * g.h)[:, None, None]
+    y = (g.origin[1] + np.arange(g.shape[1]) * g.h)[None, :, None]
+    z = (g.origin[2] + np.arange(g.shape[2]) * g.dz)[None, None, :]
+    # cylinder: centre of curvature at (0, *, radius_mm + T/2 ... ) so that the mid-surface passes through z = zmid at x = 0
+    zc = -radius_mm + 0.0
+    rho = np.sqrt(x * x + (z - zc) ** 2)
+    Rm = radius_mm + 0.5 * T
+    a_mid = (rho - Rm).astype(np.float32)
+    s = Rm * np.arctan2(x, z - zc)  # arc length at the mid-surface
+    rng = np.random.default_rng(seed)
+    ni, nj = int(math.ceil((W + 4 * pitch_mm) / pitch_mm)) + 2, int(math.ceil((Hh + 4 * pitch_mm) / (pitch_mm * 0.87))) + 2
+    jit = rng.uniform(-jitter, jitter, (ni, nj, 2)) * pitch_mm
+    i, j = np.meshgrid(np.arange(ni), np.arange(nj), indexing="ij")
+    px = (-W / 2 - 2 * pitch_mm + (i + 0.5 * (j % 2)) * pitch_mm + jit[:, :, 0]) / elongate
+    py = -2 * pitch_mm + j * pitch_mm * 0.87 + jit[:, :, 1]
+    pts = np.stack([px.ravel(), py.ravel()], axis=1)
+    tree = cKDTree(pts)
+    q = np.stack([(s / elongate + 0 * y).ravel(), (y + 0 * s).ravel()], axis=1)
+    dist, idx = tree.query(q, k=3)
+    u = [(q - pts[idx[:, i]]) / np.maximum(dist[:, i : i + 1], 1e-9) for i in range(3)]
+    d01, d02 = 0.5 * (dist[:, 1] - dist[:, 0]), 0.5 * (dist[:, 2] - dist[:, 0])
+    g01, g02 = 0.5 * (u[1] - u[0]), 0.5 * (u[2] - u[0])
+    m = np.minimum(d01, d02)
+    e1, e2 = np.exp(-(d01 - m) / fillet), np.exp(-(d02 - m) / fillet)
+    d = m - fillet * np.log(e1 + e2)
+    gg = (e1[:, None] * g01 + e2[:, None] * g02) / (e1 + e2)[:, None]
+    gn = np.maximum(np.sqrt((gg[:, 0] / elongate) ** 2 + gg[:, 1] ** 2), 1e-6)
+    b = (d / gn).reshape(s.shape[0], g.shape[1], g.shape[2]).astype(np.float32)
+    d_rod = np.sqrt(a_mid**2 + b**2) - 0.5 * rod_mm
+    edge = np.minimum(W / 2 - np.abs(s), np.minimum(y, Hh - y)).astype(np.float32)  # distance to the outline of the patch (inside > 0)
+    d_frame = np.maximum(np.abs(a_mid) - 0.5 * T, edge - frame_mm)
+    phi = np.maximum(np.minimum(d_rod, d_frame), -edge).astype(np.float32)
+    phi[phi == 0] = 1e-3
+    return phi, g, {"rod_mm": rod_mm, "pitch_mm": pitch_mm, "thickness_mm": T, "frame_mm": frame_mm, "size_mm": [W, Hh], "radius_mm": radius_mm, "voxel_mm": voxel_mm,
+                    "band": (np.abs(a_mid) < 0.75 * voxel_mm) & (edge > frame_mm + 1.0), "region": (np.abs(a_mid) < 0.5 * T) & (edge > frame_mm + 2.0)}

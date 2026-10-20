@@ -79,7 +79,11 @@ def run(a, name):
                                     "share_below_rod_minus_1_voxel": float((d[ok] < v.yarn_mm - fg.h).mean())}
         np.savez_compressed(OUT / f"{name}_thin.npz", pts=th["points"][ok & (d < v.yarn_mm - fg.h)], d=d[ok & (d < v.yarn_mm - fg.h)])
     del mesh
-    views = LV.rasterize(LV.splat_views(fine, fg, 1, VIEWS5))
+    sp = LV.splat_views(fine, fg, 1, VIEWS5)
+    for k, (sx, sy, dep, col) in list(sp.items()):  # depth cue: farther surfaces darker (the walls of the open sole are otherwise flat grey from below)
+        t = (dep - dep.min()) / max(float(dep.max() - dep.min()), 1e-6)
+        sp[k] = (sx, sy, dep, (col * (0.62 + 0.38 * t)).astype(np.float32))
+    views = LV.rasterize(sp)
     np.savez_compressed(OUT / f"{name}_views.npz", **{k: np.nan_to_num(x, nan=-1.0) for k, x in views.items()})
     res["total_s"] = round(time.perf_counter() - t0, 1)
     res["peak_rss_mb"] = round(LV.rss_mb())
