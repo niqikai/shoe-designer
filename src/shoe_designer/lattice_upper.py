@@ -252,7 +252,10 @@ def shell_openings(phi: np.ndarray, fg: Grid, cav: np.ndarray, coarse: Grid, zt:
             if s0 <= sl[0].start + a < e0:
                 holes.append(2.0 * float(mx[i]))
     v = np.asarray(holes) if holes else np.zeros(1)
-    return {"holes": int(len(holes)), "p10_mm": round(float(np.percentile(v, 10)), 2), "p50_mm": round(float(np.percentile(v, 50)), 2),
+    big = v[v >= 3.0]
+    major = {"major_holes_ge3mm": int(len(big)), "major_p50_mm": round(float(np.median(big)), 2) if len(big) else None,
+             "major_fraction_ge_min": round(float((big >= min_open_mm).mean()), 3) if len(big) else None}
+    return {**major, "holes": int(len(holes)), "p10_mm": round(float(np.percentile(v, 10)), 2), "p50_mm": round(float(np.percentile(v, 50)), 2),
             "p90_mm": round(float(np.percentile(v, 90)), 2), "max_mm": round(float(v.max()), 2),
             "fraction_ge_min": round(float((v >= min_open_mm).mean()), 3), "min_open_mm": min_open_mm}
 

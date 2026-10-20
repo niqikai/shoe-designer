@@ -468,7 +468,7 @@ def check_sole_params(cfg: LatticeConfig, process: ProcessConfig | None, zone: S
     if not (s.cell_mm > 0 and math.isfinite(s.cell_mm)):
         raise LatticeError("cell_mm must be > 0")
     for k in (s.skin_cavity_mm, s.skin_outsole_mm):
-        if k < strut_min_mm(cfg, process):
+        if 0 < k < strut_min_mm(cfg, process):  # 0 = no skin on that side (open sole)
             raise LatticeError(f"skin {k:g} mm < minimum wall {strut_min_mm(cfg, process):g} mm")
     if s.pad_radius_factor < 1.0:
         raise LatticeError("pad_radius_factor must be >= 1 (the pad layer only thickens)")
@@ -478,7 +478,7 @@ def check_sole_params(cfg: LatticeConfig, process: ProcessConfig | None, zone: S
     need = max(cfg.min_opening_mm, process.min_channel_mm if process is not None else 0.0)
     if 0 < s.outsole_hole_mm < need:
         raise LatticeError(f"outsole powder window {s.outsole_hole_mm:g} mm < required opening {need:g} mm")
-    pores = pore_report(s.kind, s.cell_mm, max(radii) * max(s.pad_radius_factor, 1.0), min(cfg.voxel_mm, 0.25))
+    pores = pore_report(s.kind, s.cell_mm, max(radii) * max(s.pad_radius_factor, 1.0), max(min(cfg.voxel_mm, 0.25), s.cell_mm / 40))
     pores["required_mm"] = need
     pores["ok"] = bool(pores["through_mm"] >= need)
     if cfg.enforce_opening and not pores["ok"]:
