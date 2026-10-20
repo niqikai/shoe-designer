@@ -45,4 +45,6 @@ SHOE_ASSETS_ROOT=~/Downloads uv run --extra fast make-shoe --form B --out-dir re
 
 Form B-knit (the #47 variants): `make-shoe --form B-knit --variant v7_hex`.
 
+Per-parameter overrides for B / B-knit: `--set pitch_mm=10 --set yarn_mm=2.0` (JSON for lists); `--list-params` shows the keys and ranges.
+
 Writes `shoe.stl`, `report.md`, `params.json`, `audit.json`. Intent backends: `--backend rules|claude|deepseek` (keys from the environment).

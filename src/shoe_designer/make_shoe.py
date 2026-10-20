@@ -36,10 +36,11 @@ from .assets import AssetError, load_asset, load_catalog
 from .compose import compose, gate_verdict
 from .envelope import envelope
 from .lattice_conformal import build_whole, load_specs
-from .lattice_variants import build_variant, load_variants, prepare
+from .lattice_variants import build_variant, check_variant, load_variants, prepare
 from .pattern import PatternConfig, PatternMasks, PatternSpec, apply_pattern
 from .process import ProcessConfig, build_volume, channel_width, mesh_inner_shells
 from .sdf import Grid
+from .spec_overrides import OverrideError, apply_overrides, describe, parse_set
 from .support_closure import closure
 
 SIZES = (43, 44, 45)  # the DLP template family
@@ -367,6 +368,9 @@ def report_md(p: dict, res: Result) -> str:
     lines += [f"- {s}" for s in p["clamp_report"]] or ["- 无调整,无不支持的请求"]
     if p.get("ignored"):
         lines += [f"- 未应用:{s}" for s in p["ignored"]]
+    if p.get("overrides"):
+        lines += ["", "## 参数覆盖(--set)", ""] + [f"- `{k}` = `{json.dumps(v, ensure_ascii=False)}`" for k, v in p["overrides"].items()]
+        lines += [f"- 限幅:{c}" for c in p["override_clamps"]]
     n_bad = sum(c.status == "fail" for c in res.checks)
     n_warn = sum(c.status == "warn" for c in res.checks)
     lines += ["", "## 审计结论", "", f"**{'存在未通过项' if n_bad else '全部硬性检查通过'}**(未通过 {n_bad},注意 {n_warn})。", "",
@@ -423,6 +427,18 @@ def run(a, log=None) -> int:
             ignored.append("form B takes its look from --style; the intent's pattern / style tags are not applied")
         if a.lattice_sole:
             ignored.append("--lattice-sole is form A only (form B has its own net sole)")
+    overrides, applied, set_clamps = parse_set(a.set), {}, []
+    if overrides and a.form == "A":
+        raise MakeShoeError("--set applies to --form B / B-knit only")
+    if a.form != "A":
+        spec_b = style if a.form == "B" else variant
+        try:
+            spec_b, applied, set_clamps = apply_overrides(spec_b, overrides)
+            check_variant(spec_b, lcfg, proc)  # refuse (yarn below the strut minimum, voxel too coarse ...) before the 25 s template stage
+        except (OverrideError, L.LatticeError) as e:
+            raise MakeShoeError(f"{a.form} parameters: {e}") from None
+        style, variant = (spec_b, None) if a.form == "B" else (None, spec_b)
+        clamp_report += [f"--set {s}" for s in set_clamps]
     t0 = time.perf_counter()
     log(f"[template] {shoe_id}, process {proc.name}")
     pl = place_cavity(shoe_id, proc, a.h, intent.get("instep_ease_mm"))
@@ -439,7 +455,7 @@ def run(a, log=None) -> int:
     res.mesh.export(out / "shoe.stl")
     params = {"form": a.form, "size": a.size, "template": template, "template_id": shoe_id, "process": proc.name, "process_file": a.process,
               "backend": a.backend if (text.strip() or images) else "none", "text": text, "images": [p for p, _ in images],
-              "intent": intent, "clamp_report": clamp_report, "ignored": ignored, "lattice_sole": a.lattice_sole, "style": a.style if a.form == "B" else None, "variant": a.variant if a.form == "B-knit" else None,
+              "intent": intent, "clamp_report": clamp_report, "ignored": ignored, "overrides": applied, "override_clamps": set_clamps, "lattice_sole": a.lattice_sole, "style": a.style if a.form == "B" else None, "variant": a.variant if a.form == "B-knit" else None,
               "pattern": spec.to_dict() if spec else None, "h_mm": a.h, "seconds": res.seconds, "peak_rss_mb": round(rss_mb()),
               "total_seconds": round(time.perf_counter() - t_all, 1), "stl": str(out / "shoe.stl")}
     (out / "params.json").write_text(json.dumps({**params, "build": res.build}, indent=1, ensure_ascii=False, default=float))
@@ -469,6 +485,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--lattice-sole", action="store_true", help="form A: lattice sole (#14)")
     ap.add_argument("--style", default=DEFAULT_STYLE, help=f"form B: variant name (default {DEFAULT_STYLE}); see config/lattice_conformal*.toml")
     ap.add_argument("--variant", default=DEFAULT_VARIANT, help=f"form B-knit: {', '.join(variant_names())} (default {DEFAULT_VARIANT})")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="form B / B-knit: override a spec field on top of --style / --variant (repeatable; JSON for lists, e.g. 'raise_pts=[[0,45],[1,0]]')")
+    ap.add_argument("--list-params", action="store_true", help="print the --set keys of --form B / B-knit with defaults and ranges, then exit")
     ap.add_argument("--outline", help="form B: outline functions as a JSON list or a JSON file (see shoe_designer.outline)")
     ap.add_argument("--h", type=float, default=1.0, help="template grid spacing in mm")
     ap.add_argument("--samples", type=int, default=10000, help="wall-thickness ray samples (solid forms)")
@@ -478,6 +497,17 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     a = parser().parse_args(argv)
+    if a.list_params:
+        try:
+            base = load_style(a.style, None)[0] if a.form == "B" else load_variant(a.variant, None)[0] if a.form == "B-knit" else None
+        except MakeShoeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        if base is None:
+            print("error: --list-params needs --form B or --form B-knit", file=sys.stderr)
+            return 2
+        print("\n".join(describe(base)))
+        return 0
     try:
         return run(a)
     except MakeShoeError as e:

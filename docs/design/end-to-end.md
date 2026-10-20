@@ -20,6 +20,10 @@ uv run --extra fast make-shoe --form B --outline '[{"fn":"sole_wall","sole_mm":2
 # 路线 B-knit:#47 的建模自由度变体 v1_base … v10_structure(config/lattice_variants.toml)
 uv run --extra fast make-shoe --form B-knit --variant v7_hex --out-dir reports/make_shoe/knit
 uv run --extra fast make-shoe --form B-knit --variant v6_image --pattern-image my.png   # 图像驱动线径;不给图用内置测试图
+# B / B-knit 参数覆盖:在 --style / --variant 预设之上逐项改(可重复;列表用 JSON)
+uv run --extra fast make-shoe --form B-knit --variant v7_hex --set pitch_mm=10 --set yarn_mm=2.0
+uv run --extra fast make-shoe --form B-knit --variant v1_base --set 'raise_pts=[[0,45],[0.5,45],[0.64,0],[1,0]]'
+uv run make-shoe --form B-knit --variant v7_hex --list-params      # 列出可用键、默认值与范围
 ```
 
 `scripts/make_shoe.py` 是同一入口的薄封装。参数见 `make-shoe --help`:`--size`(43/44/45,默认 44)、`--template`(solid/hollow,默认取意图,再默认 solid)、`--process`(默认 `config/process_sls_tpu.toml`)、`--image`/`--pattern-image`(参考图 / 图案图)、`--pattern`(强制图案种类)。
@@ -33,6 +37,10 @@ uv run --extra fast make-shoe --form B-knit --variant v6_image --pattern-image m
 5. **输出**(`--out-dir`):`shoe.stl`、`report.md`(中文摘要)、`params.json`(输入、解析后的意图、限幅、参数、用时)、`audit.json`。
 
 退出码:0 通过(可含"注意"项),1 有硬性检查未通过(文件仍会写出),2 输入错误(缺密钥、缺素材、尺码不存在)。
+
+## 参数覆盖 `--set`
+
+键是 spec 字段(B:`ConformalSpec`,B-knit:`VariantSpec`),值按 JSON 解析(数字、布尔、列表),不是 JSON 就当字符串;走 spec 自己的 `from_dict`,校验与 toml 加载器一致。未知键、类型不符、`--form A` 用 `--set` 都退出 2,并列出可用键。有设计范围的数值(`spec_overrides.RANGES`)会被夹到范围内,写进限幅报告(格式同意图 / 轮廓的限幅);引擎自己的限制(线径低于工艺下限、厚度小于最粗线径、体素大于最细特征 / 4)保持拒绝,在 25 秒的模板阶段之前就以引擎的原话退出 2(要看粗体素预览可加 `--set preview=true`)。已应用的覆盖与限幅写入 `report.md` 和 `params.json`(`overrides`、`override_clamps`)。
 
 ## 已知限制
 

@@ -160,3 +160,68 @@ def test_knit_arg_wiring_and_printable_check(tmp_path, monkeypatch):
     assert "B-knit 针织变体 v7_hex" in md and "预览(不可打印)" in md and "B-knit takes its look" in md
     assert json.loads((tmp_path / "params.json").read_text())["variant"] == "v7_hex"
     assert ms.main(["--form", "B-knit", "--variant", "nope", "--out-dir", str(tmp_path)]) == 2
+
+
+# ---------------------------------------------------------------------------------------------- --set overrides
+from shoe_designer import spec_overrides as so
+
+
+def test_parse_set_numbers_bools_json_and_strings():
+    d = so.parse_set(["pitch_mm=10", "preview=true", "style=hex", "raise_pts=[[0,45],[1,0]]", "pitch_mm=11"])
+    assert d == {"pitch_mm": 11, "preview": True, "style": "hex", "raise_pts": [[0, 45], [1, 0]]}
+    with pytest.raises(so.OverrideError):
+        so.parse_set(["novalue"])
+
+
+def test_apply_overrides_types_clamp_and_json_fields():
+    v, _ = ms.load_variant("v7_hex", None)
+    new, applied, clamps = so.apply_overrides(v, {"pitch_mm": 100, "yarn_mm": 2, "raise_pts": [[0, 45], [0.5, 45], [1, 0]], "bumps": [{"dT": 2.0, "u": [0, 0.3]}]})
+    assert new.pitch_mm == 40.0 and applied["pitch_mm"] == 40.0 and clamps == ["pitch_mm: 100.0 -> 40.0 (range [4.0, 40.0])"]
+    assert new.yarn_mm == 2.0 and new.raise_pts[1] == (0.5, 45.0) and new.bump_dicts() == [{"dT": 2.0, "u": [0, 0.3]}]
+    assert new.name == v.name and v.pitch_mm != 40.0  # the preset is untouched
+
+
+def test_apply_overrides_rejects_unknown_key_and_bad_types():
+    v, _ = ms.load_variant("v1_base", None)
+    with pytest.raises(so.OverrideError, match="valid keys: .*pitch_mm"):
+        so.apply_overrides(v, {"nope": 1})
+    for bad in ({"pitch_mm": "x"}, {"preview": 1}, {"raise_pts": 3}, {"seed": 1.5}, {"name": "x"}):
+        with pytest.raises(so.OverrideError):
+            so.apply_overrides(v, bad)
+
+
+def test_conformal_spec_overrides_and_list_params(capsys):
+    v, _ = ms.load_style("k1_honeycomb", None)
+    new, _, _ = so.apply_overrides(v, {"flow_cross_deg": 99, "sole_mode": "net"})
+    assert new.flow_cross_deg == 30.0 and new.outline == v.outline
+    assert ms.main(["--form", "B", "--list-params"]) == 0
+    out = capsys.readouterr().out
+    assert "flow_cross_deg" in out and "range [4.0, 40.0]" in out
+    assert ms.main(["--form", "A", "--list-params"]) == 2
+
+
+def test_set_refusals_exit_2(tmp_path):
+    base = ["--form", "B-knit", "--variant", "v7_hex", "--out-dir", str(tmp_path)]
+    assert ms.main([*base, "--set", "bogus=1"]) == 2
+    assert ms.main([*base, "--set", "yarn_mm=0.6"]) == 2  # below the 1.2 mm strut minimum: the engine refuses, before the template stage
+    assert ms.main(["--out-dir", str(tmp_path), "--set", "pitch_mm=9"]) == 2  # form A
+
+
+def test_set_is_recorded_in_report_and_params(tmp_path, monkeypatch):
+    phi, g, core = cup()
+    monkeypatch.setattr(ms, "place_cavity", lambda *a, **k: types.SimpleNamespace(pose={}))
+    seen = {}
+
+    def fake(pl, v, cfg, log):
+        seen["pitch"], seen["yarn"] = v.pitch_mm, v.yarn_mm
+        return {"form": "B-knit", "variant": v.name, "printable": True, "_field": (phi, g), "_core": (core, g)}
+
+    monkeypatch.setattr(ms, "build_form_knit", fake)
+    a = ms.parser().parse_args(["--form", "B-knit", "--variant", "v7_hex", "--set", "pitch_mm=10", "--set", "yarn_mm=2.0", "--set", "elongate=9",
+                                "--out-dir", str(tmp_path), "--samples", "500"])
+    assert ms.run(a, lambda s: None) == 0
+    assert seen == {"pitch": 10.0, "yarn": 2.0}
+    p = json.loads((tmp_path / "params.json").read_text())
+    assert p["overrides"] == {"pitch_mm": 10.0, "yarn_mm": 2.0, "elongate": 3.0} and "elongate" in p["override_clamps"][0]
+    md = (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "参数覆盖" in md and "`pitch_mm` = `10.0`" in md and "elongate: 9.0 -> 3.0" in md
